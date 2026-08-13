@@ -1,0 +1,7 @@
+secrets/
+*.seeds.yaml
+agents/diamond/
+.DS_Store
+__pycache__/
+*.pyc
+.venv/

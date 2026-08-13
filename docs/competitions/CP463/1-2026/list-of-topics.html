@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CP463 — Artificial Intelligence | Course Layout</title>
+<style>
+  :root {
+    --red: #DA2128;
+    --gray: #636466;
+    --red-light: #FDEDEE;
+    --gray-light: #F2F2F3;
+    --white: #FFFFFF;
+    --dark: #2B2B2C;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    background: var(--gray-light);
+    color: var(--dark);
+    line-height: 1.6;
+  }
+  .container { max-width: 1100px; margin: 0 auto; padding: 0 24px 60px; }
+
+  /* ---------- Header ---------- */
+  header {
+    background: linear-gradient(135deg, var(--dark) 0%, var(--gray) 100%);
+    color: var(--white);
+    padding: 48px 24px 40px;
+    text-align: center;
+    border-bottom: 6px solid var(--red);
+  }
+  header .course-code {
+    display: inline-block;
+    background: var(--red);
+    padding: 4px 16px;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    margin-bottom: 12px;
+  }
+  header h1 { font-size: 2.2rem; margin-bottom: 8px; }
+  header p.subtitle { color: #D9D9DA; font-size: 1.05rem; max-width: 720px; margin: 0 auto; }
+  .lang-switch { margin-top: 16px; }
+  .lang-switch a {
+    color: var(--white); text-decoration: none; font-size: 0.85rem;
+    border: 1px solid rgba(255,255,255,0.5); padding: 4px 14px; border-radius: 999px;
+  }
+  .lang-switch a:hover { background: var(--red); border-color: var(--red); }
+
+  /* ---------- Pedagogy flow strip ---------- */
+  .flow-strip {
+    background: var(--white);
+    border-radius: 12px;
+    padding: 22px 26px;
+    margin: -26px auto 40px;
+    max-width: 980px;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.08);
+    position: relative;
+  }
+  .flow-strip h2 { font-size: 1rem; color: var(--gray); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 14px; text-align: center; }
+  .flow-steps { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .flow-step {
+    background: var(--red-light); color: var(--red);
+    padding: 6px 14px; border-radius: 999px;
+    font-size: 0.85rem; font-weight: 600;
+  }
+  .flow-arrow { color: var(--gray); font-weight: 700; }
+  .flow-note { text-align: center; font-size: 0.82rem; color: var(--gray); margin-top: 12px; }
+  .flow-note b { color: var(--red); }
+
+  /* ---------- Part headers ---------- */
+  .part-header { display: flex; align-items: center; gap: 16px; margin: 48px 0 20px; }
+  .part-header .part-badge {
+    background: var(--red); color: var(--white);
+    font-weight: 800; font-size: 0.8rem; letter-spacing: 1px;
+    padding: 6px 14px; border-radius: 6px; white-space: nowrap;
+  }
+  .part-header.part2 .part-badge { background: var(--gray); }
+  .part-header h2 { font-size: 1.5rem; color: var(--dark); }
+  .part-header .line { flex: 1; height: 3px; background: linear-gradient(90deg, var(--red), transparent); border-radius: 2px; }
+  .part-header.part2 .line { background: linear-gradient(90deg, var(--gray), transparent); }
+  .part-desc { color: var(--gray); font-size: 0.95rem; margin-bottom: 24px; max-width: 860px; }
+
+  /* ---------- Class cards ---------- */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); gap: 18px; }
+  @media (max-width: 1040px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--white);
+    border-radius: 12px;
+    padding: 22px 24px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    border-top: 4px solid var(--red);
+    display: flex; flex-direction: column;
+    transition: transform .15s ease, box-shadow .15s ease;
+  }
+  .card:hover { transform: translateY(-3px); box-shadow: 0 8px 22px rgba(0,0,0,0.12); }
+  .card.agentic { border-top-color: var(--gray); }
+  .card-top { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 10px; }
+  .class-num {
+    min-width: 52px; height: 52px; border-radius: 10px;
+    background: var(--red); color: var(--white);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-weight: 800; line-height: 1.05;
+  }
+  .class-num small { font-size: 0.55rem; font-weight: 600; letter-spacing: 1px; }
+  .class-num span { font-size: 1.4rem; }
+  .card.agentic .class-num { background: var(--gray); }
+  .card h3 { font-size: 1.12rem; color: var(--dark); }
+  .card .en-sub { font-size: 0.85rem; color: var(--gray); font-weight: 400; }
+  .topics { list-style: none; margin: 8px 0 12px; }
+  .topics li { font-size: 0.9rem; color: #3d3d3f; padding: 3px 0 3px 20px; position: relative; }
+  .topics li::before {
+    content: ""; position: absolute; left: 4px; top: 11px;
+    width: 7px; height: 7px; border-radius: 2px; background: var(--red);
+  }
+  .card.agentic .topics li::before { background: var(--gray); }
+  .card-footer { margin-top: auto; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 10px; border-top: 1px dashed #E0E0E1; }
+  .chapters { font-size: 0.78rem; color: var(--gray); }
+  .chapters b { color: var(--red); }
+  .status {
+    font-size: 0.75rem; font-weight: 700; padding: 3px 12px; border-radius: 999px;
+    background: var(--gray-light); color: var(--gray);
+  }
+  a.status.ready { background: var(--red); color: var(--white); text-decoration: none; }
+
+  /* ---------- Assessment / footer ---------- */
+  .assess {
+    margin-top: 52px; background: var(--white); border-radius: 12px;
+    padding: 26px 30px; border-left: 6px solid var(--red);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  }
+  .assess h2 { color: var(--red); font-size: 1.2rem; margin-bottom: 8px; }
+  .assess p { font-size: 0.93rem; color: #3d3d3f; }
+  footer { text-align: center; color: var(--gray); font-size: 0.8rem; margin-top: 40px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="course-code">CP463</div>
+  <h1>Artificial Intelligence</h1>
+  <p class="subtitle">From Reinforcement Learning to Agentic AI — a 14-week journey based on <em>The Hitchhiker's Guide to Agentic AI: From Foundations to Systems</em></p>
+  <div class="lang-switch"><a href="../th/index.html">ภาษาไทย →</a></div>
+</header>
+
+<div class="container">
+
+  <div class="flow-strip">
+    <h2>How Every Topic Is Taught</h2>
+    <div class="flow-steps">
+      <span class="flow-step">1. Motivation</span><span class="flow-arrow">→</span>
+      <span class="flow-step">2. Idea</span><span class="flow-arrow">→</span>
+      <span class="flow-step">3. Theory</span><span class="flow-arrow">→</span>
+      <span class="flow-step">4. Demonstration</span><span class="flow-arrow">→</span>
+      <span class="flow-step">5. Real-World Applications</span>
+    </div>
+    <p class="flow-note">Every topic ends with <b>Key Takeaways</b> and a <b>3-question quiz</b> (multiple choice, with answer key).</p>
+  </div>
+
+  <!-- ================= PART 1 ================= -->
+  <div class="part-header">
+    <span class="part-badge">PART 1 · CLASS 1–7</span>
+    <h2>Reinforcement Learning</h2>
+    <div class="line"></div>
+  </div>
+  <p class="part-desc">From the classical foundations — MDPs, value functions, and policy gradients — to the modern algorithms (PPO, DPO, GRPO) that align large language models and power today's reasoning models.</p>
+
+  <div class="grid">
+
+    <div class="card">
+      <div class="card-top">
+        <div class="class-num"><small>CLASS</small><span>1</span></div>
+        <h3>Introduction to RL &amp; Markov Decision Processes</h3>
+      </div>
+      <ul class="topics">
+        <li>Why learning from interaction? The agent–environment loop</li>
+        <li>MDP: states, actions, rewards, transitions, discount factor</li>
+        <li>Policies, value functions V(s) and Q(s,a), Bellman equations</li>
+        <li>Taxonomy of RL methods — the map for the next 6 classes</li>
+      </ul>
+      <div class="card-footer">
+        <span class="chapters">Textbook: <b>Ch. 3.1–3.3</b></span>
+        <a class="status ready" href="class01.html">Open lesson →</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-top">
+        <div class="class-num"><small>CLASS</small><span>2</span></div>
+        <h3>Value-Based Methods: TD Learning &amp; Q-Learning</h3>
+      </div>
+      <ul class="topics">
+        <li>Learning without a model: Temporal Difference learning</li>
+        <li>TD error, bootstrapping, SARSA vs Q-Learning</li>
+        <li>Exploration vs exploitation: ε-greedy</li>
+        <li>Worked example: Q-Learning on a gridworld, step by step</li>
+      </ul>
+      <div class="card-footer">
+        <span class="chapters">Textbook: <b>Ch. 3.4–3.5</b></span>
+        <a class="status ready" href="class02.html">Open lesson →</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-top">
+        <div class="class-num"><small>CLASS</small><span>3</span></div>
+        <h3>Policy Gradient Methods: REINFORCE, Actor-Critic &amp; GAE</h3>
+      </div>
+      <ul class="topics">
+        <li>Optimizing the policy directly: the policy gradient theorem</li>
+        <li>REINFORCE and the high-variance problem</li>
+        <li>Baselines and Actor-Critic architectures</li>
+        <li>Generalized Advantage Estimation (GAE): the bias–variance dial</li>
+      </ul>
+      <div class="card-footer">
+        <span class="chapters">Textbook: <b>Ch. 3.6–3.8</b></span>
+        <a class="status ready" href="class03.html">Open lesson →</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-top">
+        <div class="class-num"><small>CLASS</small><span>4</span></div>
+        <h3>The RL Landscape &amp; RL for Language Models</h3>
+      </div>
+      <ul class="topics">
+        <li>On-policy vs off-policy; model-based vs model-free; reward shaping</li>
+        <li>Text generation as an MDP: tokens as actions</li>
+        <li>The RLHF pipeline: SFT → reward model → RL fine-tuning</li>
+        <li>Two paradigms for RL in LLMs (RLHF vs RLVR)</li>
+      </ul>
+      <div class="card-footer">
+        <span class="chapters">Textbook: <b>Ch. 3.9–3.11, 4</b></span>
+        <a class="status ready" href="class04.html">Open lesson →</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-top">
+        <div class="class-num"><small>CLASS</small><span>5</span></div>
+        <h3>PPO — Proximal Policy Optimization</h3>
+      </div>
+      <ul class="topics">
+        <li>Why naive policy gradients break: the trust-region idea</li>
+        <li>The clipped surrogate objective, derived and visualized</li>
+        <li>Full PPO loss: policy + value + entropy; rollout buffers</li>
+        <li>PPO in RLHF: how ChatGPT-style alignment actually trains</li>
+      </ul>
+      <div class="card-footer">
+        <span class="chapters">Textbook: <b>Ch. 5</b></span>
+        <a class="status ready" href="class05.html">Open lesson →</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-top">
+        <div class="class-num"><small>CLASS</small><span>6</span></div>
+        <h3>DPO &amp; Preference Optimization</h3>
+      </div>
+      <ul class="topics">
+        <li>Skipping the reward model: Direct Preference Optimization</li>
+        <li>DPO derivation from the RLHF objective; gradient analysis</li>
+        <li>The variant zoo: KTO, IPO, ORPO, Online DPO, Best-of-N</li>
+        <li>Choosing an alignment method: a practical decision guide</li>
+      </ul>
+      <div class="card-footer">
+        <span class="chapters">Textbook: <b>Ch. 6, 8</b></span>
+        <a class="status ready" href="class06.html">Open lesson →</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-top">
+        <div class="class-num"><small>CLASS</small><span>7</span></div>
+        <h3>GRPO, Reward Models &amp; Reasoning Models</h3>
+      </div>
+      <ul class="topics">
+        <li>GRPO: group-relative advantages, no critic needed</li>
+        <li>Reward model training: Bradley-Terry, PRM vs ORM, rule-based rewards</li>
+        <li>RL for reasoning: DeepSeek-R1, o1/o3, test-time scaling</li>
+        <li>Part 1 wrap-up: the bridge from RL to agents</li>
+      </ul>
+      <div class="card-footer">
+        <span class="chapters">Textbook: <b>Ch. 7, 9, 13</b></span>
+        <a class="status ready" href="class07.html">Open lesson →</a>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ================= PART 2 ================= -->
+  <div class="part-header part2">
+    <span class="part-badge">PART 2 · CLASS 8–14</span>
+    <h2>Agentic AI</h2>
+    <div class="line"></div>
+  </div>
+  <p class="part-desc">From a single LLM call to autonomous systems: retrieval, memory, orchestration, tools and protocols (MCP, A2A), multi-agent systems, and how to evaluate it all.</p>
+
+  <div class="grid">
+
+    <div class="card agentic">
+      <div class="card-top">
+        <div class="class-num"><small>CLASS</small><span>8</span></div>
+        <h3>Introduction to Agentic AI</h3>
+      </div>
+      <ul class="topics">
+        <li>From chatbots to autonomous agents: what changes?</li>
+        <li>Anatomy of an agent: LLM + tools + memory + loop</li>
+        <li>The augmented LLM and the perceive–reason–act cycle</li>
+        <li>Agentic RL preview: how Part 1 powers Part 2</li>
+      </ul>
+      <div class="card-footer">
+        <span class="chapters">Textbook: <b>Ch. 15, 12.1–12.4</b></span>
+        <a class="status ready" href="class08.html">Open lesson →</a>
+      </div>
+    </div>
+
+    <div class="card agentic">
+      <div class="card-top">
+        <div class="class-num"><small>CLASS</small><span>9</span></div>
+        <h3>Retrieval-Augmented Generation (RAG)</h3>
+      </div>
+      <ul class="topics">
+        <li>Why LLMs need external knowledge: hallucination &amp; staleness</li>
+        <li>Core architecture: chunking, embedding, retrieval, generation</li>
+        <li>Sparse vs dense retrieval; reranking; advanced RAG patterns</li>
+        <li>Agentic RAG: retrieval as a tool the agent decides to use</li>
+      </ul>
+      <div class="card-footer">
+        <span class="chapters">Textbook: <b>Ch. 16</b></span>
+        <a class="status ready" href="class09.html">Open lesson →</a>
+      </div>
+    </div>
+
+    <div class="card agentic">
+      <div class="card-top">
+        <div class="class-num"><small>CLASS</small><span>10</span></div>
+        <h3>Agentic Memory Systems</h3>
+      </div>
+      <ul class="topics">
+        <li>Why agents forget: the context-window bottleneck</li>
+        <li>Memory taxonomy: working, episodic, semantic, procedural</li>
+        <li>Memory operations: write, consolidate, retrieve, forget</li>
+        <li>Memory for multi-turn conversations and multi-agent systems</li>
+      </ul>
+      <div class="card-footer">
+        <span class="chapters">Textbook: <b>Ch. 17</b></span>
+        <a class="status ready" href="class10.html">Open lesson →</a>
+      </div>
+    </div>
+
+    <div class="card agentic">
+      <div class="card-top">
+        <div class="class-num"><small>CLASS</small><span>11</span></div>
+        <h3>Agent Harness &amp; Design Patterns</h3>
+      </div>
+      <ul class="topics">
+        <li>The agent harness: context management &amp; prompt architecture</li>
+        <li>Orchestration: chaining, routing, parallelization, evaluator loops</li>
+        <li>Workflow patterns vs autonomous agent patterns</li>
+        <li>Error handling, state management, pattern selection guide</li>
+      </ul>
+      <div class="card-footer">
+        <span class="chapters">Textbook: <b>Ch. 18, 19</b></span>
+        <span class="status">Coming soon</span>
+      </div>
+    </div>
+
+    <div class="card agentic">
+      <div class="card-top">
+        <div class="class-num"><small>CLASS</small><span>12</span></div>
+        <h3>Tool Use: MCP &amp; Agent Skills</h3>
+      </div>
+      <ul class="topics">
+        <li>The tool-integration problem: N×M connectors → one protocol</li>
+        <li>MCP architecture: hosts, clients, servers; tools, resources, prompts</li>
+        <li>Security model: trust hierarchy, consent, sandboxing</li>
+        <li>Agent Skills: packaging expertise; skills vs fine-tuning</li>
+      </ul>
+      <div class="card-footer">
+        <span class="chapters">Textbook: <b>Ch. 21, 22</b></span>
+        <span class="status">Coming soon</span>
+      </div>
+    </div>
+
+    <div class="card agentic">
+      <div class="card-top">
+        <div class="class-num"><small>CLASS</small><span>13</span></div>
+        <h3>Multi-Agent Systems &amp; A2A Communication</h3>
+      </div>
+      <ul class="topics">
+        <li>Why one agent isn't enough: specialization &amp; parallelism</li>
+        <li>The Google A2A protocol: agent cards, tasks, messages</li>
+        <li>Multi-agent topologies: supervisor, swarm, hierarchical</li>
+        <li>Coordination failures and how to design around them</li>
+      </ul>
+      <div class="card-footer">
+        <span class="chapters">Textbook: <b>Ch. 23, 24</b></span>
+        <span class="status">Coming soon</span>
+      </div>
+    </div>
+
+    <div class="card agentic">
+      <div class="card-top">
+        <div class="class-num"><small>CLASS</small><span>14</span></div>
+        <h3>Evaluation, Environments &amp; The Road Ahead</h3>
+      </div>
+      <ul class="topics">
+        <li>Agentic environments &amp; benchmarks: SWE-bench, WebArena, τ-bench</li>
+        <li>Evaluating agents: task success, trajectories, LLM-as-judge</li>
+        <li>Development frameworks landscape; production concerns</li>
+        <li>Course wrap-up: open problems &amp; future directions</li>
+      </ul>
+      <div class="card-footer">
+        <span class="chapters">Textbook: <b>Ch. 20, 14.6–14.7, 25, 29</b></span>
+        <span class="status">Coming soon</span>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="assess">
+    <h2>Assessment in Every Module</h2>
+    <p>Each topic within a class includes a <strong>Key Takeaways</strong> box highlighting the essential points, followed by a <strong>3-question multiple-choice quiz</strong> (4 options each) with a full answer key — so you can check your understanding before moving on.</p>
+  </div>
+
+  <footer>
+    CP463 Artificial Intelligence · Based on <em>The Hitchhiker's Guide to Agentic AI</em> (H. Roitman, 2026) · <a href="../th/index.html" style="color:var(--red)">ภาษาไทย</a>
+  </footer>
+
+</div>
+</body>
+</html>
