@@ -1,0 +1,51 @@
+# CP463 1/2026 · Competition 1 · Phase Final (สัปดาห์ 7)
+# ค่าตาม environment-spec.md §11
+#
+# ทดสอบว่า generalize ได้จริง ไม่ใช่จำ config เดิม — ห้องใหญ่ขึ้น หน้าต่างแคบลง
+# และเพิ่ม sensor_noise เข้ามาเป็นครั้งแรก
+task: vacuum_gridworld
+version: 1.0.0
+phase: final
+
+room:
+  width: 30
+  height: 30
+  obstacle_density: 0.22 # ⚠️ ค่าที่ต้อง calibrate (§15)
+  obstacle_generator: clustered
+  dirt_distribution: clustered # ฝุ่นเกาะกลุ่มเป็นหย่อม
+  dirt_ratio: 0.60
+  guarantee_connected: true
+
+robot:
+  start: random
+  observation: local
+  observation_window: 3 # แคบลงจาก Main
+  battery: null
+  move_cost: 1
+  suck_cost: 2
+
+dynamics:
+  action_noise: 0.10
+  sticky_dirt: 0.15
+  # calibrate แล้ว (ส.ค. 2026): ค่าเดิม 0.05 ทำให้ Gold ดูดครบแค่ 2/30 (7%)
+  # → completion_bonus แทบไม่ทำงาน และ ladder ทั้งชุดยุบลงมาชิดกัน
+  # ที่ 0.01 Gold ดูดครบ 21/30 = 70% ซึ่งตรงกลางช่วงเป้า 60–90% ของ §15 พอดี
+  # หน้าต่าง 3×3 อ่านค่า 18 ค่าต่อ step (เทียบกับ 50 ค่าของ window 5) จึงต้องใช้ noise
+  # ต่ำกว่า Main เพื่อให้ได้ความยากใกล้เคียงกัน
+  sensor_noise: 0.01
+
+episode:
+  # ยืนยันแล้วว่า max_steps ไม่ใช่ตัวคุมของ phase นี้ — เพิ่มเป็น 4000 แล้ว Gold ดูดครบ
+  # 20/30 ซึ่งไม่ต่างจาก 3000 (21/30) ตัวที่ผูกพันจริงคือ sensor_noise
+  max_steps: 3000
+  stop_on_full_coverage: true
+  step_timeout_ms: 1000
+
+penalties:
+  collision: 1.0
+  redundant_suck: 0.2
+
+scoring:
+  metric: coverage_auc
+  completion_bonus: 1.0
+  max_penalty: 0.2

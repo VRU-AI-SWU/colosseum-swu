@@ -1,0 +1,48 @@
+# CP463 1/2026 · Competition 1 · Phase Warm-up (สัปดาห์ 1–3)
+# ค่าตาม environment-spec.md §11
+#
+# เป้าหมายของ phase นี้: ทุกทีมมีชื่อบน leaderboard และ tabular Q-learning ทำได้จริง
+# (state space เล็กพอจะเก็บเป็นตารางได้ ตรงกับ worked example ในคาบ 2)
+task: vacuum_gridworld
+version: 1.0.0
+phase: warmup
+
+room:
+  width: 10
+  height: 10
+  obstacle_density: 0.10
+  obstacle_generator: random # ไม่มีซอกมุม ไม่มีกับดักเชิงโครงสร้าง
+  dirt_distribution: uniform
+  dirt_ratio: 0.60
+  guarantee_connected: true
+
+robot:
+  start: corner # ง่ายที่สุด — กวาดเป็นแนวได้เป็นระบบ
+  observation: full
+  observation_window: null
+  battery: null # ตัดสินใจแล้ว: ให้ max_steps เป็นข้อจำกัดเดียวที่ผูกพัน (§11)
+  move_cost: 1
+  suck_cost: 2
+
+dynamics:
+  action_noise: 0.00 # deterministic — planning ยังชนะได้ใน phase นี้ และตั้งใจให้เป็นแบบนั้น
+  sticky_dirt: 0.00
+  sensor_noise: 0.00
+
+episode:
+  # calibrate แล้ว (ส.ค. 2026): Gold ดูดครบที่ t_end 137 (p90 = 144) → 250 ≈ 1.7× ของ p90
+  # ค่าเดิม 400 ให้ช่องว่างเหนือ Gold แค่ 0.156 จุด (Gold = 1.844 จากเพดาน 2.0)
+  # ที่ 250 ช่องว่างเป็น 0.25 จุด → ทีมที่เร็วกว่า Gold แสดงตัวได้ชัดขึ้น
+  # ไม่บีบไปกว่านี้เพราะจุดประสงค์ของ phase นี้คือ "ทุกทีมมีชื่อบน leaderboard" ไม่ใช่การแข่ง
+  max_steps: 250
+  stop_on_full_coverage: true
+  step_timeout_ms: 1000
+
+penalties:
+  collision: 1.0
+  redundant_suck: 0.2
+
+scoring:
+  metric: coverage_auc
+  completion_bonus: 1.0
+  max_penalty: 0.2

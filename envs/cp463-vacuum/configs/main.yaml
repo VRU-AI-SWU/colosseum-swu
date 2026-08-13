@@ -1,0 +1,54 @@
+# CP463 1/2026 · Competition 1 · Phase Main (สัปดาห์ 4–6)
+# ค่าตาม environment-spec.md §11
+#
+# จุดที่ตั้งใจให้เกิด: ทีมที่ใช้ tabular Q-learning ผ่าน Warm-up มาสบายๆ จะเจอกำแพงทันที
+# ซึ่งเป็นสัปดาห์เดียวกับที่คาบเรียนอธิบายว่าทำไมต้องมี function approximation
+task: vacuum_gridworld
+version: 1.0.0
+phase: main
+
+room:
+  width: 20
+  height: 20
+  obstacle_density: 0.15
+  obstacle_generator: clustered # ก้อนเฟอร์นิเจอร์ มีซอก มีทางตัน
+  dirt_distribution: uniform
+  dirt_ratio: 0.60
+  guarantee_connected: true
+
+robot:
+  start: random # ยากที่สุดและยุติธรรมที่สุด — จำ "แผนสำเร็จรูป" ไม่ได้
+  observation: local
+  observation_window: 5
+  battery: null
+  move_cost: 1
+  suck_cost: 2
+
+dynamics:
+  # calibrate แล้ว (ส.ค. 2026) — ดู calibration-2026-08.md
+  # action_noise กด planner ไม่ลง (0 → 0.50 คะแนน Gold ตกแค่ 9% และยังดูดครบทุก seed)
+  # เก็บ 0.10 ไว้เพราะไม่เสียหายและทำให้โลกสมจริง แต่ **ไม่ใช่คันโยกความยาก**
+  action_noise: 0.10
+  # sticky_dirt ก็กดไม่ลงเช่นกัน (แม้ตั้ง 0.80) เพราะ agent ที่ replan เห็นเองว่าดูดไม่ขึ้น
+  sticky_dirt: 0.15
+  # 🔑 คันโยกจริงอยู่ตรงนี้ — sensor_noise ทำให้ **แผนที่ที่สะสมไว้ผิดถาวร**
+  # ซึ่งต่างจาก action_noise ที่ทำให้แค่เส้นทางยาวขึ้น
+  # ที่ 0.02: Gold = 1.649 (จาก 1.810) และดูดครบ 26/30 — ยังไม่ใช่เรื่องดวง
+  # ที่ 0.05 เป็นหน้าผา (Gold = 0.753, 3/30) จึงห้ามตั้งเกิน 0.03 ใน phase นี้
+  sensor_noise: 0.02
+
+episode:
+  # calibrate แล้ว: ที่ sensor_noise 0.02 Gold ดูดครบ 26/30 (87%) — อยู่ในช่วงเป้า 60–90% ของ §15
+  # ไม่ลด max_steps ลงพร้อมกันเพราะสองอย่างนี้ทบกัน (ที่ 760 + noise 0.02 Gold เหลือ 16/30)
+  max_steps: 1500
+  stop_on_full_coverage: true
+  step_timeout_ms: 1000
+
+penalties:
+  collision: 1.0
+  redundant_suck: 0.2
+
+scoring:
+  metric: coverage_auc
+  completion_bonus: 1.0
+  max_penalty: 0.2

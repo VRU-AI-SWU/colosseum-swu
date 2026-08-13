@@ -1,0 +1,200 @@
+"""การทดลอง calibrate ตาม environment-spec §15
+
+⚠️ ต้องทำก่อนเปิดเทอมและก่อนงานอื่นทั้งหมด เพราะผลอาจทำให้ต้องกลับไปแก้ §11
+
+    การทดลองที่ 1 — `action_noise` กด planner ลงได้จริงไหม
+    การทดลองที่ 2 — `max_steps` พอให้ดูดครบไหม (เกณฑ์: Gold completed 60–90% ของ seed)
+    การทดลองที่ 3 — คะแนน baseline ทั้ง 4 ระดับห่างกันเกินความกว้างของ CI ไหม
+
+การทดลองที่ 1 ต้องมี **learned policy** มาเทียบด้วยถึงจะตอบได้ครบ — ตอนนี้สคริปต์รัน
+เฉพาะฝั่ง planner (Gold) ให้ก่อน ถ้ามี policy แล้วให้ส่งเข้ามาทาง `--policy module:Class`
+
+    python examples/calibrate.py --seeds 30
+    python examples/calibrate.py --seeds 30 --policy mypkg.ppo:PPOAgent
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib
+import json
+import time
+from pathlib import Path
+
+import numpy as np
+
+from vacuum import load_config
+from vacuum.baselines import BASELINES
+from vacuum.rollout import evaluate
+
+CONFIG_DIR = Path(__file__).resolve().parent.parent / "configs"
+
+# seed ของการทดลอง — ใช้ช่วงของตัวเอง ไม่ทับกับ train/public/private/conformance
+CALIBRATION_SEED_BASE = 80001
+
+NOISE_LEVELS = (0.0, 0.05, 0.10, 0.20)
+BOOTSTRAP_N = 2000
+
+
+def bootstrap_ci(scores: np.ndarray, n: int = BOOTSTRAP_N) -> tuple[float, float]:
+    """CI ของค่าเฉลี่ย โดย resample **ที่ระดับ seed** (template §7.2)
+
+    timestep ในหนึ่ง episode ไม่เป็นอิสระต่อกัน จึง resample ที่ระดับ seed เท่านั้น
+    """
+    rng = np.random.Generator(np.random.PCG64(12345))  # ตรึงไว้ → CI ของทุกทีมเทียบกันได้
+    idx = rng.integers(0, len(scores), size=(n, len(scores)))
+    means = scores[idx].mean(axis=1)
+    return float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))
+
+
+def run(config, level: str, seeds: list[int]) -> dict:
+    t0 = time.perf_counter()
+    summary, results = evaluate(config, BASELINES[level] if level in BASELINES else level, seeds)
+    scores = np.array([r.breakdown.score for r in results], dtype=np.float64)
+    lo, hi = bootstrap_ci(scores)
+    completed = [r.breakdown for r in results if r.breakdown.completed]
+    return {
+        "score": summary.score,
+        "ci": [lo, hi],
+        "completion_rate": len(completed) / len(results),
+        "mean_coverage": summary.mean_coverage,
+        "mean_t_end_completed": summary.mean_t_end_completed,
+        "p90_t_end_completed": (
+            float(np.percentile([b.t_end for b in completed], 90)) if completed else None
+        ),
+        "worst": summary.worst_episode,
+        "sd": summary.sd_across_seeds,
+        "seconds": time.perf_counter() - t0,
+    }
+
+
+def experiment_1(seeds: list[int], policy) -> dict:
+    """`action_noise` กด planner ลงได้จริงไหม — Gold เทียบ learned policy ที่ noise หลายระดับ"""
+    base = load_config(CONFIG_DIR / "main.yaml")
+    out: dict[str, dict] = {}
+    for noise in NOISE_LEVELS:
+        cfg = base.replace(**{"dynamics.action_noise": noise})
+        entry = {"gold": run(cfg, "gold", seeds)}
+        if policy is not None:
+            entry["policy"] = run(cfg, policy, seeds)
+        out[f"{noise:.2f}"] = entry
+    return out
+
+
+def experiment_2(seeds: list[int]) -> dict:
+    """`max_steps` พอให้ดูดครบไหม — เกณฑ์ที่ต้องการ: Gold completed 60–90% ของ seed"""
+    out = {}
+    for phase in ("warmup", "main", "final"):
+        cfg = load_config(CONFIG_DIR / f"{phase}.yaml")
+        res = run(cfg, "gold", seeds)
+        rate = res["completion_rate"]
+        res["verdict"] = (
+            "ok"
+            if 0.60 <= rate <= 0.90
+            else ("max_steps น้อยเกิน — completion_bonus แทบไม่ทำงาน" if rate < 0.60 else "max_steps มากเกิน — แยกทีมไม่ออก")
+        )
+        res["max_steps"] = cfg.episode.max_steps
+        out[phase] = res
+    return out
+
+
+def experiment_3(seeds: list[int]) -> dict:
+    """คะแนน baseline ห่างกันเกินความกว้างของ CI ไหม — ถ้าไม่ เส้นแบ่งเกรดจะไม่มีความหมาย"""
+    out = {}
+    for phase in ("warmup", "main", "final"):
+        cfg = load_config(CONFIG_DIR / f"{phase}.yaml")
+        levels = {level: run(cfg, level, seeds) for level in BASELINES}
+        gaps = {}
+        order = ["bronze", "silver", "gold"]
+        for lo_name, hi_name in zip(order, order[1:]):
+            lo, hi = levels[lo_name], levels[hi_name]
+            gaps[f"{lo_name}→{hi_name}"] = {
+                "gap": hi["score"] - lo["score"],
+                "separated": hi["ci"][0] > lo["ci"][1],
+            }
+        out[phase] = {"levels": levels, "gaps": gaps}
+    return out
+
+
+def fmt(report: dict) -> str:
+    lines = ["# ผลการ calibrate (environment-spec §15)", ""]
+    lines.append(f"seeds: {report['n_seeds']} ตัว (ช่วง {CALIBRATION_SEED_BASE}+) · "
+                 f"bootstrap {BOOTSTRAP_N} รอบ resample ที่ระดับ seed")
+    lines.append("")
+
+    lines += ["## การทดลองที่ 1 — action_noise กด planner ลงได้จริงไหม", "",
+              "| action_noise | Gold score | Gold completed | Gold t_end | policy score |",
+              "|---|---|---|---|---|"]
+    for noise, entry in report["experiment_1"].items():
+        g = entry["gold"]
+        p = entry.get("policy")
+        t_end = "—" if g["mean_t_end_completed"] is None else f"{g['mean_t_end_completed']:.0f}"
+        policy_score = "ยังไม่มี" if p is None else f"{p['score']:.4f}"
+        lines.append(
+            f"| {noise} | {g['score']:.4f} [{g['ci'][0]:.3f}, {g['ci'][1]:.3f}] | "
+            f"{g['completion_rate']*100:.0f}% | {t_end} | {policy_score} |"
+        )
+    lines.append("")
+
+    lines += ["## การทดลองที่ 2 — max_steps พอให้ดูดครบไหม (เป้า 60–90%)", "",
+              "| phase | max_steps | Gold completed | t_end เฉลี่ย | t_end p90 | coverage | สรุป |",
+              "|---|---|---|---|---|---|---|"]
+    for phase, r in report["experiment_2"].items():
+        t_end = r["mean_t_end_completed"]
+        p90 = r["p90_t_end_completed"]
+        lines.append(
+            f"| {phase} | {r['max_steps']} | {r['completion_rate']*100:.0f}% | "
+            f"{'—' if t_end is None else f'{t_end:.0f}'} | {'—' if p90 is None else f'{p90:.0f}'} | "
+            f"{r['mean_coverage']:.3f} | {r['verdict']} |"
+        )
+    lines.append("")
+
+    lines += ["## การทดลองที่ 3 — baseline ห่างกันพอไหม", ""]
+    for phase, r in report["experiment_3"].items():
+        lines += [f"### {phase}", "", "| ระดับ | score | 95% CI | completed |", "|---|---|---|---|"]
+        for level, v in r["levels"].items():
+            lines.append(
+                f"| {level} | {v['score']:.4f} | [{v['ci'][0]:.3f}, {v['ci'][1]:.3f}] | "
+                f"{v['completion_rate']*100:.0f}% |"
+            )
+        lines.append("")
+        for pair, g in r["gaps"].items():
+            mark = "✅ แยกได้" if g["separated"] else "⚠️ CI ทับกัน"
+            lines.append(f"- {pair}: ห่าง {g['gap']:+.4f} — {mark}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def load_policy(spec: str | None):
+    if not spec:
+        return None
+    module, _, cls = spec.partition(":")
+    return getattr(importlib.import_module(module), cls)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seeds", type=int, default=30)
+    parser.add_argument("--policy", default=None, help="module:Class ของ learned policy (การทดลองที่ 1)")
+    parser.add_argument("--out", default="calibration-report.md")
+    args = parser.parse_args()
+
+    seeds = list(range(CALIBRATION_SEED_BASE, CALIBRATION_SEED_BASE + args.seeds))
+    policy = load_policy(args.policy)
+
+    report = {
+        "n_seeds": len(seeds),
+        "experiment_1": experiment_1(seeds, policy),
+        "experiment_2": experiment_2(seeds),
+        "experiment_3": experiment_3(seeds),
+    }
+
+    Path(args.out).write_text(fmt(report), encoding="utf-8")
+    Path(args.out).with_suffix(".json").write_text(
+        json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    print(fmt(report))
+
+
+if __name__ == "__main__":
+    main()

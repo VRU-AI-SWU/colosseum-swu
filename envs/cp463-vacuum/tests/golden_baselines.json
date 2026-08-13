@@ -1,0 +1,98 @@
+{
+  "env_version": "1.0.0",
+  "seeds": [
+    70001,
+    70002,
+    70003,
+    70004,
+    70005,
+    70006,
+    70007,
+    70008,
+    70009,
+    70010,
+    70011,
+    70012,
+    70013,
+    70014,
+    70015,
+    70016,
+    70017,
+    70018,
+    70019,
+    70020,
+    70021,
+    70022,
+    70023,
+    70024,
+    70025,
+    70026,
+    70027,
+    70028,
+    70029,
+    70030
+  ],
+  "note": "ค่าชั่วคราวก่อนการ calibrate (§15) — ต้อง generate ใหม่หลังตรึงค่า config",
+  "phases": {
+    "warmup": {
+      "config_hash": "sha256:08559dc77c2a3dc598b3f87e7442db513fea66e6949b45604e778ed01328eb7b",
+      "scores": {
+        "bronze": {
+          "score": 0.135941858839972,
+          "n_completed": 0,
+          "mean_coverage": 0.6218145818774748
+        },
+        "silver": {
+          "score": 0.6311204286047053,
+          "n_completed": 3,
+          "mean_coverage": 0.6552993244817144
+        },
+        "gold": {
+          "score": 1.7478411833216865,
+          "n_completed": 30,
+          "mean_coverage": 1.0
+        }
+      }
+    },
+    "main": {
+      "config_hash": "sha256:f58cc4e51a1e4f828c792e61631189ea8a37380713af7f5821a6aad2ff82e4a5",
+      "scores": {
+        "bronze": {
+          "score": 0.24379633998477612,
+          "n_completed": 0,
+          "mean_coverage": 0.6074161189941854
+        },
+        "silver": {
+          "score": 0.8100080786050952,
+          "n_completed": 4,
+          "mean_coverage": 0.9333816326623731
+        },
+        "gold": {
+          "score": 1.7160521735549068,
+          "n_completed": 28,
+          "mean_coverage": 0.9996723976947101
+        }
+      }
+    },
+    "final": {
+      "config_hash": "sha256:6c4084f7a21a984d36ffbf6ef94bd82368ee84f4a2e07f48cc359c203ad85b01",
+      "scores": {
+        "bronze": {
+          "score": 0.14825485980487588,
+          "n_completed": 0,
+          "mean_coverage": 0.49179957691048054
+        },
+        "silver": {
+          "score": 0.5627394625831312,
+          "n_completed": 0,
+          "mean_coverage": 0.8464430857033955
+        },
+        "gold": {
+          "score": 1.511444562341978,
+          "n_completed": 22,
+          "mean_coverage": 0.9992021345706387
+        }
+      }
+    }
+  }
+}
