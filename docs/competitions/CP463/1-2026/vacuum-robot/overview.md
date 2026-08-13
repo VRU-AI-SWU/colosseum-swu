@@ -20,7 +20,8 @@
 | **Evaluation mode** | Agent vs Environment ([README §3](../../../../../README.md#3-โหมดการแข่งขัน-evaluation-modes)) |
 | **Execution model** | Hosted Run บน runner on-prem ([README §4](../../../../../README.md#4-รูปแบบการรัน-execution-models)) |
 | **Compute ที่ใช้ตัดสิน** | CPU lane (policy เล็ก ไม่ต้องใช้ GPU) |
-| **สถานะ** | ร่าง — ยังต้องทดสอบ config กับ baseline ก่อนเปิดเทอม (ดู §11) |
+| **โค้ด** | [`envs/cp463-vacuum`](../../../../../envs/cp463-vacuum/) — v1.0.0 · conformance test §14 ผ่านครบ |
+| **สถานะ** | config ผ่านการ calibrate รอบที่ 1 แล้ว ([รายงาน](calibration-2026-08.md)) — เหลือยืนยันว่า learned policy ชนะ Gold ได้ ([§11 ข้อ 0b](#11-สิ่งที่ต้องตัดสินใจทดสอบก่อนเปิดเทอม)) |
 
 ---
 
@@ -61,50 +62,71 @@
 - **Termination** — ดูดครบทุกช่อง (จบทันที) หรือครบ `max_steps` หรือแบตหมด
   ทุก action นับเป็น 1 timestep เท่ากันหมด รวมถึง `IDLE` และการเดินชนกำแพง → การอยู่เฉยหรือเดินเสียเปล่าถูกลงโทษโดยอัตโนมัติ
 - **Determinism** — ผังห้อง ตำแหน่งเริ่มต้น และการกระจายฝุ่น ถูกสุ่มจาก `seed` ทั้งหมด → seed เดียวกันได้ห้องเดียวกันเสมอ ตรวจซ้ำได้
-- **Stochasticity** — ตั้งแต่ phase Main เป็นต้นไป การเคลื่อนที่มีโอกาสพลาดทิศ (`action_noise`) และบางพื้นผิวดูดไม่ติดในครั้งแรก (`sticky_dirt`)
-  ความสุ่มนี้ถูกตรึงด้วย seed เช่นกัน → seed เดียวกันได้ผลลัพธ์เดียวกันเสมอ
+- **Stochasticity** — ตั้งแต่ phase Main เป็นต้นไป การเคลื่อนที่มีโอกาสพลาดทิศ (`action_noise`)
+  บางพื้นผิวดูดไม่ติดในครั้งแรก (`sticky_dirt`) และ **ค่าที่อ่านจากเซนเซอร์ผิดพลาดได้** (`sensor_noise`)
+  ความสุ่มทั้งหมดถูกตรึงด้วย seed เช่นกัน → seed เดียวกันได้ผลลัพธ์เดียวกันเสมอ
 
 > **ทำไมต้องมี stochasticity** — ในห้องที่ deterministic และรู้กติกาแน่นอน **BFS/frontier planner ชนะ RL อย่างขาดลอย**
 > ถ้าปล่อยไว้แบบนั้น ทีมที่เขียน planner มือจะชนะทีมที่ตั้งใจทำ RL ทั้งเทอม ซึ่งขัดกับวัตถุประสงค์ของวิชา
-> การใส่ความไม่แน่นอนทำให้ planner ต้อง replan ตลอดและทำได้แย่ลง ขณะที่วิธีที่หลักสูตรสอน (value estimation ภายใต้ความไม่แน่นอน,
-> policy gradient, GAE) กลายเป็นคำตอบที่เป็นธรรมชาติ — รายละเอียดของประเด็นนี้อยู่ที่
+> รายละเอียดของประเด็นนี้อยู่ที่
 > [template §5](../../../../task-templates/agent-vs-environment-rl.md#5-ปัญหาที่ต้องตัดสินใจ-planning-ชนะ-learning)
+>
+> ⚠️ **แต่ความสุ่มไม่ได้ผลเท่ากันทุกชนิด — ข้อนี้วัดจริงแล้วและผลไม่ตรงกับที่ร่างไว้ตอนแรก**
+> ([รายงานการ calibrate](calibration-2026-08.md))
+>
+> | ชนิดความสุ่ม | ผลต่อ Gold (BFS planner) |
+> |---|---|
+> | `action_noise` 0 → 0.50 | คะแนนตกแค่ 9% · ยังดูดครบ **ทุก seed** |
+> | `sticky_dirt` 0 → 0.80 | คะแนนตกแค่ 3% · ยังดูดครบทุก seed |
+> | `sensor_noise` 0 → 0.02 | คะแนนตก **9% และเริ่มดูดไม่ครบ** · ที่ 0.05 พังทั้งชุด |
+>
+> เหตุผลที่สองตัวแรกไม่ได้ผล: planner ที่ **replan ทุก timestep** เป็น closed-loop controller
+> การลื่นหรือการดูดไม่ขึ้นทำให้*เส้นทาง*ยาวขึ้นเท่านั้น ไม่ได้ทำให้*ความรู้เกี่ยวกับโลก*ผิด
+> และเพราะหลักการ hardware-independent scoring ไม่คิดเวลา การ replan จึงไม่มีต้นทุนเลย
+>
+> `sensor_noise` ต่างออกไปตรงที่มันทำให้**แผนที่ที่ agent สะสมไว้ผิดถาวร** สำหรับช่องที่ไม่ได้กลับไปดูซ้ำ
+> planner ที่เชื่อเซนเซอร์ตรงๆ จะไล่ตาม "ฝุ่นผี" และหลบ "กำแพงที่ไม่มีอยู่จริง"
+> ส่วน agent ที่รวมหลักฐานจากการสังเกตหลายครั้ง (belief state) จะทนได้ — ซึ่งตรงกับ
+> value estimation ภายใต้ความไม่แน่นอนที่สอนในคาบ 3–5 พอดี **จึงเป็นคันโยกหลักของโจทย์นี้**
 
 ---
 
 ## 3. Configuration
 
 ผู้สอนแก้ค่าเหล่านี้ได้ผ่านหน้าเว็บหรือไฟล์ YAML ต่อ competition
+ตัวอย่างข้างล่างคือ **config ของ phase Main ที่ใช้จริง** — ไฟล์ตัวจริงอยู่ที่
+[`envs/cp463-vacuum/configs/`](../../../../../envs/cp463-vacuum/configs/) และค่าของทั้ง 3 phase
+อยู่ที่ [environment-spec §11](environment-spec.md#11-config-ของทั้ง-3-phase)
 
 ```yaml
 task: vacuum_gridworld
 version: 1.0.0
+phase: main
 
 room:
   width: 20
   height: 20
   obstacle_density: 0.15        # สัดส่วนช่องที่เป็นสิ่งกีดขวาง
-  obstacle_generator: clustered # random | clustered | rooms | fixed
-  fixed_layout: null            # ใส่ผังตายตัวได้ถ้าต้องการ
-  dirt_distribution: uniform    # uniform | clustered | patchy
+  obstacle_generator: clustered # random | clustered  (rooms/fixed ยังไม่ implement ใน v1.0.0)
+  dirt_distribution: uniform    # uniform | clustered  (patchy ยังไม่ implement)
   dirt_ratio: 0.6               # สัดส่วนช่องว่างที่สกปรก
   guarantee_connected: true     # การันตีว่าทุกช่องสกปรกไปถึงได้
 
 robot:
   start: random                 # random | corner | center
   observation: local
-  observation_window: 5
-  battery: 500                  # null = ไม่จำกัด
-  move_cost: 1
+  observation_window: 5         # ต้องเป็นเลขคี่
+  battery: null                 # ตัดสินใจแล้ว: null ทุก phase — ให้ max_steps เป็นข้อจำกัดเดียว
+  move_cost: 1                  # ยังอยู่ใน schema ไว้ใช้ปีถัดไป แต่ไม่มีผลเมื่อ battery = null
   suck_cost: 2
 
-dynamics:                       # ตัวที่ทำให้ planning อ่อนลงและ learning คุ้มขึ้น
-  action_noise: 0.10            # โอกาสเดินพลาดไปทิศข้างเคียง (0 = deterministic)
-  sticky_dirt: 0.15             # สัดส่วนช่องที่ต้อง SUCK สองครั้ง และไม่มีอะไรบอกล่วงหน้า
-  sensor_noise: 0.0             # โอกาสที่ observation ผิดพลาด (ใช้ใน phase Final)
+dynamics:
+  action_noise: 0.10            # โอกาสเดินพลาดไปทิศข้างเคียง — วัดแล้วว่า *ไม่ใช่* คันโยกความยาก (§2)
+  sticky_dirt: 0.15             # สัดส่วนช่องที่ต้อง SUCK สองครั้ง — วัดแล้วว่าไม่ใช่คันโยกเช่นกัน
+  sensor_noise: 0.02            # 🔑 คันโยกจริง — โอกาสที่แต่ละค่าใน observation ถูกพลิก
 
 episode:
-  max_steps: 1000               # จำนวน decision timestep สูงสุดต่อ episode
+  max_steps: 1500               # จำนวน decision timestep สูงสุดต่อ episode
   stop_on_full_coverage: true   # จบทันทีเมื่อดูดครบ → ยิ่งจบที่ timestep น้อย ยิ่งได้เปรียบ
   step_timeout_ms: 1000         # ตัวกันงานค้างเท่านั้น "ไม่มีผลต่อคะแนน"
                                 #   เกินเวลานี้ = ถือว่า agent ล้มเหลว ไม่ใช่ "ได้คะแนนน้อยลง"
@@ -117,11 +139,10 @@ scoring:
   metric: coverage_auc          # คิดจาก decision timestep ล้วน
   completion_bonus: 1.0         # โบนัสเมื่อดูดครบ 100% (ตั้ง 0 = ใช้ AUC ล้วน)
   max_penalty: 0.2              # เพดานรวมของ penalty กันไม่ให้พลิกลำดับข้ามชั้น
-
-evaluation:
-  public_seeds:  [1001, 1002, ..., 1030]   # 30 seed เห็นคะแนนได้ตลอดเทอม
-  private_seeds: hidden                      # 100 seed เปิดตอนปิดเทอม
 ```
+
+**ค่า seed ไม่ได้อยู่ใน config ของ environment** — เป็นเรื่องของ runner และเก็บที่ on-prem เท่านั้น
+ย่านที่ใช้สุ่ม: train `1–9999` · public `20000–29999` · private `50000–59999` ([§7](#7-seeds-และ-public--private-split))
 
 ---
 
@@ -205,23 +226,51 @@ bot ของผู้สอนที่วางไว้บน leaderboard เ
 คะแนนของแต่ละระดับต้องได้จากการรันจริงบน public seeds ชุดเดียวกับนิสิต แล้วตรึงค่าไว้ทั้งเทอม
 และต้องรันใหม่ทุกครั้งที่เปลี่ยน phase เพราะ config ต่างกันทำให้คะแนนของ baseline ต่างกัน
 
+**คะแนนที่วัดได้จริง** (30 seed ของชุด conformance · `env_version` 1.0.0 · ค่าที่ตรึงเป็นเส้นเกรดต้องรันบน public seeds อีกครั้ง)
+
+| | Warm-up | Main | Final |
+|---|---|---|---|
+| 🥉 Bronze | 0.136 | 0.244 | 0.148 |
+| 🥈 Silver | 0.631 | 0.810 | 0.563 |
+| 🥇 Gold | 1.748 (ครบ 30/30) | 1.716 (ครบ 28/30) | 1.511 (ครบ 22/30) |
+| เพดานของสูตร | 2.0 | 2.0 | 2.0 |
+
 > **Gold = BFS planner เป็นหมุดหมายที่ตั้งใจ** — ข้อความที่ต้องการสื่อคือ "วิธีดั้งเดิมที่ไม่เรียนรู้ทำได้ถึงแค่นี้เมื่อโลกไม่แน่นอน"
 > ทีมที่ส่ง planner มาก็จะไปหยุดอยู่ตรงระดับ Gold พอดี ส่วนการจะแตะ Diamond ต้องใช้ policy ที่เรียนรู้จากประสบการณ์
-> ถ้าผลจริงไม่เป็นแบบนี้ แปลว่า `action_noise` ตั้งไว้ต่ำเกินไป (ดู §11 ข้อ 0)
+>
+> ⚠️ **ยังพิสูจน์ไม่ได้ว่าครึ่งหลังของประโยคนั้นจริง** — ช่องว่างระหว่าง Gold กับเพดานเหลือ 0.28 จุดบน Main
+> ซึ่งแปลว่า policy ที่จะแตะ Diamond ต้องดูดครบเกือบทุก seed **และเร็วกว่า BFS** โดยเห็นแค่หน้าต่าง 5×5
+> ข้อนี้ต้องยืนยันด้วยการเทรน PPO จริงก่อน ([§11 ข้อ 0](#11-สิ่งที่ต้องตัดสินใจทดสอบก่อนเปิดเทอม))
+>
+> **"Gold" ในที่นี้หมายถึง planner ที่เชื่อเซนเซอร์ตรงๆ** — มันเขียนทับแผนที่ด้วยค่าที่เห็นล่าสุดโดยไม่กรองอะไรเลย
+> ถ้าให้ Gold ทำ majority vote จากการสังเกตซ้ำ มันจะทน `sensor_noise` ได้มากขึ้นและหมุดจะขยับสูงขึ้นมาก
+> — เป็นการตัดสินใจที่ต้องประกาศให้ชัด เพราะมันคือเส้นแบ่งเกรด
 
 ---
 
 ## 7. Seeds และ Public / Private Split
 
-| | Public | Private |
-|---|---|---|
-| จำนวน seed | 30 | 100 |
-| เปิดเผย | บอกจำนวน แต่ไม่บอกค่า seed และไม่ให้ผังห้อง | ไม่เปิดเผยจนกว่าจะปิดเทอม |
-| ใช้ทำอะไร | leaderboard ระหว่างเทอม + starter kit ให้ทดสอบเองได้ | **ตัดสินอันดับและเกรดจริง** |
+| ชุด | ย่านที่สุ่มมา | จำนวนที่ใช้ | นิสิตรู้ | ใช้ทำอะไร |
+|---|---|---|---|---|
+| **Train** | `1–9999` | ไม่จำกัด | รู้ย่าน + มี generator | เทรนและทดสอบเองในเครื่อง |
+| **Public** | `20000–29999` | 30 ต่อ phase | **รู้แค่จำนวน ไม่รู้ค่า** | leaderboard ระหว่างเทอม |
+| **Private** | `50000–59999` | 100 (Warm-up) / 150 (Main, Final) | ไม่รู้อะไรเลย | **ตัดสินอันดับและเกรดจริง** |
+| **Conformance** | `70001–70030` | 30 | **เปิดเผยทั้งค่าและ golden** | ให้นิสิตยืนยันว่า environment ในเครื่องตรงกับตัวที่ใช้ตัดสิน |
 
-- **ห้ามให้ private seeds ทับกับ public เด็ดขาด** และควรสุ่มจากช่วงเลขที่ต่างกันไปเลยเพื่อกันความผิดพลาด
+> **ประกาศได้แค่ "ย่าน" ห้ามประกาศ "ช่วงที่ใช้จริง"** — ร่างแรกของ spec เขียนว่า public คือ `20001–20030`
+> ซึ่งเป็นช่วงที่มี 30 ค่าพอดีสำหรับ seed 30 ตัว **เท่ากับบอกค่าไปทั้งชุด** และ private leaderboard
+> จะไร้ความหมายทันที ย่าน `20000–29999` มี 10,000 ค่าแต่ใช้จริง 30 ค่า รู้ย่านแล้วยังเดาไม่ได้
+> ค่าจริงถูกสุ่มแล้วเก็บไว้ที่ [`colosseum-hypogeum`](../../../../../README.md#105-โครงสร้าง-repository)
+
+- **สี่ชุดนี้ต้องไม่ทับกันเลย** — ตรวจให้ตอน generate ไม่ใช่หวังว่าย่านที่แยกกันจะพอ
 - private seeds เก็บไว้ที่ runner on-prem เท่านั้น ไม่อัพขึ้น cloud
+- ชุด conformance เปิดเผยได้เพราะเป็นคนละช่วงกับที่ใช้ตัดสิน ([README §10.4](../../../../../README.md#104-ขอบเขตความไว้วางใจ-trust-boundaries))
 - นโยบายกันการโกงที่เหลือใช้ตามแพลตฟอร์ม ([README §7](../../../../../README.md#7-ความสุจริตทางวิชาการและการกันโกงระบบ))
+
+> **นิสิตประเมินตัวเองบน public seeds ในเครื่องไม่ได้** — เพราะไม่รู้ค่า seed ซึ่งเป็นเจตนา
+> `arena eval --local` จึงรันบน **training seeds** ที่นิสิตสร้างเองได้ไม่จำกัด ส่วนคะแนน public
+> ต้องส่งเข้าระบบเท่านั้น (นี่คือสิ่งที่ทำให้โควตาส่งมีความหมาย — ถ้ารันเองได้ก็ไม่มีอะไรกันการ overfit)
+> การยืนยันว่า environment ในเครื่อง "ตรงกับตัวที่ใช้ตัดสิน" ใช้ชุด conformance แทน
 
 ---
 
@@ -232,9 +281,9 @@ bot ของผู้สอนที่วางไว้บน leaderboard เ
 
 | ช่วง | สัปดาห์ | config | คาบที่เพิ่งเรียน | เครื่องมือที่ใช้ได้ |
 |---|---|---|---|---|
-| **Warm-up** | 1–3 | ห้อง 10×10 · `observation: full` · `action_noise: 0` · ไม่จำกัดแบต | คาบ 1–2 (MDP, TD, Q-learning) | **tabular Q-learning ทำได้จริง** — state space เล็กพอจะเก็บเป็นตารางได้ ตรงกับ worked example ในคาบ 2 เป๊ะ |
-| **Main** | 4–6 | ห้อง 20×20 · `observation: local` · `action_noise: 0.10` · `sticky_dirt: 0.15` | คาบ 3–5 (policy gradient, actor-critic, GAE, PPO) | **ตารางเก็บไม่ไหวแล้ว** → ต้อง function approximation → PPO / actor-critic กลายเป็นคำตอบธรรมชาติ |
-| **Final** | 7 | ห้อง 30×30 · `sensor_noise: 0.05` · obstacle หนาแน่นขึ้น | — | ทดสอบว่า generalize ได้จริง ไม่ใช่จำ config เดิม |
+| **Warm-up** | 1–3 | ห้อง 10×10 · `observation: full` · ไม่มีความสุ่มเลย · `max_steps: 250` | คาบ 1–2 (MDP, TD, Q-learning) | **tabular Q-learning ทำได้จริง** — state space เล็กพอจะเก็บเป็นตารางได้ ตรงกับ worked example ในคาบ 2 เป๊ะ |
+| **Main** | 4–6 | ห้อง 20×20 · `observation: local` (5×5) · `sensor_noise: 0.02` · `max_steps: 1500` | คาบ 3–5 (policy gradient, actor-critic, GAE, PPO) | **ตารางเก็บไม่ไหวแล้ว** → ต้อง function approximation และต้องรับมือ observation ที่เชื่อไม่ได้ 100% → PPO / actor-critic กลายเป็นคำตอบธรรมชาติ |
+| **Final** | 7 | ห้อง 30×30 · หน้าต่างแคบลงเหลือ 3×3 · `sensor_noise: 0.01` · obstacle หนาแน่นขึ้น | — | ทดสอบว่า generalize ได้จริง ไม่ใช่จำ config เดิม |
 
 > **จุดที่ตั้งใจให้เกิด** — ทีมที่ใช้ tabular Q-learning ผ่าน Warm-up มาสบายๆ จะเจอกำแพงทันทีในสัปดาห์ที่ 4
 > ซึ่งเป็นสัปดาห์เดียวกับที่คาบเรียนอธิบายว่าทำไมต้องมี function approximation — นิสิตจะเข้าใจเหตุผลจากการเจอปัญหาเอง
@@ -247,14 +296,18 @@ bot ของผู้สอนที่วางไว้บน leaderboard เ
 ## 9. Starter Kit
 
 - โค้ด environment ตัวเดียวกับที่ใช้ตัดสิน (Gymnasium-compatible) ให้ train ที่บ้านได้
+  → [`envs/cp463-vacuum`](../../../../../envs/cp463-vacuum/) ติดตั้งผ่าน wheel ที่ release ไว้ ไม่ต้อง clone repo
 - `RandomAgent`, `GreedyAgent`, `BFSCoverageAgent` เป็นตัวอย่างและเป็น baseline
-- สคริปต์ประเมินผลในเครื่องตัวเอง (ใช้ public seeds) ที่คำนวณคะแนนด้วยสูตรเดียวกับ §5 เป๊ะ
+- **สคริปต์ประเมินผลในเครื่องตัวเอง ที่รันบน training seeds** (`1–9999`) และคำนวณคะแนนด้วย
+  `vacuum/scoring.py` ซึ่งเป็น**ไฟล์เดียวกับที่ grader ใช้** ไม่ใช่สูตรที่เขียนซ้ำ
+  → ไม่ใช่ public seeds เพราะนิสิตไม่รู้ค่า seed ชุดนั้น ([§7](#7-seeds-และ-public--private-split))
+- **ชุด conformance test พร้อม golden value** ให้รันยืนยันว่า environment ในเครื่องตรงกับตัวที่ใช้ตัดสินทุกบิต
 - ตัวอย่าง reward shaping สำหรับตอน train (**ย้ำ: reward ตอน train ≠ metric ตอนตัดสิน**)
 - CLI สำหรับส่งงาน:
 
 ```bash
 arena init cp463-vacuum-1-2026
-arena eval --local --seeds public
+arena eval --local --seeds 1-200      # training seeds — ไม่กินโควตา
 arena submit --note "เพิ่ม frontier exploration"
 ```
 
@@ -274,12 +327,16 @@ arena submit --note "เพิ่ม frontier exploration"
 
 ## 11. สิ่งที่ต้องตัดสินใจ/ทดสอบก่อนเปิดเทอม
 
-| # | ประเด็น | รายละเอียด |
+📊 ผลการวัดทั้งหมดอยู่ที่ [calibration-2026-08.md](calibration-2026-08.md)
+
+| # | ประเด็น | สถานะ |
 |---|---|---|
-| 0 | **⚠️ `action_noise` และ `sticky_dirt` แรงพอจะกด planner ลงจริงไหม** | ต้องรัน `BFSCoverageAgent` เทียบกับ PPO baseline ที่ noise หลายระดับ (0 / 0.05 / 0.10 / 0.20) ก่อนเปิดเทอม ถ้า planner ยังชนะที่ 0.10 แปลว่า noise น้อยไป ถ้า PPO ก็แพ้ไปด้วยแปลว่าแรงเกินจนโจทย์กลายเป็นเรื่องดวง — **ข้อนี้ต้องเสร็จก่อนข้ออื่นทั้งหมด** |
-| 1 | **Observation mode ที่จะใช้จริงในช่วง Main** | `local` น่าจะกำลังดี — `full` ง่ายไป, `sensor` อาจยากเกินสำหรับเทอมเดียว ต้องลองกับ baseline ก่อน |
-| 2 | **`max_steps` เพียงพอไหม** | ถ้าตั้งน้อยไปจนไม่มีทีมไหนดูดครบได้เลย `completion_bonus` จะกลายเป็นค่าคงที่ที่ไม่มีผล และคะแนนจะถอยไปเป็น AUC ล้วนโดยปริยาย — ต้องรัน `BFSCoverageAgent` ดูว่าใช้กี่ timestep แล้วตั้ง `max_steps` ให้มีที่เหลือพอสมควร |
-| 3 | **น้ำหนัก penalty และ `completion_bonus`** | รันกับ baseline ทั้ง 4 ระดับ ดูว่าคะแนนกระจายตัวห่างกันพอให้แยกชั้นได้จริงไหม |
-| 4 | ~~**`battery` จำกัดหรือไม่**~~ | ✅ **ตัดสินใจแล้ว: `battery: null` ทุก phase** ให้ `max_steps` เป็นข้อจำกัดเดียวที่ผูกพัน ([เหตุผล](environment-spec.md#11-config-ของทั้ง-3-phase)) |
-| 5 | **จำนวน episode ต่อ run** | 30 public seeds × เวลาที่ใช้รัน 1 episode × จำนวนทีม × โควตาต่อวัน ต้องไม่เกินกำลัง runner ในคืนก่อน deadline |
-| 6 | **ผังห้องแบบ `rooms`** | ถ้าจะใช้ generator แบบหลายห้องเชื่อมกัน ต้องเขียนเพิ่มและตรวจ `guarantee_connected` ให้ดี |
+| 0 | ~~**`action_noise` และ `sticky_dirt` แรงพอจะกด planner ลงจริงไหม**~~ | ❌ **วัดแล้ว: ไม่แรงพอ และไม่ใช่แค่ "น้อยไป"** — `action_noise` 0 → 0.50 กด Gold ลงแค่ 9% และยังดูดครบทุก seed · `sticky_dirt` 0.80 กดลง 3% · **เปลี่ยนไปใช้ `sensor_noise` เป็นคันโยกหลักแทน** (Main 0.02 · Final 0.01) เหตุผลอยู่ที่ [§2](#2-environment-spec) |
+| 0b | **⚠️ learned policy ชนะ Gold ได้จริงไหม** | ยังไม่ตอบ — ต้องเทรน PPO แล้วรัน `examples/calibrate.py --policy` เทียบที่ `sensor_noise` 0 / 0.01 / 0.02 / 0.05 · **ข้อนี้เหลืออยู่ข้อเดียวที่ยังกั้นการเปิดเทอม** ถ้า PPO ยังแพ้ Gold ที่ 0.02 ต้องกลับไปพิจารณาทางเลือก C+D ของ [template §5](../../../../task-templates/agent-vs-environment-rl.md#5-ปัญหาที่ต้องตัดสินใจ-planning-ชนะ-learning) |
+| 0c | **"Gold" คือ planner ที่ไร้เดียงสาเรื่อง noise หรือไม่** | ต้องประกาศให้ชัดเพราะเป็นเส้นแบ่งเกรด — ตอนนี้ `BFSCoverageAgent` เขียนทับแผนที่ด้วยค่าล่าสุดโดยไม่กรอง ถ้าเพิ่ม majority vote หมุด Gold จะขยับขึ้นมาก ([§6](#6-baseline-ladder)) |
+| 1 | ~~**Observation mode ที่จะใช้จริงในช่วง Main**~~ | ✅ **`local` window 5** — วัดแล้วว่าขนาดหน้าต่างแทบไม่มีผลต่อ Gold (window 5→3 ตกแค่ 0.005 · โหมด `sensor` ตก 0.013) ตัวที่คุมความยากคือ `sensor_noise` ไม่ใช่ขนาดหน้าต่าง |
+| 2 | ~~**`max_steps` เพียงพอไหม**~~ | ✅ **Warm-up 250 · Main 1500 · Final 3000** — ยืนยันแล้วว่า Gold ดูดครบ 30/30 · 28/30 · 22/30 ตามลำดับ `completion_bonus` จึงทำงานทุก phase · Final ยืนยันด้วยว่าตัวที่ผูกพันคือ `sensor_noise` ไม่ใช่ `max_steps` (เพิ่มเป็น 4000 แล้วผลไม่ต่าง) |
+| 3 | ~~**น้ำหนัก penalty และ `completion_bonus`**~~ | ✅ **คงค่าเดิม** — ladder แยกกันได้ทุก phase โดย CI ไม่ทับกันเลย ([การทดลองที่ 3](calibration-2026-08.md#3-การทดลองที่-3--baseline-ห่างกันพอไหม)) · ข้อควรระวัง: CI ของ Silver กว้าง ±0.17 เพราะมันติดหลังกำแพงแล้วแกว่งในบาง seed ถ้าใช้เป็นเส้นเกรดต้องตรึงด้วย seed จำนวนมากกว่านี้ |
+| 4 | ~~**`battery` จำกัดหรือไม่**~~ | ✅ **`battery: null` ทุก phase** ให้ `max_steps` เป็นข้อจำกัดเดียวที่ผูกพัน ([เหตุผล](environment-spec.md#11-config-ของทั้ง-3-phase)) |
+| 5 | **จำนวน episode ต่อ run** | วัดต้นทุนได้แล้ว: Gold ใช้ **~0.5 วินาที/episode** บน Main → 30 seed ≈ 15 วินาทีต่อ run · 10 ทีม × 5 ครั้ง/วัน ≈ 12 นาที/วัน ของเวลา CPU **ไม่เป็นคอขวด** เหลือแค่ยืนยันกับ policy ที่หนักกว่า (PPO + torch) |
+| 6 | **ผังห้องแบบ `rooms`** | ยังไม่ implement ใน v1.0.0 — ถ้าจะใช้ต้องขึ้น v1.1.0 พร้อม conformance test ใหม่ |

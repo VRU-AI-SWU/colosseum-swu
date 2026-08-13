@@ -96,4 +96,4 @@ Course project ของวิชา **CP463 (Artificial Intelligence)** ภา�
 | Arena M1 (แข่งได้ครบวงจร) | LLM gateway + token metering |
 | Vacuum environment + config 3 phase | Document generator + policy corpus + normalizer |
 | Baseline ทั้ง 4 ระดับของ Comp 1 | Baseline ทั้ง 4 ระดับของ Comp 2 |
-| **ยืนยันว่า `action_noise` กด planner ลงได้จริง** ([§11 ข้อ 0](vacuum-robot/overview.md#11-สิ่งที่ต้องตัดสินใจทดสอบก่อนเปิดเทอม)) | ตรวจ throughput ของ GPU |
+| **ยืนยันว่า learned policy ชนะ Gold baseline ได้** ([§11 ข้อ 0b](vacuum-robot/overview.md#11-สิ่งที่ต้องตัดสินใจทดสอบก่อนเปิดเทอม)) — `action_noise` ถูกวัดแล้วว่าไม่ใช่คันโยก เปลี่ยนไปใช้ `sensor_noise` แทน ([รายงาน](vacuum-robot/calibration-2026-08.md)) | ตรวจ throughput ของ GPU |

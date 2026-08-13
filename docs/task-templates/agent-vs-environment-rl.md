@@ -63,8 +63,8 @@ def act(self, observation) -> action
 
 | มิติ | ค่าของโจทย์ CP463 |
 |---|---|
-| Observability | **POMDP** ถ้า `observation: local`/`sensor` · MDP ถ้า `full` |
-| Transition | **deterministic** (ตาม config ปัจจุบัน — เปลี่ยนได้ ดู §5) |
+| Observability | **POMDP** ทั้ง Main และ Final — `observation: local` และมี `sensor_noise` ทำให้ observation เชื่อไม่ได้ 100% · MDP เฉพาะ phase Warm-up (`full`, ไม่มีความสุ่มเลย) |
+| Transition | **stochastic** ตั้งแต่ phase Main (`action_noise: 0.10`, `sticky_dirt: 0.15`) · deterministic เฉพาะ Warm-up |
 | Action space | **discrete** 6 actions |
 | Horizon | **episodic**, finite (`max_steps`) |
 | Agent count | **single** |
@@ -131,17 +131,36 @@ frontier exploration + BFS/A* ทำ coverage ได้เกือบ optimal �
 
 ### ถ้าเลือก A — คันโยกที่ทำให้ planning อ่อนลงและ learning คุ้มขึ้น
 
-| คันโยก | ผลต่อโจทย์ |
-|---|---|
-| `action_noise: 0.1` (เดินพลาดทิศ 10%) | planner ต้อง replan ตลอด → กลายเป็นการแก้ MDP ซึ่ง RL ถนัดกว่า |
-| dynamics ที่ไม่บอก (เช่น บางพื้นผิวดูดไม่ติดในครั้งแรก) | ต้อง**เรียนรู้จากประสบการณ์** planner ที่ไม่รู้กติกาทำไม่ได้ |
-| การกระจายฝุ่นมีรูปแบบซ่อนอยู่ต่อประเภทห้อง | policy ที่เรียนรู้ prior จาก training seeds ได้เปรียบชัดเจน |
-| `observation: sensor` + sensor noise | mapping ยากขึ้นมาก planner ที่พึ่งแผนที่แม่นๆ พัง |
-| จุดชาร์จ + แบตจำกัด | เพิ่ม long-horizon credit assignment ซึ่งเป็นจุดแข็งของ RL |
+> ⚠️ **วัดจริงแล้วในโจทย์ CP463 และคันโยกส่วนใหญ่ในตารางนี้ไม่ทำงาน**
+> — ตัวเลขอยู่ที่ [calibration-2026-08.md](../competitions/CP463/1-2026/vacuum-robot/calibration-2026-08.md)
 
-> **ข้อเสนอ**: เลือก **A + C ร่วมกัน** — ใส่ `action_noise` และ hidden dynamics เล็กน้อยเพื่อให้ learning คุ้ม
+| คันโยก | ที่คิดไว้ | **ผลจริง** |
+|---|---|---|
+| `action_noise: 0.1` (เดินพลาดทิศ 10%) | planner ต้อง replan ตลอด → กลายเป็นการแก้ MDP ซึ่ง RL ถนัดกว่า | ❌ **แทบไม่มีผล** — Gold เสียไป 1% ที่ 0.10 และแม้ 0.50 ก็ยังดูดครบทุก seed |
+| dynamics ที่ไม่บอก (เช่น บางพื้นผิวดูดไม่ติดในครั้งแรก) | ต้อง**เรียนรู้จากประสบการณ์** planner ที่ไม่รู้กติกาทำไม่ได้ | ❌ **แทบไม่มีผล** ถ้า agent *ตรวจสอบผลได้ทันทีจาก observation* — planner ที่ replan เห็นเองว่าดูดไม่ขึ้นแล้วดูดซ้ำ |
+| `sensor_noise` | mapping ยากขึ้น planner ที่พึ่งแผนที่แม่นๆ พัง | ✅ **ได้ผลจริงและได้ผลตัวเดียว** — แต่ชันมาก ต้อง calibrate ละเอียด |
+| การกระจายฝุ่นมีรูปแบบซ่อนอยู่ต่อประเภทห้อง | policy ที่เรียนรู้ prior จาก training seeds ได้เปรียบชัดเจน | ยังไม่ได้ทดสอบ — เป็นคันโยกที่เหลืออยู่และน่าจะได้ผลด้วยเหตุผลเดียวกับ `sensor_noise` |
+| จุดชาร์จ + แบตจำกัด | เพิ่ม long-horizon credit assignment ซึ่งเป็นจุดแข็งของ RL | ยังไม่ได้ทดสอบ (`battery: null` ทุก phase) |
+
+### บทเรียนที่ใช้กับโจทย์ RL อื่นได้
+
+**เกณฑ์แยกคันโยกที่ได้ผลออกจากที่ไม่ได้ผล**
+
+> ความสุ่มที่ทำให้ **เส้นทางยาวขึ้น** → planner รับมือได้ฟรี
+> ความสุ่มที่ทำให้ **ความรู้เกี่ยวกับโลกผิด** → planner พัง
+
+`action_noise` และ `sticky_dirt` อยู่กลุ่มแรก · `sensor_noise` อยู่กลุ่มที่สอง
+
+และมีเงื่อนไขซ้อนอีกชั้น: **hidden dynamics จะซ่อนจริงก็ต่อเมื่อ agent ตรวจสอบผลไม่ได้ทันที**
+ถ้า observation บอกผลของ action นั้นในเฟรมถัดไป มันไม่ใช่ hidden dynamics แต่เป็นแค่ค่าคงที่ที่เพิ่ม timestep ให้ทุกคนเท่ากัน
+
+**ทำไม planner ถึงแข็งกว่าที่คาด** — หลักการ hardware-independent scoring ([README §5.1](../../README.md#51-metric-เป็นของแต่ละโจทย์-ไม่ใช่ของแพลตฟอร์ม))
+ทำให้การ replan ทุก timestep **ไม่มีต้นทุนเลย** planner จึงกลายเป็น closed-loop controller ที่แทบ optimal
+นี่เป็นผลข้างเคียงของหลักการที่ถูกต้องในตัวมันเอง และเป็นสิ่งที่ต้องคิดล่วงหน้าตอนออกแบบโจทย์ RL ทุกตัวบนแพลตฟอร์มนี้
+
+> **ข้อเสนอ**: เลือก **A + C ร่วมกัน** — ใส่ความไม่แน่นอนที่ทำให้*ความรู้*ผิด (ไม่ใช่แค่ที่ทำให้เส้นทางยาว)
 > แล้วยังคง BFS planner ไว้เป็น Gold baseline เพื่อให้เห็นชัดว่า "วิธีดั้งเดิมทำได้แค่นี้ในสภาพแวดล้อมที่ไม่แน่นอน"
-> ต้องรัน baseline ทั้งสองแบบเทียบกันก่อนเปิดเทอม เพื่อยืนยันว่าช่องว่างเปิดจริง
+> **ต้องรัน baseline ทั้งสองแบบเทียบกันก่อนเปิดเทอมเสมอ** — ประสบการณ์จาก CP463 คือสมมติฐานเรื่องคันโยกผิดไป 2 ใน 3 ตัว
 
 ---
 
@@ -245,6 +264,44 @@ evaluation:
 (ผังห้องทั้งใบ, ตำแหน่งเป้าหมาย, ค่า seed) ได้ตรงๆ ด้วยโค้ดไม่กี่บรรทัด แล้วเล่นได้สมบูรณ์แบบโดยไม่ต้องเรียนรู้อะไรเลย
 runner ถือ environment ไว้ · agent อยู่ใน sandbox · คุยกันผ่าน pipe ทีละ step
 (รายละเอียดและต้นทุนที่ [README §10.4](../../README.md#104-ขอบเขตความไว้วางใจ-trust-boundaries))
+
+### 9.1 Wire protocol ระหว่าง runner กับ agent
+
+```
+runner (trusted)                       sandbox container (untrusted)
+  Env · seed · เฉลย   ──fd 3──►   arena-agent-host  ──เรียก──►  Agent.act()
+                      ◄─fd 4───
+```
+
+**ใช้ fd 3/4 ไม่ใช่ stdin/stdout** — เพราะ `stdout`/`stderr` ต้องเหลือไว้ให้นิสิต `print()` debug ได้
+ถ้าใช้ stdout เป็นช่องโปรโตคอล การที่นิสิตเผลอ print ตัวเดียวจะทำให้ทั้ง run พังแบบที่อธิบายไม่ได้
+
+**Framing** — length-prefixed msgpack: `uint32 LE` ของความยาว แล้วตามด้วย payload
+ndarray ส่งเป็น `{"__nd__": {"dtype": str, "shape": [int], "data": bytes}}` (ไม่ใช้ pickle — pickle = รันโค้ดได้)
+
+| ทิศทาง | ข้อความ | payload |
+|---|---|---|
+| → agent | `hello` | `{"protocol": 1, "agent_config": {...}}` — ข้อมูลที่ประกาศใน `TaskSpec` เท่านั้น **ห้ามมี seed หรือผังห้อง** |
+| ← agent | `ready` | `{"agent_version": str}` |
+| → agent | `reset` | `{"episode_info": {...}}` |
+| ← agent | `ok` | `{}` |
+| → agent | `act` | `{"obs": <ndarray หรือ dict ของ ndarray>}` |
+| ← agent | `action` | `{"action": int \| ndarray}` |
+| → agent | `close` | `{}` |
+| ← agent | `error` | `{"type": str, "traceback": str}` — runner กรอง path ของระบบก่อนแสดงให้นิสิต |
+
+**กติกา**
+
+- runner เป็นฝ่ายเริ่มทุกข้อความ agent ตอบอย่างเดียว — agent ส่งเองไม่ได้นอกจาก `error`
+- ทุกข้อความ `act` ต้องได้คำตอบภายใน `step_timeout_ms` เกินแล้ว **episode นั้นล้มเหลว ไม่ใช่ได้คะแนนน้อยลง** (§7.3)
+- runner ตรวจ `action` ว่าอยู่ใน action space **ก่อน**ส่งเข้า environment เสมอ
+- **ไม่มี seed และไม่มี ground truth เดินทางผ่านช่องนี้** — ข้อนี้คือทั้งหมดของ trust boundary
+  ต่อให้ agent หนีออกจาก sandbox ได้ก็ยังไม่มีเฉลยให้อ่าน (หลักการเดียวกับการแยก stage ของ
+  [prediction-based §5](prediction-based-supervised.md#5-pipeline-การประเมินผล))
+- ไม่มี state ค้างข้าม episode — `reset` ต้องล้างจริง ระบบสลับลำดับ episode เพื่อตรวจข้อนี้
+
+**ต้นทุน** — ราว 200,000 round trip ต่อ run (1,500 step × 130 episode) ที่ ~0.1 ms ≈ 20 วินาที
+ยอมรับได้ และเป็นราคาที่ถูกมากเมื่อเทียบกับการที่โจทย์ทั้งเทอมถูกโกงได้ด้วย `import gc`
 
 **การเทรนไม่ได้เกิดบนแพลตฟอร์ม** — นิสิตเทรนบนเครื่องตัวเอง/Colab แพลตฟอร์มประเมินผลอย่างเดียว
 เหตุผลและทางเลือกในอนาคตดู [CP463 §10](../competitions/CP463/1-2026/vacuum-robot/overview.md#10-นโยบายการ-train)

@@ -490,6 +490,7 @@ runner process (trusted)              sandbox container (untrusted)
 |---|---|---|
 | ค่า **private seeds** / private instance | 🔒 สูงสุด | รู้แล้วเทรนเจาะได้ → private leaderboard ไร้ความหมาย |
 | ค่า public seeds | 🔒 รองลงมา | รู้แล้ว overfit ได้ ทำให้ feedback ระหว่างเทอมเสียคุณค่ากับทุกคน |
+| **ย่าน**ที่ seed ถูกสุ่มมา (เช่น `20000–29999`) | 🔓 ไม่ลับ | ย่านมี 10,000 ค่า ใช้จริง 30 ค่า — รู้ย่านแล้วยังเดาไม่ได้ · ⚠️ **แต่ต้องประกาศเป็นย่านที่กว้างกว่าจำนวนที่ใช้มากๆ** ถ้าประกาศว่า "public คือ 20001–20030" สำหรับ 30 seed ก็เท่ากับเปิดค่าไปทั้งชุด |
 | เฉลยของ Competition 2 · คลัง prompt injection ชุด private | 🔒 | — |
 | baseline agent ระดับ Diamond | 🔒 | ลอกได้ |
 | **golden value ของ baseline** | 🔓 **ไม่ลับ** | เราโชว์บน leaderboard อยู่แล้ว — รู้ว่าต้องทำเท่าไรถึงผ่าน Gold ไม่ได้ช่วยให้ทำได้ |
@@ -528,10 +529,14 @@ colosseum-swu/                    (public · MIT)
 └── docs/
 
 colosseum-hypogeum/               (private · all rights reserved · clone เฉพาะเครื่อง GPU)
-├── cp463-1-2026/seeds.yaml
-├── cp463-1-2026/injection-private/
-└── agents/diamond/
+├── tools/make_seeds.py           # สร้างชุด seed + ตรวจว่า public/private ยากพอๆ กัน
+└── cp463-1-2026/
+    ├── vacuum/seeds.yaml         # ✅ มีแล้ว — ค่า seed ของ 3 phase + Diamond agent (ภายหลัง)
+    └── intelligence-document/    # seeds + คลัง prompt injection ชุด private (ก่อนสัปดาห์ 8)
 ```
+
+**แบ่งตาม competition ไม่ใช่ตามชนิดของไฟล์** — เพราะของลับเกือบทุกอย่างมีอายุเท่ากับ competition
+และเวลาปิดเทอมแล้วอยากเปิดของเก่าเป็น archive จะได้ย้ายทั้งโฟลเดอร์
 
 **เกณฑ์ตรวจว่าแบ่งถูก**
 
@@ -635,9 +640,11 @@ arena worker --competition <slug>             # โหมด remote worker (pred
 ### M0 — โครงกระดูก
 auth (Google OAuth) · course/enrollment/team · competition CRUD · โครง DB · Docker Compose ทั้งชุด
 
-### M1 — แข่งได้จริง (ต้องเสร็จก่อนเปิดเทอม 1/2026) 🎯
-[CP463 Competition 1](docs/competitions/CP463/1-2026/vacuum-robot/overview.md): environment + config 3 phase + scorer + starter kit + baseline agents ·
-runner on-prem + sandbox · อัพโหลด/ตรวจสอบ submission · คิว + ประเมินผล · **public leaderboard** · โควตาส่ง · หน้าผลพื้นฐาน
+### M1 — แข่งได้จริง (ต้องเสร็จก่อนนิสิตเริ่ม project) 🎯
+[CP463 Competition 1](docs/competitions/CP463/1-2026/vacuum-robot/overview.md):
+✅ environment + config 3 phase + scorer + baseline agents + conformance test ([`envs/cp463-vacuum`](envs/cp463-vacuum/)) ·
+⬜ starter kit ที่แจกนิสิต · ⬜ runner on-prem + sandbox · ⬜ อัพโหลด/ตรวจสอบ submission ·
+⬜ คิว + ประเมินผล · ⬜ **public leaderboard** · ⬜ โควตาส่ง · ⬜ หน้าผลพื้นฐาน
 
 > เกณฑ์ว่า M1 พร้อมใช้: ทีมทดสอบส่ง agent แล้วเห็นคะแนนขึ้น leaderboard ได้ครบวงจร โดยไม่มีใครต้องเข้า SSH
 
@@ -717,7 +724,8 @@ docs/competitions/CP463/1-2026/
 ├── list-of-topics.html          ← โครงสร้างรายวิชา (อ้างอิง)
 ├── vacuum-robot/
 │   ├── overview.md              ← ภาพรวมโจทย์ + เหตุผลเชิงออกแบบ
-│   └── environment-spec.md      ← build spec ระดับ implement
+│   ├── environment-spec.md      ← build spec ระดับ implement
+│   └── calibration-2026-08.md   ← ผลการวัดจริงที่ใช้ตรึงค่า config
 └── intelligence-document/
     └── overview.md
 ```
@@ -725,7 +733,7 @@ docs/competitions/CP463/1-2026/
 | วิชา | ช่วง | โจทย์ | Template | เอกสาร |
 |---|---|---|---|---|
 | CP463 | 1/2026 | ภาพรวม term project | — | [term_project.md](docs/competitions/CP463/1-2026/term_project.md) |
-| CP463 | สัปดาห์ 1–7 | Vacuum Robot | [agent-vs-environment-rl](docs/task-templates/agent-vs-environment-rl.md) | [overview](docs/competitions/CP463/1-2026/vacuum-robot/overview.md) · [environment-spec](docs/competitions/CP463/1-2026/vacuum-robot/environment-spec.md) 📐 |
+| CP463 | สัปดาห์ 1–7 | Vacuum Robot | [agent-vs-environment-rl](docs/task-templates/agent-vs-environment-rl.md) | [overview](docs/competitions/CP463/1-2026/vacuum-robot/overview.md) · [environment-spec](docs/competitions/CP463/1-2026/vacuum-robot/environment-spec.md) 📐 · [calibration](docs/competitions/CP463/1-2026/vacuum-robot/calibration-2026-08.md) 📊 |
 | CP463 | สัปดาห์ 8–14 | Intelligence Document | [llm-agent-tool-use](docs/task-templates/llm-agent-tool-use.md) | [overview](docs/competitions/CP463/1-2026/intelligence-document/overview.md) |
 
 **การเพิ่มโจทย์ใหม่** = สร้างโฟลเดอร์ `<competition>/` ใต้เทอมนั้น แล้วเขียน
@@ -740,4 +748,47 @@ docs/competitions/CP463/1-2026/
 
 ## เริ่มพัฒนา
 
-_(จะเพิ่มเมื่อเริ่มเขียนโค้ดจริง)_
+ตอนนี้มีของจริงอยู่ก้อนเดียว: **environment ของ CP463 Competition 1**
+แกนกลางของแพลตฟอร์ม (`core/`, `runners/`, `web/`) ยังไม่เริ่ม
+
+```bash
+git config core.hooksPath tools/hooks   # ⚠️ ทำครั้งเดียวต่อ clone — ดูข้างล่าง
+tools/hooks/pre-commit --selftest        # ยืนยันว่า hook ทำงาน
+
+cd envs/cp463-vacuum
+uv venv --python 3.11 && uv pip install -e ".[dev]"
+pytest -q                        # conformance test §14 — 31 ข้อ
+python examples/calibrate.py     # การทดลอง §15
+```
+
+### pre-commit hook — กันค่า seed หลุด
+
+repo นี้เป็น **public** แต่ค่า seed ของ public/private eval เป็นความลับและอยู่ที่
+[`colosseum-hypogeum`](#105-โครงสร้าง-repository) กฎ "ห้ามเอาออกจาก repo นั้น" เป็นวินัยล้วนๆ
+[`tools/hooks/pre-commit`](tools/hooks/pre-commit) ทำให้มันเป็นการป้องกันเชิงโครงสร้างแทน — ปฏิเสธ commit ที่มี
+
+- ตัวเลขตรงกับค่า seed ลับตัวใดตัวหนึ่ง (รายงานเป็น `file:line` + ค่าที่ mask ไว้ ไม่พิมพ์ค่าเต็ม)
+- ชื่อไฟล์ที่ไม่ควรอยู่ที่นี่ (`seeds*.yaml`, path ที่มี `hypogeum` หรือ `/diamond/`)
+
+หา hypogeum จาก `../colosseum-hypogeum` หรือตัวแปร `ARENA_HYPOGEUM`
+
+**ข้อจำกัดที่ต้องรู้** — hook คุ้มครองได้เท่าที่มันถูกเปิดใช้จริง
+
+| | |
+|---|---|
+| เครื่องที่ไม่ได้ตั้ง `core.hooksPath` | ไม่มีการตรวจเลย |
+| เครื่องที่ไม่ได้ clone hypogeum | ตรวจชื่อไฟล์ได้ แต่ตรวจค่า seed ไม่ได้ (เตือนแล้วปล่อยผ่าน) |
+| ประวัติที่ commit ไปแล้ว | ไม่ตรวจย้อนหลัง — hook ดูเฉพาะสิ่งที่ staged |
+| `git commit --no-verify` | ข้ามได้ตามปกติของ git |
+
+**ถ้าโดนฟ้องเพราะเลขบังเอิญตรงกัน ให้เปลี่ยนเลขนั้น ไม่ใช่ทำ allowlist** —
+การใส่เลขลงไฟล์ allowlist ใน repo สาธารณะเท่ากับประกาศว่าเลขนั้นเป็น seed ซึ่งคือสิ่งที่กำลังกันอยู่พอดี
+(โอกาสชนกันเองราว 0.5% ต่อเลข 5 หลักหนึ่งตัว)
+
+| ก้อน | สถานะ |
+|---|---|
+| [`envs/cp463-vacuum`](envs/cp463-vacuum/) | ✅ v1.0.0 — conformance test ผ่านครบ · config ผ่านการ calibrate รอบที่ 1 ([รายงาน](docs/competitions/CP463/1-2026/vacuum-robot/calibration-2026-08.md)) |
+| `core/` · `runners/` · `web/` | ⬜ ยังไม่เริ่ม |
+
+**สิ่งที่ยังกั้นการเปิด competition 1 อยู่**: ยังไม่ได้พิสูจน์ว่า learned policy ชนะ Gold baseline ได้
+([รายละเอียด](docs/competitions/CP463/1-2026/vacuum-robot/overview.md#11-สิ่งที่ต้องตัดสินใจทดสอบก่อนเปิดเทอม))
