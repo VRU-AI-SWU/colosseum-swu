@@ -2,15 +2,19 @@
 
 ⚠️ ต้องทำก่อนเปิดเทอมและก่อนงานอื่นทั้งหมด เพราะผลอาจทำให้ต้องกลับไปแก้ §11
 
-    การทดลองที่ 1 — `action_noise` กด planner ลงได้จริงไหม
+    การทดลองที่ 1 — learned policy ชนะ planner ได้ที่ระดับความยากไหน
     การทดลองที่ 2 — `max_steps` พอให้ดูดครบไหม (เกณฑ์: Gold completed 60–90% ของ seed)
     การทดลองที่ 3 — คะแนน baseline ทั้ง 4 ระดับห่างกันเกินความกว้างของ CI ไหม
 
-การทดลองที่ 1 ต้องมี **learned policy** มาเทียบด้วยถึงจะตอบได้ครบ — ตอนนี้สคริปต์รัน
-เฉพาะฝั่ง planner (Gold) ให้ก่อน ถ้ามี policy แล้วให้ส่งเข้ามาทาง `--policy module:Class`
+**การทดลองที่ 1 sweep `sensor_noise` ไม่ใช่ `action_noise`** — รอบแรก (ส.ค. 2026) วัดแล้วว่า
+`action_noise` กด planner ไม่ลงเลย (0 → 0.50 คะแนน Gold ตกแค่ 9% และยังดูดครบทุก seed)
+เพราะมันทำให้แค่ *เส้นทาง* ยาวขึ้น ไม่ได้ทำให้ *ความรู้เกี่ยวกับโลก* ผิด
+`sensor_noise` ต่างออกไปตรงที่มันทำให้แผนที่สะสมผิดถาวร — จึงเป็นคันโยกจริง
+(รายละเอียด: docs/competitions/CP463/1-2026/vacuum-robot/calibration-2026-08.md)
 
     python examples/calibrate.py --seeds 30
-    python examples/calibrate.py --seeds 30 --policy mypkg.ppo:PPOAgent
+    PPO_MODEL=models/ppo_main.zip python examples/calibrate.py --seeds 30 \
+        --policy examples.ppo_agent:PPOAgent
 """
 
 from __future__ import annotations
@@ -32,7 +36,9 @@ CONFIG_DIR = Path(__file__).resolve().parent.parent / "configs"
 # seed ของการทดลอง — ใช้ช่วงของตัวเอง ไม่ทับกับ train/public/private/conformance
 CALIBRATION_SEED_BASE = 80001
 
-NOISE_LEVELS = (0.0, 0.05, 0.10, 0.20)
+# ระดับ sensor_noise ที่ sweep — ค่าที่ใช้จริงใน Main คือ 0.02
+# ที่ 0.05 เป็นหน้าผา (Gold ร่วงจาก 1.81 เหลือ 0.75) จึงเป็นขอบบนของช่วงที่มีความหมาย
+SENSOR_NOISE_LEVELS = (0.0, 0.01, 0.02, 0.03, 0.05)
 BOOTSTRAP_N = 2000
 
 
@@ -69,15 +75,20 @@ def run(config, level: str, seeds: list[int]) -> dict:
 
 
 def experiment_1(seeds: list[int], policy) -> dict:
-    """`action_noise` กด planner ลงได้จริงไหม — Gold เทียบ learned policy ที่ noise หลายระดับ"""
+    """learned policy ชนะ planner ได้ที่ระดับความยากไหน — sweep `sensor_noise` บน config Main
+
+    สิ่งที่อยากเห็น: มีช่วงของ `sensor_noise` ที่ policy ชนะ Gold **โดยที่คะแนนยังไม่ร่วงทั้งคู่**
+    ถ้าไม่มีช่วงนั้นเลย แปลว่าคันโยกนี้ก็ไม่ตอบโจทย์เหมือน `action_noise` และต้องกลับไป
+    พิจารณาทางเลือก C+D ของ template §5
+    """
     base = load_config(CONFIG_DIR / "main.yaml")
     out: dict[str, dict] = {}
-    for noise in NOISE_LEVELS:
-        cfg = base.replace(**{"dynamics.action_noise": noise})
-        entry = {"gold": run(cfg, "gold", seeds)}
+    for noise in SENSOR_NOISE_LEVELS:
+        cfg = base.replace(**{"dynamics.sensor_noise": noise})
+        entry = {"gold": run(cfg, "gold", seeds), "silver": run(cfg, "silver", seeds)}
         if policy is not None:
             entry["policy"] = run(cfg, policy, seeds)
-        out[f"{noise:.2f}"] = entry
+        out[f"{noise:.3f}"] = entry
     return out
 
 
@@ -122,17 +133,26 @@ def fmt(report: dict) -> str:
                  f"bootstrap {BOOTSTRAP_N} รอบ resample ที่ระดับ seed")
     lines.append("")
 
-    lines += ["## การทดลองที่ 1 — action_noise กด planner ลงได้จริงไหม", "",
-              "| action_noise | Gold score | Gold completed | Gold t_end | policy score |",
+    lines += ["## การทดลองที่ 1 — learned policy ชนะ planner ได้ที่ระดับความยากไหน", "",
+              "| sensor_noise | Silver | Gold (planner) | PPO (learned) | ใครชนะ |",
               "|---|---|---|---|---|"]
     for noise, entry in report["experiment_1"].items():
-        g = entry["gold"]
+        g, s = entry["gold"], entry["silver"]
         p = entry.get("policy")
-        t_end = "—" if g["mean_t_end_completed"] is None else f"{g['mean_t_end_completed']:.0f}"
-        policy_score = "ยังไม่มี" if p is None else f"{p['score']:.4f}"
+        if p is None:
+            policy_cell, verdict = "ยังไม่มี", "—"
+        else:
+            policy_cell = f"{p['score']:.4f} [{p['ci'][0]:.3f}, {p['ci'][1]:.3f}] · ครบ {p['completion_rate']*100:.0f}%"
+            if p["ci"][0] > g["ci"][1]:
+                verdict = "**PPO ชนะชัด**"
+            elif g["ci"][0] > p["ci"][1]:
+                verdict = "Gold ชนะชัด"
+            else:
+                verdict = "CI ทับกัน แยกไม่ออก"
         lines.append(
-            f"| {noise} | {g['score']:.4f} [{g['ci'][0]:.3f}, {g['ci'][1]:.3f}] | "
-            f"{g['completion_rate']*100:.0f}% | {t_end} | {policy_score} |"
+            f"| {noise} | {s['score']:.4f} | "
+            f"{g['score']:.4f} [{g['ci'][0]:.3f}, {g['ci'][1]:.3f}] · ครบ {g['completion_rate']*100:.0f}% | "
+            f"{policy_cell} | {verdict} |"
         )
     lines.append("")
 

@@ -41,8 +41,27 @@ print(score.score, score.n_completed)
 | `env.py` | §5, §6, §8 | transition, termination, Gymnasium API |
 | `scoring.py` | §7 | Coverage AUC + completion bonus — **grader ใช้ไฟล์นี้ตัวเดียวกัน** |
 | `replay.py` | §9 | รูปแบบ `.vrp` (header + delta 4 ไบต์/timestep) |
-| `baselines/` | §10 | Bronze / Silver / Gold |
+| `baselines/` | §10 | Bronze / Silver / Gold / Diamond — Gold กับ Diamond ต่างกันแค่ "กรอง noise หรือไม่" |
 | `rollout.py` | — | ตัวรันในเครื่อง (**ห้ามใช้เป็นตัวรันของ grader** — ดูหัวไฟล์) |
+
+## เทรน policy เอง
+
+```bash
+uv pip install -e ".[train]"
+python examples/train_ppo.py --phase main --steps 3000000
+```
+
+| ไฟล์ | หน้าที่ |
+|---|---|
+| `examples/reward_wrappers.py` | ตัวอย่าง reward 2 แบบ — **reward ตอนเทรน ≠ metric ตอนตัดสิน** |
+| `examples/map_memory.py` | แผนที่สะสม + feature ให้ policy · **ใช้ไฟล์เดียวกันทั้งตอนเทรนและตอน inference** |
+| `examples/train_ppo.py` | PPO (SB3) — เทรนบน training seeds `1–9999` เท่านั้น |
+| `examples/ppo_agent.py` | ห่อ policy ให้เป็น `Agent` ตาม interface เดียวกับ baseline |
+
+> observation ที่ environment ให้คือหน้าต่างรอบตัว (POMDP) — policy แบบไม่มีความจำ
+> ทำ coverage ไม่ได้โดยหลักการ `map_memory.py` แก้ด้วยการแยก **state estimation** ออกมา
+> แล้วให้ policy ตัดสินใจบน belief แทน ซึ่งเป็นสิ่งที่ Silver/Gold ทำอยู่แล้ว
+> (อีกทางคือใช้ recurrent policy ให้มันเรียนรู้ที่จะจำเอง — ช้ากว่ามากเมื่อ episode ยาว 1,500 step)
 
 ## ทดสอบ
 

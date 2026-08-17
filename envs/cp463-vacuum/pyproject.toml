@@ -17,6 +17,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-xdist>=3"]
+# ใช้เฉพาะ examples/train_ppo.py — ไม่ใช่ dependency ของ environment
+# environment เองต้องรันได้โดยไม่มี torch เพราะ runner ที่ประเมินผลไม่ควรต้องลง torch
+train = ["torch>=2.4", "stable-baselines3>=2.4", "sb3-contrib>=2.4", "tensorboard>=2.16"]
 
 [build-system]
 requires = ["hatchling"]
