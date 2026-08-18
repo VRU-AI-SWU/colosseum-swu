@@ -317,13 +317,32 @@ runner ถือ environment ไว้ · agent อยู่ใน sandbox · �
 ### 9.1 Wire protocol ระหว่าง runner กับ agent
 
 ```
-runner (trusted)                       sandbox container (untrusted)
-  Env · seed · เฉลย   ──fd 3──►   arena-agent-host  ──เรียก──►  Agent.act()
-                      ◄─fd 4───
+runner (trusted)                          sandbox container (untrusted)
+  Env · seed · เฉลย   ──stdin──►   arena-agent-host  ──เรียก──►  Agent.act()
+                      ◄─stdout──
+                      ◄─stderr──   log ของนิสิต (print / traceback)
 ```
 
-**ใช้ fd 3/4 ไม่ใช่ stdin/stdout** — เพราะ `stdout`/`stderr` ต้องเหลือไว้ให้นิสิต `print()` debug ได้
-ถ้าใช้ stdout เป็นช่องโปรโตคอล การที่นิสิตเผลอ print ตัวเดียวจะทำให้ทั้ง run พังแบบที่อธิบายไม่ได้
+**ใช้ stdin/stdout ของ container เป็นช่องโปรโตคอล และ agent host ต้องย้าย fd 1 ไปที่ stderr
+ก่อนโหลดโค้ดนิสิต**
+
+```python
+protocol_out = os.dup(1)   # เก็บ stdout จริงไว้เป็น fd สูงๆ สำหรับโปรโตคอล
+os.dup2(2, 1)              # ทำให้ fd 1 ชี้ไปที่ stderr
+# ...ตรงนี้ค่อย import agent.py ของนิสิต — print() ของเขาจะไปออก stderr
+```
+
+**ทำไมไม่ใช้ fd 3/4 (ซึ่งเป็นสิ่งที่ร่างแรกของ spec นี้เขียนไว้)** — สองเหตุผล
+
+1. **`docker run` ส่ง fd เพิ่มเข้า container ไม่ได้** มันให้แค่ stdin/stdout/stderr
+   ถ้าจะใช้ fd 3/4 ต้องไปทำ unix socket bind-mount เข้าไปแทน ซึ่งเพิ่มชิ้นส่วนที่พังได้อีกชิ้น
+   โดยไม่ได้อะไรกลับมา
+2. **การย้าย fd 1 ไปที่ stderr ปลอดภัยกว่า fd 3/4** — หลัง `dup2` แล้ว โค้ดนิสิตที่เขียนลง fd 1
+   ตรงๆ (`os.write(1, ...)`) ก็ยังไปออก stderr ไม่ทำ stream พัง ต่างจาก fd 3/4 ที่ถ้านิสิต
+   เผลอเขียนลง fd 3 จะทำโปรโตคอลเสียทันที
+
+ผลลัพธ์ที่ต้องการยังเหมือนเดิมทุกข้อ: **นิสิต `print()` ได้ตามปกติและเห็น log ของตัวเอง**
+โดยที่โปรโตคอลไม่พัง
 
 **Framing** — length-prefixed msgpack: `uint32 LE` ของความยาว แล้วตามด้วย payload
 ndarray ส่งเป็น `{"__nd__": {"dtype": str, "shape": [int], "data": bytes}}` (ไม่ใช้ pickle — pickle = รันโค้ดได้)

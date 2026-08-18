@@ -1,0 +1,50 @@
+# base image ของ agent container — `arena/vacuum:cpu`
+#
+# หลักการ: **ทุกอย่างที่นิสิตต้องใช้ต้องอยู่ในนี้ตั้งแต่ build เสร็จ**
+# เพราะตอนรันไม่มีเน็ต (`--network none`) จะ `pip install` อะไรเพิ่มไม่ได้เลย
+# ซึ่งเป็นเจตนา ไม่ใช่ข้อจำกัด — package whitelist จึงบังคับตัวเองโดยโครงสร้าง
+#
+#   docker build -f runners/agent_env/images/Dockerfile.cpu -t arena/vacuum:cpu .
+#
+# ⚠️ ต้อง build จาก root ของ repo เพราะต้องคัดลอกทั้ง runners/ และ envs/
+
+FROM python:3.11-slim-bookworm
+
+# ── ผู้ใช้ที่ไม่ใช่ root ──────────────────────────────────────────────
+# uid/gid ตายตัวเพื่อให้ตั้งสิทธิ์ของ volume ที่ mount เข้ามาได้ตรงกันทุกเครื่อง
+RUN groupadd --gid 10001 arena \
+ && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin arena
+
+WORKDIR /opt/arena
+
+# ── โค้ดแพลตฟอร์มส่วนที่เข้า container ได้ ────────────────────────────
+# มีแค่ agent_host กับ protocol เท่านั้น — **ไม่มี runner.py** ซึ่งเป็นตัวที่ถือ env และ seed
+# ถ้าวันใดวันหนึ่งไฟล์ฝั่ง trusted หลุดเข้ามาในนี้ trust boundary จะพังเงียบๆ
+COPY runners/__init__.py runners/__init__.py
+COPY runners/agent_env/__init__.py runners/agent_env/__init__.py
+COPY runners/agent_env/agent_host.py runners/agent_env/agent_host.py
+COPY runners/agent_env/protocol.py runners/agent_env/protocol.py
+
+# ── environment ของโจทย์ (นิสิตต้อง import ได้เพื่อใช้ helper ของ starter kit) ──
+COPY envs/cp463-vacuum /opt/arena/envs/cp463-vacuum
+
+RUN pip install --no-cache-dir \
+        "msgpack==1.1.*" \
+        "numpy==2.1.*" \
+        "gymnasium==1.3.*" \
+        "zstandard==0.23.*" \
+        "pyyaml==6.*" \
+ && pip install --no-cache-dir --no-deps /opt/arena/envs/cp463-vacuum \
+ && find /opt/arena -name "__pycache__" -type d -prune -exec rm -rf {} + \
+ && chmod -R a-w /opt/arena
+
+ENV PYTHONPATH=/opt/arena \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    ARENA_SUBMISSION=/submission \
+    HOME=/tmp
+
+USER arena:arena
+
+# submission ถูก mount เข้ามาที่ /submission แบบ read-only ตอนรัน
+ENTRYPOINT ["python", "-m", "runners.agent_env.agent_host"]

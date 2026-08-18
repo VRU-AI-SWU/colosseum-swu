@@ -1,0 +1,29 @@
+# ทุกอย่างที่ไม่ควรเข้าไปอยู่ใน container ของนิสิต
+#
+# ⚠️ ข้อนี้ไม่ใช่แค่เรื่องขนาด — `.venv` ของ envs/cp463-vacuum มี torch และ
+# `models/` มี policy ที่ผู้สอนเทรนไว้ ทั้งสองอย่างไม่มีเหตุผลที่จะอยู่ในกล่อง
+# ของนิสิต และการติดไปโดยไม่ตั้งใจคือรูปแบบหนึ่งของการรั่วของข้อมูล
+
+.venv/
+**/.venv/
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/*.egg-info/
+
+# policy ที่เทรนแล้ว + checkpoint + tensorboard
+**/models/
+**/tb/
+
+.git/
+.github/
+docs/
+web/
+core/
+
+# ฝั่ง trusted — ห้ามเข้า container เด็ดขาด
+runners/agent_env/runner.py
+runners/agent_env/launcher.py
+runners/agent_env/validate.py
+runners/agent_env/plugin.py
+runners/tests/
