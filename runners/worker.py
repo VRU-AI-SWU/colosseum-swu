@@ -1,0 +1,194 @@
+"""Runner daemon — หยิบงานจากคิวแล้วรันใน sandbox
+
+    claim → โหลด seed จากที่เก็บของลับ → แตก submission → รันใน sandbox → รายงานผล
+
+บนของจริง worker ตัวนี้อยู่บนเครื่อง GPU ในมหาวิทยาลัยและต่อ WebSocket **ออกไปหา** cloud
+([README §10.1](../README.md#101-ภาพรวม-hybrid-web-บน-cloud--runner-ในมหาวิทยาลัย))
+เวอร์ชันนี้คุยกับคิวในหน่วยความจำโดยตรง — ตรรกะการทำงานเหมือนกันทุกประการ
+ต่างแค่ช่องทางที่หยิบงาน
+
+**seed ถูกอ่านที่นี่ ไม่ใช่ที่ API** — ถ้าวันหนึ่งมีคนย้ายการโหลด seed ไปฝั่ง API
+ของลับจะเดินทางขึ้น cloud ทันทีโดยไม่มีใครสังเกต
+"""
+
+from __future__ import annotations
+
+import threading
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from core.domain import Competition, Run, RunKind, RunStatus
+from core.queue import JobQueue, LeaseExpired
+from core.store import ArtifactStore, Store
+from runners.agent_env.launcher import Launcher, SubprocessLauncher
+from runners.agent_env.runner import RunResult, run_submission
+from runners.seeds import SecretsUnavailable, expected_config_hash, load_seeds
+
+HEARTBEAT_EVERY = 20.0
+
+
+class ConfigDrift(RuntimeError):
+    """config เปลี่ยนไปหลังจากที่ seed ถูก generate — ห้ามรันต่อ"""
+
+
+@dataclass
+class Worker:
+    """หนึ่งตัวต่อหนึ่งเลน — เครื่องหนึ่งรันหลายตัวพร้อมกันได้"""
+
+    runner_id: str
+    store: Store
+    queue: JobQueue
+    artifacts: ArtifactStore
+    workdir: Path
+    launcher: Launcher = field(default_factory=SubprocessLauncher)
+    lanes: tuple[str, ...] = ("cpu",)
+    allow_seed_fallback: bool = False
+
+    def run_once(self) -> Run | None:
+        """หยิบงานหนึ่งชิ้นแล้วทำจนจบ — คืน `None` ถ้าคิวว่าง"""
+        run = self.queue.claim(self.runner_id, lanes=self.lanes)
+        if run is None:
+            return None
+
+        stop = threading.Event()
+        beat = threading.Thread(target=self._heartbeat, args=(run.id, stop), daemon=True)
+        beat.start()
+        try:
+            self._execute(run)
+        except Exception as exc:  # noqa: BLE001 — งานพังต้องไม่ทำให้ worker ตาย
+            self._report_failure(run, f"{type(exc).__name__}: {exc}")
+        finally:
+            stop.set()
+            beat.join(timeout=2)
+        return run
+
+    def drain(self, limit: int | None = None) -> int:
+        """ทำงานจนคิวว่าง — ใช้ในเทสต์และโหมด dev"""
+        done = 0
+        while (limit is None or done < limit) and self.run_once() is not None:
+            done += 1
+        return done
+
+    def serve_forever(self, poll: float = 2.0) -> None:
+        """โหมด daemon — คิวว่างก็รอแล้วถามใหม่"""
+        while True:
+            if self.run_once() is None:
+                time.sleep(poll)
+
+    # ── ภายใน ───────────────────────────────────────────────────────
+
+    def _heartbeat(self, run_id: str, stop: threading.Event) -> None:
+        """ต่ออายุ lease ระหว่างที่งานยังรันอยู่
+
+        ถ้า worker ตายไปเฉยๆ heartbeat หยุดเอง แล้ว lease จะหมดอายุ
+        คิวจึงเอางานกลับไปแจกใหม่โดยไม่ต้องมีใครมาเก็บกวาด
+        """
+        while not stop.wait(HEARTBEAT_EVERY):
+            try:
+                self.queue.heartbeat(run_id, self.runner_id)
+            except (LeaseExpired, KeyError):
+                return
+
+    def _execute(self, run: Run) -> None:
+        submission = self.store.submissions[run.submission_id]
+        competition = self.store.competitions[run.competition_id]
+        phase = self._phase_name(competition, run)
+
+        try:
+            seeds = load_seeds(
+                competition_slug=competition.slug,
+                phase=phase,
+                kind="public" if run.kind is not RunKind.PRIVATE else "private",
+                allow_fallback=self.allow_seed_fallback,
+            )
+        except SecretsUnavailable as exc:
+            self._report_failure(run, str(exc))
+            return
+
+        if run.kind is RunKind.DRYRUN:
+            seeds = seeds[:2]  # dry run ใช้ชุดเล็กเพื่อไม่ให้กินคิว (template §10)
+
+        workdir = self.workdir / run.id
+        try:
+            submission_dir = self.artifacts.extract(submission.artifact_url, workdir)
+            result = run_submission(
+                env_plugin=competition.env_plugin,
+                config_path=competition.config_path,
+                submission_dir=submission_dir,
+                seeds=seeds,
+                config_overrides=self._overrides(competition, run),
+                replay_dir=self.artifacts.replay_path(run.id),
+                launcher=self.launcher,
+            )
+            self._check_config_hash(competition, phase, result)
+            self._report(run, result)
+        finally:
+            self.artifacts.clear_workdir(workdir)
+
+    def _phase_name(self, competition: Competition, run: Run) -> str:
+        phase = competition.phase_at(run.created_at)
+        return phase.name if phase else "main"
+
+    def _overrides(self, competition: Competition, run: Run) -> dict:
+        phase = competition.phase_at(run.created_at)
+        return dict(phase.config_override) if phase else {}
+
+    def _check_config_hash(self, competition: Competition, phase: str, result: RunResult) -> None:
+        expected = expected_config_hash(competition_slug=competition.slug, phase=phase)
+        if expected and result.config_hash and expected != result.config_hash:
+            raise ConfigDrift(
+                f"config ของ phase {phase!r} เปลี่ยนไปหลังจากที่ seed ถูก generate\n"
+                f"  seed ผูกกับ {expected}\n"
+                f"  ตอนนี้เป็น   {result.config_hash}\n"
+                f"คะแนนข้าม config hash ห้ามเอามาเทียบกัน — ต้อง generate seed ใหม่หรือย้อน config"
+            )
+
+    def _report(self, run: Run, result: RunResult) -> None:
+        if not result.ok:
+            self._report_failure(run, f"{result.status}: {result.detail}", log=result.log)
+            return
+
+        summary = result.summary
+        episodes = [
+            {
+                "seed": e.seed,
+                "score": e.breakdown.score,
+                "status": e.status,
+                "coverage": getattr(e.breakdown, "coverage", None),
+                "t_end": getattr(e.breakdown, "t_end", None),
+                "replay_bytes": e.replay_bytes,
+            }
+            for e in result.episodes
+        ]
+        self.queue.report(
+            run.id,
+            self.runner_id,
+            status=RunStatus.DONE,
+            score=summary.score,
+            tiebreak=summary.tiebreak_key[1:],  # ตัวแรกคือ score เอง
+            metrics={
+                "n_completed": summary.n_completed,
+                "worst_episode": summary.worst_episode,
+                "mean_coverage": summary.mean_coverage,
+                "sd_across_seeds": summary.sd_across_seeds,
+                "seconds": result.seconds,
+                "episodes": episodes,
+            },
+            config_hash=result.config_hash,
+            env_version=result.env_version,
+        )
+        self.store.record(
+            "run.completed", "run", run.id,
+            actor_id=self.runner_id, score=summary.score, seeds=len(result.episodes),
+        )
+
+    def _report_failure(self, run: Run, message: str, log: str = "") -> None:
+        try:
+            self.queue.report(
+                run.id, self.runner_id, status=RunStatus.FAILED, error_message=message,
+                metrics={"log": log[-4000:]} if log else {},
+            )
+        except LeaseExpired:
+            return  # งานถูกแจกให้คนอื่นไปแล้ว — ผลของเราไม่มีความหมาย
+        self.store.record("run.failed", "run", run.id, actor_id=self.runner_id, error=message[:500])

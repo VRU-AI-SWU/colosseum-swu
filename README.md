@@ -756,10 +756,17 @@ tools/hooks/pre-commit --selftest        # ยืนยันว่า hook ท�
 
 # แพลตฟอร์ม (core + runners)
 uv venv --python 3.11
-uv pip install -e . -e ./envs/cp463-vacuum pytest
-pytest core/tests runners/tests -q                    # 74 ข้อ
+uv pip install -e ".[dev]" -e ./envs/cp463-vacuum
+pytest core/tests runners/tests -q                    # 93 ข้อ
 docker build -f runners/agent_env/images/Dockerfile.cpu -t arena/vacuum:cpu .
 pytest runners/tests/test_docker_sandbox.py -q        # ต้องมี Docker
+
+# ลองใช้จริง — API + worker ในกระบวนการเดียว (dev เท่านั้น)
+python -m core.cli serve --port 8000
+ARENA_URL=http://127.0.0.1:8000 ARENA_TOKEN=team-1 \
+    python -m core.cli submit cp463-vacuum-1-2026 --dir path/to/agent
+ARENA_URL=http://127.0.0.1:8000 ARENA_TOKEN=team-1 \
+    python -m core.cli leaderboard cp463-vacuum-1-2026
 
 # environment ของโจทย์ (นิสิตติดตั้งแค่ก้อนนี้)
 cd envs/cp463-vacuum && uv venv --python 3.11 && uv pip install -e ".[dev]"
@@ -770,18 +777,26 @@ python examples/calibrate.py     # การทดลอง §15
 | ก้อน | สถานะ |
 |---|---|
 | [`envs/cp463-vacuum`](envs/cp463-vacuum/) | ✅ v1.0.0 · conformance test 31 ข้อผ่าน · calibrate แล้ว ([รายงาน](docs/competitions/CP463/1-2026/vacuum-robot/calibration-2026-08.md)) |
-| [`runners/agent_env`](runners/agent_env/) | ✅ โปรโตคอลแยก process · Docker sandbox · submission validation — 45 ข้อผ่าน |
-| [`core`](core/) | 🟡 domain model · fair-share queue + lease/heartbeat · leaderboard — 29 ข้อผ่าน · **ยังไม่ผูก DB จริง** |
-| `web/` · API · CLI | ⬜ ยังไม่เริ่ม |
+| [`runners/`](runners/) | ✅ โปรโตคอลแยก process · Docker sandbox · submission validation · worker daemon |
+| [`core/`](core/) | 🟡 domain · คิว fair-share · leaderboard · REST API · CLI — **ยังเก็บข้อมูลในหน่วยความจำ** |
+| `web/` | ⬜ ยังไม่เริ่ม |
 
-**สิ่งที่พิสูจน์แล้วว่าใช้ได้จริง** — รัน submission ผ่าน Docker sandbox แล้วได้คะแนน
-**ตรงกับการรันในเครื่องนิสิตถึง 1e-12** ทั้ง 4 baseline × 2 phase ซึ่งเป็นเงื่อนไขที่ทำให้
-`arena eval --local` มีความหมาย · ส่วน trust boundary ([§10.4](#104-ขอบเขตความไว้วางใจ-trust-boundaries))
-ถูกทดสอบด้วยการให้ agent **พยายามเอื้อมไปหา environment จริงๆ** แล้วยืนยันว่าทำไม่ได้
-ไม่ใช่แค่อ่านธง `docker run` แล้วเชื่อว่ามันทำงาน
+**วงจรที่ปิดครบแล้ว** — อัพโหลด zip → ตรวจแบบ static → เข้าคิว → worker หยิบไปรันใน
+Docker sandbox → คะแนนขึ้น leaderboard พร้อม replay ทุก episode
+ซึ่งเป็นเกณฑ์ที่ [§14 M1](#14-ขอบเขต-mvp-และ-roadmap) ใช้วัดว่าพร้อมหรือยัง:
+*"ทีมทดสอบส่ง agent แล้วเห็นคะแนนขึ้น leaderboard ได้ครบวงจร โดยไม่มีใครต้องเข้า SSH"*
 
-**ที่เหลือก่อนเปิดใช้จริง** — ผูก `core/` เข้ากับ Postgres · API + CLI สำหรับส่งงาน ·
-หน้าเว็บ leaderboard · ตรึงคะแนน baseline บน public seeds
+สองอย่างที่พิสูจน์ด้วยเทสต์ ไม่ใช่แค่เขียนไว้ในเอกสาร
+
+- **คะแนนใน sandbox ตรงกับที่นิสิตรันในเครื่องตัวเองถึง 1e-12** ทั้ง 4 baseline × 2 phase
+  — เงื่อนไขที่ทำให้ `arena eval --local` มีความหมาย
+- **trust boundary ปิดจริง** ([§10.4](#104-ขอบเขตความไว้วางใจ-trust-boundaries)) — เทสต์ให้ agent
+  พยายามเอื้อมไปหา environment ผ่าน `gc` · ต่อเน็ต · เขียน rootfs **จริงๆ** แล้วยืนยันว่าทำไม่ได้
+  ไม่ใช่อ่านธง `docker run` แล้วเชื่อว่ามันทำงาน
+
+**ที่เหลือก่อนเปิดใช้จริง** — ผูก `core/` เข้ากับ Postgres · Google OAuth แทน team token ·
+runner daemon ที่ต่อ WebSocket ออกมาหา cloud · หน้าเว็บ leaderboard + replay viewer ·
+ตรึงคะแนน baseline บน public seeds
 
 ### pre-commit hook — กันค่า seed หลุด
 
@@ -807,10 +822,3 @@ repo นี้เป็น **public** แต่ค่า seed ของ public/p
 การใส่เลขลงไฟล์ allowlist ใน repo สาธารณะเท่ากับประกาศว่าเลขนั้นเป็น seed ซึ่งคือสิ่งที่กำลังกันอยู่พอดี
 (โอกาสชนกันเองราว 0.5% ต่อเลข 5 หลักหนึ่งตัว)
 
-| ก้อน | สถานะ |
-|---|---|
-| [`envs/cp463-vacuum`](envs/cp463-vacuum/) | ✅ v1.0.0 — conformance test ผ่านครบ · config ผ่านการ calibrate รอบที่ 1 ([รายงาน](docs/competitions/CP463/1-2026/vacuum-robot/calibration-2026-08.md)) |
-| `core/` · `runners/` · `web/` | ⬜ ยังไม่เริ่ม |
-
-**สิ่งที่ยังกั้นการเปิด competition 1 อยู่**: ยังไม่ได้พิสูจน์ว่า learned policy ชนะ Gold baseline ได้
-([รายละเอียด](docs/competitions/CP463/1-2026/vacuum-robot/overview.md#11-สิ่งที่ต้องตัดสินใจทดสอบก่อนเปิดเทอม))

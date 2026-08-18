@@ -100,6 +100,20 @@ class Competition:
     quota_per_day: int = 5
     max_final_submissions: int = 2
     phases: list[Phase] = field(default_factory=list)
+    #: package ที่นิสิต import ได้ นอกเหนือจาก stdlib — ประกาศตอนเปิดเทอม (§13)
+    #: ว่างไว้ = ใช้ค่าจาก `default_whitelist()`
+    import_whitelist: frozenset[str] = frozenset()
+
+    def effective_whitelist(self) -> frozenset[str]:
+        """whitelist ที่ใช้จริง — รวม **แพ็กเกจของ environment เอง** ให้เสมอ
+
+        นิสิตต้อง import แพ็กเกจนั้นได้โดยนิยาม เพราะ starter kit ทั้งชุดอยู่ในนั้น
+        (baseline ที่ใช้เป็นตัวอย่าง, helper ของแผนที่, ตัวคิดคะแนนที่รันในเครื่องตัวเอง)
+        core ดึงชื่อมาจาก `env_plugin` ได้โดยไม่ต้องรู้ว่าแพ็กเกจนั้นทำอะไร
+        """
+        env_package = self.env_plugin.split(":", 1)[0].split(".", 1)[0]
+        base = self.import_whitelist or frozenset({"numpy", "torch"})
+        return base | {env_package}
 
     def phase_at(self, when: datetime) -> Phase | None:
         return next((p for p in self.phases if p.contains(when)), None)
