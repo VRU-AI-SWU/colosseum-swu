@@ -643,8 +643,10 @@ auth (Google OAuth) · course/enrollment/team · competition CRUD · โคร�
 ### M1 — แข่งได้จริง (ต้องเสร็จก่อนนิสิตเริ่ม project) 🎯
 [CP463 Competition 1](docs/competitions/CP463/1-2026/vacuum-robot/overview.md):
 ✅ environment + config 3 phase + scorer + baseline agents + conformance test ([`envs/cp463-vacuum`](envs/cp463-vacuum/)) ·
-⬜ starter kit ที่แจกนิสิต · ⬜ runner on-prem + sandbox · ⬜ อัพโหลด/ตรวจสอบ submission ·
-⬜ คิว + ประเมินผล · ⬜ **public leaderboard** · ⬜ โควตาส่ง · ⬜ หน้าผลพื้นฐาน
+✅ runner + sandbox ([`runners/agent_env`](runners/agent_env/)) · ✅ ตรวจสอบ submission ·
+✅ คิว + โควตา + leaderboard ระดับตรรกะ ([`core`](core/)) ·
+⬜ ผูก `core` กับ Postgres · ⬜ API + CLI อัพโหลด · ⬜ runner daemon ที่ต่อ WebSocket ·
+⬜ หน้าเว็บ leaderboard · ⬜ starter kit ที่แจกนิสิต
 
 > เกณฑ์ว่า M1 พร้อมใช้: ทีมทดสอบส่ง agent แล้วเห็นคะแนนขึ้น leaderboard ได้ครบวงจร โดยไม่มีใครต้องเข้า SSH
 
@@ -748,18 +750,38 @@ docs/competitions/CP463/1-2026/
 
 ## เริ่มพัฒนา
 
-ตอนนี้มีของจริงอยู่ก้อนเดียว: **environment ของ CP463 Competition 1**
-แกนกลางของแพลตฟอร์ม (`core/`, `runners/`, `web/`) ยังไม่เริ่ม
-
 ```bash
 git config core.hooksPath tools/hooks   # ⚠️ ทำครั้งเดียวต่อ clone — ดูข้างล่าง
 tools/hooks/pre-commit --selftest        # ยืนยันว่า hook ทำงาน
 
-cd envs/cp463-vacuum
-uv venv --python 3.11 && uv pip install -e ".[dev]"
+# แพลตฟอร์ม (core + runners)
+uv venv --python 3.11
+uv pip install -e . -e ./envs/cp463-vacuum pytest
+pytest core/tests runners/tests -q                    # 74 ข้อ
+docker build -f runners/agent_env/images/Dockerfile.cpu -t arena/vacuum:cpu .
+pytest runners/tests/test_docker_sandbox.py -q        # ต้องมี Docker
+
+# environment ของโจทย์ (นิสิตติดตั้งแค่ก้อนนี้)
+cd envs/cp463-vacuum && uv venv --python 3.11 && uv pip install -e ".[dev]"
 pytest -q                        # conformance test §14 — 31 ข้อ
 python examples/calibrate.py     # การทดลอง §15
 ```
+
+| ก้อน | สถานะ |
+|---|---|
+| [`envs/cp463-vacuum`](envs/cp463-vacuum/) | ✅ v1.0.0 · conformance test 31 ข้อผ่าน · calibrate แล้ว ([รายงาน](docs/competitions/CP463/1-2026/vacuum-robot/calibration-2026-08.md)) |
+| [`runners/agent_env`](runners/agent_env/) | ✅ โปรโตคอลแยก process · Docker sandbox · submission validation — 45 ข้อผ่าน |
+| [`core`](core/) | 🟡 domain model · fair-share queue + lease/heartbeat · leaderboard — 29 ข้อผ่าน · **ยังไม่ผูก DB จริง** |
+| `web/` · API · CLI | ⬜ ยังไม่เริ่ม |
+
+**สิ่งที่พิสูจน์แล้วว่าใช้ได้จริง** — รัน submission ผ่าน Docker sandbox แล้วได้คะแนน
+**ตรงกับการรันในเครื่องนิสิตถึง 1e-12** ทั้ง 4 baseline × 2 phase ซึ่งเป็นเงื่อนไขที่ทำให้
+`arena eval --local` มีความหมาย · ส่วน trust boundary ([§10.4](#104-ขอบเขตความไว้วางใจ-trust-boundaries))
+ถูกทดสอบด้วยการให้ agent **พยายามเอื้อมไปหา environment จริงๆ** แล้วยืนยันว่าทำไม่ได้
+ไม่ใช่แค่อ่านธง `docker run` แล้วเชื่อว่ามันทำงาน
+
+**ที่เหลือก่อนเปิดใช้จริง** — ผูก `core/` เข้ากับ Postgres · API + CLI สำหรับส่งงาน ·
+หน้าเว็บ leaderboard · ตรึงคะแนน baseline บน public seeds
 
 ### pre-commit hook — กันค่า seed หลุด
 
