@@ -1,4 +1,11 @@
-# ต้องอยู่ใน whitelist ของ competition — stdlib + numpy + torch + vacuum
+# package ที่ใช้ได้ตอนรันบนระบบ — ตรงกับ whitelist ของ competition
 # sandbox ไม่มีอินเทอร์เน็ต package ที่ไม่ได้ติดตั้งไว้จะ import ไม่ได้ตอนรัน
 cp463-vacuum==1.0.0
 numpy==2.1.*
+
+# ใช้ได้ถ้าจะเทรน policy เอง (อยู่ใน whitelist)
+# torch>=2.4
+
+# ─────────────────────────────────────────────────────────────
+# `colosseum` (คำสั่ง `arena`) เป็นเครื่องมือฝั่งคุณ ไม่ได้ติดตั้งใน sandbox
+# ติดตั้งแยก: pip install colosseum

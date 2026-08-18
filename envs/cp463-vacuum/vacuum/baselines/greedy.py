@@ -25,7 +25,7 @@ class GreedyAgent:
         self.H = config["height"]
         self.mode = config["observation"]
         self.window = config.get("observation_window")
-        self._seed = int(config.get("agent_seed", 0))
+        self._seed = 0  # ตรึงไว้เพื่อให้ผลทำซ้ำได้
         self.model = WorldModel(self.W, self.H, self.mode, self.window)
         self.rng = np.random.Generator(np.random.PCG64(self._seed))
 

@@ -21,7 +21,7 @@ class RandomAgent:
         self.H = config["height"]
         # RNG ของ agent เอง — ตรึง seed ไว้เพื่อให้ผลทำซ้ำได้ (template §6 "ต้อง deterministic")
         # และห้ามใช้ global RNG เด็ดขาด ไม่งั้นจะไปกวน environment (env-spec §2 ข้อ 1)
-        self._seed = int(config.get("agent_seed", 0))
+        self._seed = 0  # ตรึงไว้เพื่อให้ผลทำซ้ำได้ (template §6 "ต้อง deterministic")
         self.model = WorldModel(self.W, self.H, config["observation"], config.get("observation_window"))
         self.rng = np.random.Generator(np.random.PCG64(self._seed))
 

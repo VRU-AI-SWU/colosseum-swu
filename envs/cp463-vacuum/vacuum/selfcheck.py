@@ -169,7 +169,7 @@ def main() -> int:
 
     print(
         f"\n{GREEN}✓ ผ่านครบทุกข้อ{RESET} — environment ในเครื่องคุณให้ผลตรงกับตัวที่ใช้ตัดสิน\n"
-        f"  {DIM}คะแนนที่ได้จาก `arena eval --local` จึงเทียบกับ leaderboard ได้ตรงๆ{RESET}\n"
+        f"  {DIM}คะแนนที่ได้จาก `arena eval` จึงเทียบกับ leaderboard ได้ตรงๆ{RESET}\n"
     )
     return 0
 

@@ -1,12 +1,14 @@
 """CLI ของนิสิต — README §13
 
-    arena eval --local --seeds 1-30      รันในเครื่องตัวเอง ไม่กินโควตา ไม่ต้องต่อเน็ต
+    arena init --dir my-agent             สร้าง starter kit
+    arena eval --seeds 1-30               รันในเครื่องตัวเอง ไม่กินโควตา ไม่ต้องต่อเน็ต
+    arena eval --check-reset              ตรวจว่า reset() ล้าง state จริง (ทำก่อนส่งเสมอ)
     arena submit --note "เพิ่ม frontier" ส่งงาน
     arena status                          สถานะ run ล่าสุด
     arena leaderboard                     อันดับใน terminal
     arena serve                           รัน API + worker สำหรับ dev
 
-**`eval --local` ใช้ตัวคิดคะแนนตัวเดียวกับ grader** — ตัวเลขที่เห็นในเครื่องจึงเทียบกับ
+**`eval` ใช้ตัวคิดคะแนนตัวเดียวกับ grader** — ตัวเลขที่เห็นในเครื่องจึงเทียบกับ
 บน leaderboard ได้ตรงๆ ต่างกันแค่ seed (นิสิตใช้ training seeds ส่วนที่ตัดสินใช้ public/private
 ซึ่งไม่เปิดเผยค่า — [overview §7](../docs/competitions/CP463/1-2026/vacuum-robot/overview.md))
 
@@ -111,19 +113,101 @@ def cmd_eval(args) -> int:
         return 1
 
     s = result.summary
+    worst = min(result.episodes, key=lambda e: e.breakdown.score)
     print(f"seed ที่ใช้     {len(seeds)} ตัว ({args.seeds})")
     print(f"คะแนนรวม       {s.score:+.4f}")
     print(f"ดูดครบ         {s.n_completed}/{len(seeds)}")
-    print(f"coverage เฉลี่ย {s.mean_coverage:.3f}")
-    print(f"episode แย่สุด  {s.worst_episode:+.4f}")
+    print(f"coverage เฉลี่ย {s.mean_coverage:.4f}")
+    print(f"episode แย่สุด  {s.worst_episode:+.4f}  (seed {worst.seed})")
     print(f"sd ข้าม seed    {s.sd_across_seeds:.4f}  (แสดงอย่างเดียว ไม่ใช้จัดอันดับ)")
+
+    if args.per_episode:
+        print("\nรายตอน (เรียงจากแย่ไปดี)")
+        print(f"  {'seed':>7} {'คะแนน':>9} {'ครบ':>4} {'t_end':>6} {'ชน':>4} {'ดูดซ้ำ':>7}")
+        for e in sorted(result.episodes, key=lambda e: e.breakdown.score):
+            b = e.breakdown
+            print(
+                f"  {e.seed:>7} {b.score:>+9.4f} {'✓' if b.completed else '·':>4} "
+                f"{b.t_end:>6} {b.collisions:>4} {b.redundant_sucks:>7}"
+            )
+
+    if args.verbose and result.log:
+        print("\n── log ของ agent (print / stderr) ──")
+        print(result.log.rstrip())
 
     failed = [e for e in result.episodes if e.status != "ok"]
     if failed:
-        print(f"\n⚠️ {len(failed)} episode ล้มเหลว:")
-        for e in failed[:5]:
-            print(f"   seed {e.seed}: {e.status} — {(e.detail or '').splitlines()[-1:]}")
+        print(f"\n⚠️ {len(failed)}/{len(seeds)} episode ล้มเหลว — แต่ละอันได้ 0 คะแนน\n")
+        for e in failed[:3]:
+            print(f"── seed {e.seed}: {e.status} " + "─" * 40)
+            print((e.detail or "(ไม่มีรายละเอียด)").rstrip())
+            print()
+        if len(failed) > 3:
+            print(f"(อีก {len(failed) - 3} อัน ไม่แสดง)")
+        return 1
+
+    if args.check_reset:
+        return _check_reset(args, seeds)
     return 0
+
+
+def _check_reset(args, seeds: list[int]) -> int:
+    """ตรวจว่า `reset()` ล้าง state จริง — **ตรวจเองก่อนส่งได้**
+
+    ระบบตรวจข้อนี้ตอนรับ submission และ**ปฏิเสธ**ถ้าไม่ผ่าน แต่ก่อนหน้านี้นิสิตไม่มี
+    ทางรู้ล่วงหน้าเลย เห็นแค่คะแนนต่ำลงเฉยๆ แล้วไล่ debug อัลกอริทึมผิดทาง
+
+    วิธีตรวจ: รัน seed เดียวกันสองแบบ — ต่อกันในกระบวนการเดียว vs แยกกระบวนการ
+    ถ้าคะแนนไม่ตรง แปลว่ามีอะไรค้างข้าม episode
+    """
+    from runners.agent_env.runner import run_submission
+
+    probe = seeds[:3]
+    common = dict(
+        env_plugin=args.env_plugin,
+        config_path=resolve_config(args.config, args.env_plugin),
+        submission_dir=Path(args.dir).resolve(),
+        # ใช้เลขคี่: ความยาว episode ที่เป็นเลขคู่รักษา parity ของตัวนับที่รั่วไว้พอดี
+        # ทำให้การรั่วมองไม่เห็น
+        config_overrides={"episode.max_steps": 61},
+    )
+    print(f"\n── ตรวจว่า reset() ล้าง state จริง (seed {probe}) ──")
+    sys.stdout.flush()  # กัน stderr แซงขึ้นไปอยู่เหนือหัวข้อเวลา redirect
+
+    together = run_submission(seeds=probe, **common)
+    if not together.ok:
+        print(f"❌ รันไม่ผ่าน: {together.status}", file=sys.stderr)
+        return 1
+    sequential = {e.seed: e.breakdown.score for e in together.episodes}
+
+    bad = []
+    for seed in probe:
+        alone = run_submission(seeds=[seed], **common)
+        if not alone.ok:
+            print(f"❌ seed {seed} รันเดี่ยวไม่ผ่าน: {alone.status}", file=sys.stderr)
+            return 1
+        solo = alone.episodes[0].breakdown.score
+        if abs(sequential[seed] - solo) > 1e-9:
+            bad.append((seed, sequential[seed], solo))
+
+    if not bad:
+        print("✅ ผ่าน — คะแนนตรงกันทั้งสองแบบ submission จะไม่ถูกปฏิเสธด้วยเหตุนี้")
+        return 0
+
+    sys.stdout.flush()
+    print("❌ **ไม่ผ่าน** — มี state ค้างข้าม episode\n", file=sys.stderr)
+    for seed, seq, solo in bad:
+        print(
+            f"   seed {seed}: ได้ {seq:+.6f} เมื่อรันต่อจาก episode อื่น "
+            f"แต่ได้ {solo:+.6f} เมื่อรันเดี่ยว",
+            file=sys.stderr,
+        )
+    print(
+        "\n   `reset()` ต้องล้าง state ภายในให้หมด — แผนที่ที่สะสมไว้ ตัวนับ RNG\n"
+        "   ทุกอย่างต้องกลับไปเป็นค่าเริ่มต้น · **submission แบบนี้จะถูกปฏิเสธตอนส่ง**",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def cmd_init(args) -> int:
@@ -281,6 +365,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--config", default="main", help="ชื่อ phase (warmup/main/final) หรือ path")
     p.add_argument("--env-plugin", default="vacuum.arena:PLUGIN")
     p.add_argument("--replay-dir", default=None)
+    p.add_argument("--per-episode", action="store_true", help="แสดงคะแนนรายตอนพร้อม seed")
+    p.add_argument("--verbose", "-v", action="store_true", help="แสดง print() ของ agent")
+    p.add_argument(
+        "--check-reset",
+        action="store_true",
+        help="ตรวจว่า reset() ล้าง state จริง — **ทำก่อนส่งเสมอ** ระบบปฏิเสธ submission ที่ไม่ผ่าน",
+    )
     p.set_defaults(func=cmd_eval)
 
     p = sub.add_parser("submit", help="ส่งงาน")
