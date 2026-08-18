@@ -5,8 +5,10 @@ from pathlib import Path
 
 import pytest
 
+import vacuum
+
 REPO = Path(__file__).resolve().parents[2]
-CONFIGS = REPO / "envs" / "cp463-vacuum" / "configs"
+CONFIGS = Path(vacuum.__file__).resolve().parent / "configs"
 
 
 def write_submission(directory: Path, body: str) -> Path:

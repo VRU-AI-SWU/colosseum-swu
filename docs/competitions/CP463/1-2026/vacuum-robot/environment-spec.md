@@ -627,7 +627,7 @@ else:
 > ฟิลด์ `battery` / `move_cost` / `suck_cost` ยังคงอยู่ใน schema ไว้ใช้ปีถัดไป
 
 > ✅ **ค่าในตารางนี้ผ่านการ calibrate รอบที่ 1 แล้ว** (ส.ค. 2026) — ไฟล์ตัวจริงคือ
-> [`envs/cp463-vacuum/configs/*.yaml`](../../../../../envs/cp463-vacuum/configs/) ซึ่งมีคอมเมนต์กำกับที่มาของทุกค่าที่เปลี่ยน
+> [`envs/cp463-vacuum/vacuum/configs/*.yaml`](../../../../../envs/cp463-vacuum/vacuum/configs/) ซึ่งมีคอมเมนต์กำกับที่มาของทุกค่าที่เปลี่ยน
 > เหตุผลและตัวเลขเต็มอยู่ที่ [calibration-2026-08.md](calibration-2026-08.md)
 
 | | Warm-up (สัปดาห์ 1–3) | Main (4–6) | Final (7) |

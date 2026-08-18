@@ -20,11 +20,11 @@ uv venv --python 3.11 && uv pip install -e ".[dev]"
 ## ใช้งาน
 
 ```python
-from vacuum import load_config, VacuumEnv
+from vacuum import phase_config, VacuumEnv
 from vacuum.baselines import BFSCoverageAgent
-from vacuum.rollout import agent_config, evaluate
+from vacuum.rollout import evaluate
 
-config = load_config("configs/main.yaml")
+config = phase_config("main")      # config ถูกแพ็กมากับแพ็กเกจ
 score, results = evaluate(config, BFSCoverageAgent, range(1, 31))
 print(score.score, score.n_completed)
 ```
@@ -43,6 +43,22 @@ print(score.score, score.n_completed)
 | `replay.py` | §9 | รูปแบบ `.vrp` (header + delta 4 ไบต์/timestep) |
 | `baselines/` | §10 | Bronze / Silver / Gold / Diamond — Gold กับ Diamond ต่างกันแค่ "กรอง noise หรือไม่" |
 | `rollout.py` | — | ตัวรันในเครื่อง (**ห้ามใช้เป็นตัวรันของ grader** — ดูหัวไฟล์) |
+
+## starter kit ที่แจกนิสิต
+
+```bash
+pip install cp463-vacuum colosseum
+arena init --dir my-agent          # คัดลอก starter kit ออกมา
+python -m vacuum.selfcheck         # ยืนยันว่า environment ตรงกับ grader
+arena eval --config main --seeds 1-20
+```
+
+ของที่แพ็กไปกับ wheel: `vacuum/configs/` (config ทั้ง 3 phase) · `vacuum/golden_baselines.json` ·
+`vacuum/starter/` (agent เปล่า + README ของนิสิต + SOURCES.md) · `vacuum/selfcheck.py`
+
+`selfcheck` คือสิ่งที่ [README §10.4](../../README.md#104-ขอบเขตความไว้วางใจ-trust-boundaries)
+สัญญาไว้ว่านิสิตต้องยืนยันเองได้ — มันเทียบคะแนน baseline ทั้ง 12 ค่ากับ golden
+และตรวจว่าเวอร์ชัน numpy/gymnasium ตรง (numpy เป็น load-bearing) โดยไม่ต้องมี pytest
 
 ## เทรน policy เอง
 
@@ -75,10 +91,11 @@ train (1–9999) · public (สุ่มจาก 20000–29999) · private (ส
 
 ## สถานะ
 
-✅ ค่าใน `configs/*.yaml` **ผ่านการ calibrate รอบที่ 1 แล้ว** (ส.ค. 2026) —
+✅ ค่าใน `vacuum/configs/*.yaml` **ผ่านการ calibrate 2 รอบแล้ว** (ส.ค. 2026) —
 [รายงาน](../../docs/competitions/CP463/1-2026/vacuum-robot/calibration-2026-08.md) ·
 รันซ้ำด้วย `python examples/calibrate.py --seeds 30`
 
-⚠️ **สิ่งที่ยังค้าง** — การทดลองที่ 1 ของ §15 ยังตอบไม่ครบ เพราะยังไม่มี learned policy มาเทียบ
-ถ้าเทรน PPO เสร็จแล้วให้รัน `--policy module:Class` เพื่อยืนยันว่าชนะ Gold baseline ได้จริง
-ก่อนตรึงค่า `sensor_noise` ถาวร
+การทดลองทั้ง 3 ข้อของ §15 ตอบครบแล้ว รวมถึงฝั่ง learned policy (PPO แพ้ planner ทุกระดับ)
+
+⚠️ **สิ่งที่ยังค้าง** — คะแนน baseline ที่ตรึงไว้ตอนนี้มาจากชุด conformance
+ค่าที่จะใช้เป็น **เส้นแบ่งเกรด** ต้องรันบน public seeds อีกครั้งหลังมี runner จริง

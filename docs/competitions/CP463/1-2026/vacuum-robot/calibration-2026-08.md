@@ -266,7 +266,7 @@ policy ที่เรียนรู้มาทนต่อ observation ที
 
 ## 4. สิ่งที่เปลี่ยนไปแล้ว
 
-ทุกค่าถูกแก้ใน [`envs/cp463-vacuum/configs/`](../../../../../envs/cp463-vacuum/configs/) และ
+ทุกค่าถูกแก้ใน [`envs/cp463-vacuum/vacuum/configs/`](../../../../../envs/cp463-vacuum/vacuum/configs/) และ
 [environment-spec §11](environment-spec.md#11-config-ของทั้ง-3-phase) แล้ว **phase ละหนึ่งค่า**
 
 | phase | เปลี่ยนอะไร | ผลกับ Gold (30 seed ของชุด conformance) |

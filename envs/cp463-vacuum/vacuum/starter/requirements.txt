@@ -1,0 +1,4 @@
+# ต้องอยู่ใน whitelist ของ competition — stdlib + numpy + torch + vacuum
+# sandbox ไม่มีอินเทอร์เน็ต package ที่ไม่ได้ติดตั้งไว้จะ import ไม่ได้ตอนรัน
+cp463-vacuum==1.0.0
+numpy==2.1.*

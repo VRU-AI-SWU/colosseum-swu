@@ -19,9 +19,9 @@ from vacuum import __version__, load_config
 from vacuum.baselines import BASELINES
 from vacuum.rollout import evaluate
 
-HERE = Path(__file__).resolve().parent
-CONFIG_DIR = HERE.parent / "configs"
-OUT = HERE / "golden_baselines.json"
+from vacuum.config import CONFIG_DIR
+
+OUT = CONFIG_DIR.parent / "golden_baselines.json"
 
 SEEDS = list(range(70001, 70031))
 

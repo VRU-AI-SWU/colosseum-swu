@@ -266,3 +266,27 @@ def load_config(path: str | Path) -> Config:
     if not isinstance(raw, dict):
         raise ConfigError(f"{path}: ไฟล์ config ต้องเป็น mapping ที่ระดับบนสุด")
     return from_dict(raw)
+
+
+#: config ของแต่ละ phase ถูกแพ็กไปกับตัวแพ็กเกจ — นิสิตที่ `pip install` ได้ไฟล์เหล่านี้ไปด้วย
+#: **จำเป็น** เพราะ environment ที่ไม่มี config ก็สร้างห้องไม่ได้เลย
+CONFIG_DIR = Path(__file__).resolve().parent / "configs"
+PHASES = ("warmup", "main", "final")
+
+
+def phase_config(name: str) -> Config:
+    """โหลด config ของ phase ที่แพ็กมากับแพ็กเกจ
+
+        from vacuum import phase_config
+        config = phase_config("main")
+    """
+    if name not in PHASES:
+        raise ConfigError(f"ไม่รู้จัก phase {name!r} — มีให้เลือก {PHASES}")
+    return load_config(CONFIG_DIR / f"{name}.yaml")
+
+
+def config_path(name: str) -> Path:
+    """ตำแหน่งไฟล์ของ phase — ใช้กับเครื่องมือที่รับ path เช่น `arena eval --config`"""
+    if name not in PHASES:
+        raise ConfigError(f"ไม่รู้จัก phase {name!r} — มีให้เลือก {PHASES}")
+    return CONFIG_DIR / f"{name}.yaml"

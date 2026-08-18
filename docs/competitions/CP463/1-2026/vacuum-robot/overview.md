@@ -106,7 +106,7 @@
 
 ผู้สอนแก้ค่าเหล่านี้ได้ผ่านหน้าเว็บหรือไฟล์ YAML ต่อ competition
 ตัวอย่างข้างล่างคือ **config ของ phase Main ที่ใช้จริง** — ไฟล์ตัวจริงอยู่ที่
-[`envs/cp463-vacuum/configs/`](../../../../../envs/cp463-vacuum/configs/) และค่าของทั้ง 3 phase
+[`envs/cp463-vacuum/vacuum/configs/`](../../../../../envs/cp463-vacuum/vacuum/configs/) และค่าของทั้ง 3 phase
 อยู่ที่ [environment-spec §11](environment-spec.md#11-config-ของทั้ง-3-phase)
 
 ```yaml

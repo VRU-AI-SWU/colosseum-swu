@@ -73,6 +73,25 @@ def parse_seeds(spec: str) -> list[int]:
 # ── คำสั่ง ──────────────────────────────────────────────────────────
 
 
+def resolve_config(spec: str, env_plugin: str) -> str:
+    """รับได้ทั้งชื่อ phase (`main`) และ path ของไฟล์
+
+    นิสิตที่ `pip install` มาไม่มีโฟลเดอร์ `configs/` ให้ชี้ — config ถูกแพ็กไปกับ
+    แพ็กเกจของ environment แล้ว การพิมพ์ชื่อ phase จึงต้องใช้ได้
+    """
+    if Path(spec).exists():
+        return spec
+    module = env_plugin.split(":", 1)[0].split(".", 1)[0]
+    try:
+        config_path = __import__(module, fromlist=["config_path"]).config_path
+    except (ImportError, AttributeError) as exc:
+        raise SystemExit(f"หาไฟล์ config {spec!r} ไม่เจอ และ {module} ไม่มี config_path()") from exc
+    try:
+        return str(config_path(spec))
+    except Exception as exc:  # noqa: BLE001
+        raise SystemExit(f"{exc}") from exc
+
+
 def cmd_eval(args) -> int:
     """รันในเครื่องตัวเอง — ไม่ต่อเน็ต ไม่กินโควตา"""
     from runners.agent_env.runner import run_submission
@@ -80,7 +99,7 @@ def cmd_eval(args) -> int:
     seeds = parse_seeds(args.seeds)
     result = run_submission(
         env_plugin=args.env_plugin,
-        config_path=args.config,
+        config_path=resolve_config(args.config, args.env_plugin),
         submission_dir=Path(args.dir).resolve(),
         seeds=seeds,
         replay_dir=args.replay_dir,
@@ -104,6 +123,39 @@ def cmd_eval(args) -> int:
         print(f"\n⚠️ {len(failed)} episode ล้มเหลว:")
         for e in failed[:5]:
             print(f"   seed {e.seed}: {e.status} — {(e.detail or '').splitlines()[-1:]}")
+    return 0
+
+
+def cmd_init(args) -> int:
+    """คัดลอก starter kit ออกมาจากแพ็กเกจของ environment (README §13)"""
+    import shutil
+
+    module = args.env_plugin.split(":", 1)[0].split(".", 1)[0]
+    try:
+        package = __import__(module)
+    except ImportError:
+        raise SystemExit(
+            f"ยังไม่ได้ติดตั้ง {module} — `pip install cp463-vacuum` ก่อน"
+        ) from None
+
+    source = Path(package.__file__).resolve().parent / "starter"
+    if not source.is_dir():
+        raise SystemExit(f"{module} ไม่มี starter kit แพ็กมาด้วย")
+
+    target = Path(args.dir).resolve()
+    if target.exists() and any(target.iterdir()):
+        raise SystemExit(f"{target} ไม่ว่าง — ระบุโฟลเดอร์ใหม่ด้วย --dir")
+
+    shutil.copytree(source, target, dirs_exist_ok=True)
+    print(f"สร้าง starter kit ที่ {target}\n")
+    for path in sorted(target.rglob("*")):
+        print(f"  {path.relative_to(target)}")
+    print(
+        "\nขั้นถัดไป\n"
+        f"  cd {target}\n"
+        "  python -m vacuum.selfcheck              # ตรวจว่าเครื่องคุณตรงกับ grader\n"
+        "  arena eval --config main --seeds 1-20   # รัน agent ตัวอย่าง\n"
+    )
     return 0
 
 
@@ -218,10 +270,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="arena", description="Arena CLI")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    p = sub.add_parser("init", help="สร้าง starter kit ในโฟลเดอร์ใหม่")
+    p.add_argument("--dir", default="my-agent")
+    p.add_argument("--env-plugin", default="vacuum.arena:PLUGIN")
+    p.set_defaults(func=cmd_init)
+
     p = sub.add_parser("eval", help="รันในเครื่องตัวเอง (ไม่กินโควตา)")
     p.add_argument("--dir", default=".")
     p.add_argument("--seeds", default="1-20", help="training seeds เช่น 1-30 หรือ 1,5,9")
-    p.add_argument("--config", required=True)
+    p.add_argument("--config", default="main", help="ชื่อ phase (warmup/main/final) หรือ path")
     p.add_argument("--env-plugin", default="vacuum.arena:PLUGIN")
     p.add_argument("--replay-dir", default=None)
     p.set_defaults(func=cmd_eval)

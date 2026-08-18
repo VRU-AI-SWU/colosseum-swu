@@ -31,7 +31,7 @@ from vacuum import load_config
 from vacuum.baselines import BASELINES
 from vacuum.rollout import evaluate
 
-CONFIG_DIR = Path(__file__).resolve().parent.parent / "configs"
+from vacuum.config import CONFIG_DIR
 
 # seed ของการทดลอง — ใช้ช่วงของตัวเอง ไม่ทับกับ train/public/private/conformance
 CALIBRATION_SEED_BASE = 80001

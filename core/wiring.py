@@ -13,9 +13,9 @@ from pathlib import Path
 from core.domain import Competition, Phase, Team, new_id
 from core.leaderboard import BaselineMark
 from core.service import Arena, build_arena
+from vacuum import config_path as vacuum_config_path
 
 REPO = Path(__file__).resolve().parent.parent
-VACUUM_CONFIGS = REPO / "envs" / "cp463-vacuum" / "configs"
 
 
 def agent_env_validator(archive_url: str, whitelist: frozenset[str]):
@@ -52,7 +52,7 @@ def demo_arena(root: Path, *, teams: int = 3) -> tuple[Arena, list[Team]]:
         title="Vacuum Robot Challenge",
         task_type="agent_env",
         env_plugin="vacuum.arena:PLUGIN",
-        config_path=str(VACUUM_CONFIGS / "main.yaml"),
+        config_path=str(vacuum_config_path("main")),
         opens_at=now - timedelta(days=1),
         closes_at=now + timedelta(days=30),
         quota_per_day=5,

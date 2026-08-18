@@ -25,8 +25,10 @@ from vacuum.replay import decode, encode, frames, header_from_env
 from vacuum.rollout import agent_config, evaluate, run_episode
 from vacuum.scoring import EpisodeStats, episode_score
 
-CONFIG_DIR = Path(__file__).resolve().parent.parent / "configs"
-GOLDEN_PATH = Path(__file__).resolve().parent / "golden_baselines.json"
+# config กับ golden ถูกแพ็กไปกับตัวแพ็กเกจ — เทสต์จึงอ้างจากที่เดียวกับที่นิสิตได้ไป
+from vacuum.config import CONFIG_DIR
+
+GOLDEN_PATH = CONFIG_DIR.parent / "golden_baselines.json"
 
 # ⚠️ seed ของ conformance test ใช้ย่านของตัวเองแยกต่างหาก — ห้ามทับกับ
 # train (1–9999) · public (สุ่มจาก 20000–29999) · private (สุ่มจาก 50000–59999)

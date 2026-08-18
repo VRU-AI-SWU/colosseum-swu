@@ -37,7 +37,7 @@ from vacuum import load_config  # noqa: E402
 from vacuum.env import VacuumEnv  # noqa: E402
 from vacuum.rollout import agent_config  # noqa: E402
 
-CONFIG_DIR = Path(__file__).resolve().parent.parent / "configs"
+from vacuum.config import CONFIG_DIR  # noqa: E402
 TRAIN_SEEDS = (1, 9999)  # ย่านที่แจกให้นิสิต — ห้ามแตะ public/private
 
 
