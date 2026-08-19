@@ -5,9 +5,15 @@ repo นี้เป็น public · ค่า seed ของ public/private eva
 กฎ "ห้ามเอาออกจาก repo นั้น" เป็นวินัย — hook นี้ทำให้มันเป็น **การป้องกันเชิงโครงสร้าง**
 ตามหลักการเดียวกับ README §10.4
 
-ตรวจ 2 อย่างในสิ่งที่ staged ไว้
+ตรวจ 3 อย่างในสิ่งที่ staged ไว้
   1. ชื่อไฟล์ที่ไม่ควรอยู่ใน repo นี้ (`seeds.yaml`, อะไรก็ตามที่มีคำว่า hypogeum/diamond)
   2. บรรทัดที่เพิ่มเข้ามา มีตัวเลขที่ตรงกับค่า seed ลับตัวใดตัวหนึ่ง
+  3. บรรทัดที่เพิ่มเข้ามา มีวิธี implement ของ baseline ระดับ Gold/Diamond ซึ่งไม่แจก
+
+ข้อ 3 เกิดจากบทเรียนจริง: โค้ดถูกย้ายไป `colosseum-hypogeum` แล้ว แต่ pseudocode เต็มๆ
+ของทั้งสองระดับยังค้างอยู่ใน env-spec §10 ของ repo สาธารณะนี้ ทำให้การย้ายไม่มีความหมาย
+เส้นแบ่งที่ใช้คือ **แนวคิดเปิด · วิธี implement ปิด** — พูดว่า "รวมหลักฐานจากการเห็นซ้ำ" ได้
+แต่เขียนสูตรอัพเดตหรือลำดับขั้นตอนที่ลอกไปเขียนได้เลย ไม่ได้
 
 ติดตั้ง (ครั้งเดียวต่อ clone)
     git config core.hooksPath tools/hooks
@@ -30,6 +36,26 @@ from pathlib import Path
 
 TOKEN = re.compile(r"\b\d{5}\b")
 SUSPICIOUS_PATH = re.compile(r"(^|/)seeds[^/]*\.ya?ml$|hypogeum|/diamond/", re.IGNORECASE)
+
+#: บรรทัดที่ลงท้ายด้วยเครื่องหมายนี้จะถูกยกเว้นจากการตรวจข้อ 3
+#: ใช้ได้เมื่อการ "เอ่ยชื่อ" จำเป็นจริง เช่น เทสต์ที่ยืนยันว่าของพวกนี้ *ไม่* อยู่ในแพ็กเกจ
+#: ⚠️ ต่างจากค่า seed ตรงที่การเอ่ยชื่อฟังก์ชันไม่ได้เปิดเผยอะไร — เปิดเผยคือ*วิธีทำ*
+LEAK_OK = "arena-allow-leak-check"
+
+#: วิธี implement ที่ห้ามอยู่ใน repo สาธารณะ — ดูเหตุผลใน docstring ข้อ 3
+SOLUTION_PATTERNS = [
+    (re.compile(r"log\(\s*\(?\s*1\s*[-\u2212\u2013]\s*p"), "สูตรอัพเดต log-odds ของ Diamond"),
+    # นิยามของ frontier = "ช่องที่รู้ว่าว่างและติดกับช่องที่ยังไม่เคยเห็น" คือหัวใจของ Gold
+    # ⚠️ ห้ามจับ `known_free` เดี่ยวๆ — มันเป็น state ของ `WorldModel` ที่เรา*ตั้งใจแจก*
+    (
+        re.compile(r"(frontier.{0,80}(known_|unknown))|((known_|unknown).{0,80}frontier)", re.I),
+        "นิยามของ frontier ซึ่งเป็นหัวใจของ planner ระดับ Gold",
+    ),
+    (
+        re.compile(r"bfs_first_step|bfs_reachable_targets|frontier_cells|known_dirty_cells|BeliefWorldModel"),
+        "ชื่อฟังก์ชัน/คลาสภายในของ baseline ที่ไม่แจก",
+    ),
+]
 
 YELLOW, RED, GREEN, RESET = "\033[33m", "\033[31m", "\033[32m", "\033[0m"
 
@@ -130,13 +156,22 @@ def check() -> int:
     else:
         secrets = load_secret_seeds(hypogeum)
 
-    if secrets:
-        for path, lineno, text in staged_additions():
+    for path, lineno, text in staged_additions():
+        # ไฟล์นี้ต้องมีตัว pattern อยู่ในตัวเอง จะให้มันฟ้องตัวเองไม่ได้
+        if path == "tools/hooks/pre-commit":
+            continue
+        if secrets:
             for token in TOKEN.findall(text):
                 if int(token) in secrets:
                     problems.append(
                         f"  {path}:{lineno} — มีเลขที่ตรงกับ seed ลับ ({mask(int(token))})"
                     )
+        if LEAK_OK in text:
+            continue
+        for pattern, what in SOLUTION_PATTERNS:
+            if pattern.search(text):
+                problems.append(f"  {path}:{lineno} — {what}")
+                break
 
     if not problems:
         return 0
@@ -148,6 +183,9 @@ def check() -> int:
         "  · ถ้าเป็นค่า seed จริง — เอาออก แล้วเก็บไว้ที่ colosseum-hypogeum แทน\n"
         "  · ถ้าเป็นเลขอื่นที่บังเอิญตรงกัน — **เปลี่ยนเลขนั้น** อย่าทำ allowlist\n"
         "    (การใส่เลขลง allowlist ใน repo สาธารณะ = ประกาศว่าเลขนั้นเป็น seed)\n"
+        "  · ถ้าเป็นวิธี implement ของ Gold/Diamond — ย้ายไป colosseum-hypogeum\n"
+        "    `docs/cp463-1-2026/vacuum/baseline-solutions.md` แล้วเหลือไว้แค่แนวคิด\n"
+        f"    ถ้าจำเป็นต้องเอ่ยชื่อจริงๆ (เช่น เทสต์ที่ยืนยันว่ามันไม่อยู่) ใส่ `{LEAK_OK}` ท้ายบรรทัด\n"
         "  · ถ้ามั่นใจจริงๆ ว่าปลอดภัย — `git commit --no-verify` แต่ต้องรู้ว่ากำลังทำอะไร\n",
         file=sys.stderr,
     )
@@ -173,6 +211,25 @@ def selftest() -> int:
     if TOKEN.findall("sha256:08559dc77c2a3dc598b3f87e7442db513fea66e6949b"):
         print(f"{RED}✗ regex จับตัวเลขในค่า hash ซึ่งจะทำให้ฟ้องผิด{RESET}")
         return 1
+
+    probes = [
+        "L <- clamp(L +- log((1 - p) / p))",
+        "ถ้าไม่มี -> หา frontier ที่ใกล้ที่สุด (known_free ที่ติดกับ unknown)",
+        "from planning import bfs_first_step",
+    ]
+    for probe in probes:
+        if not any(pat.search(probe) for pat, _ in SOLUTION_PATTERNS):
+            print(f"{RED}✗ ตรวจวิธี implement ไม่เจอ: {probe!r}{RESET}")
+            return 1
+    benign = [
+        "รวมหลักฐานจากการเห็นซ้ำแทนที่จะเชื่อค่าล่าสุด",         # แนวคิดของ Diamond — เปิด
+        "เดินไปหาขอบของสิ่งที่ยังไม่เคยเห็น (frontier)",          # แนวคิดของ Gold — เปิด
+        "    def is_known_free(self, x: int, y: int) -> bool:",  # WorldModel ที่แจกไปแล้ว
+    ]
+    for line in benign:
+        if any(pat.search(line) for pat, _ in SOLUTION_PATTERNS):
+            print(f"{RED}✗ ฟ้องของที่ตั้งใจให้เปิด: {line!r}{RESET}")
+            return 1
 
     print(
         f"{GREEN}✓ hook ทำงานได้{RESET}\n"

@@ -413,6 +413,8 @@ def test_students_cannot_see_instructor_baselines(monkeypatch):
 
     import vacuum.baselines.common as common
 
+    banned_names = ("BeliefWorldModel", "bfs_first_step", "frontier_cells")  # arena-allow-leak-check
+    for banned in banned_names:
         assert not hasattr(common, banned), f"{banned} ไม่ควรอยู่ในแพ็กเกจที่แจกให้นิสิต"
 
 
