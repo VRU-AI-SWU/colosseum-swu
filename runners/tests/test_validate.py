@@ -21,11 +21,11 @@ from runners.tests.conftest import CONFIGS
 MAIN = CONFIGS / "main.yaml"
 
 GOOD_AGENT = """
-from vacuum.baselines import BASELINES
+from vacuum.baselines import BASELINES  # noqa: F401
 
 class Agent:
     def __init__(self, config):
-        self._inner = BASELINES["gold"](config)
+        self._inner = BASELINES["silver"](config)
     def reset(self, episode_info):
         self._inner.reset(episode_info)
     def act(self, observation):
@@ -119,7 +119,7 @@ def test_smoke_test_passes_for_good_agent(baseline_submission):
     assert smoke_test(
         env_plugin="vacuum.arena:PLUGIN",
         config_path=MAIN,
-        submission_dir=baseline_submission("gold"),
+        submission_dir=baseline_submission("silver"),
     ).ok
 
 
@@ -195,6 +195,6 @@ def test_smoke_test_is_fast(baseline_submission):
     smoke_test(
         env_plugin="vacuum.arena:PLUGIN",
         config_path=MAIN,
-        submission_dir=baseline_submission("gold"),
+        submission_dir=baseline_submission("silver"),
     )
     assert time.perf_counter() - t0 < 15.0

@@ -21,19 +21,19 @@ from runners.worker import Worker
 
 SLUG = "cp463-vacuum-1-2026"
 
-GOLD_AGENT = """
+STRATEGY_AGENT = """
 from vacuum.baselines import BASELINES
 
 class Agent:
     def __init__(self, config):
-        self._inner = BASELINES["gold"](config)
+        self._inner = BASELINES["silver"](config)
     def reset(self, episode_info):
         self._inner.reset(episode_info)
     def act(self, observation):
         return self._inner.act(observation)
 """
 
-BRONZE_AGENT = GOLD_AGENT.replace('"gold"', '"bronze"')
+BRONZE_AGENT = STRATEGY_AGENT.replace('"silver"', '"bronze"')
 
 
 def zip_bytes(agent_source: str) -> bytes:
@@ -44,7 +44,11 @@ def zip_bytes(agent_source: str) -> bytes:
 
 
 @pytest.fixture
-def system(tmp_path):
+def system(tmp_path, monkeypatch):
+    # ตัด ARENA_SECRETS ทิ้งเสมอ ไม่ว่าเครื่องที่รันจะตั้งไว้หรือไม่ — สองเหตุผล
+    #   1. จำนวน episode ที่เทสต์ยืนยันจะขึ้นกับว่าเครื่องนั้นมีของลับหรือเปล่า → flaky
+    #   2. ถ้าอ่าน seed จริง ค่ามันจะโผล่ใน assertion message ตอนเทสต์ล้ม แล้วไหลไป CI log
+    monkeypatch.delenv("ARENA_SECRETS", raising=False)
     arena, teams = demo_arena(tmp_path / "artifacts", teams=3)
     client = TestClient(create_app(arena, baselines={SLUG: CP463_VACUUM_LADDER}))
     worker = Worker(
@@ -78,7 +82,7 @@ def test_submit_run_and_see_score_on_leaderboard(system):
     arena, teams, client, worker = system
     team = teams[0]
 
-    created = submit(client, team, GOLD_AGENT, note="ลองครั้งแรก")
+    created = submit(client, team, STRATEGY_AGENT, note="ลองครั้งแรก")
     assert created.status_code == 201, created.text
     body = created.json()
     assert body["quota_left"] == 4
@@ -93,7 +97,7 @@ def test_submit_run_and_see_score_on_leaderboard(system):
     done = client.get(f"/api/submissions/{body['submission_id']}", headers=auth(team)).json()
     run = done["runs"][0]
     assert run["status"] == "done", run["error"]
-    assert run["score"] > 1.5, "Gold ควรได้คะแนนสูง"
+    assert run["score"] > 0.4, "agent ที่มีกลยุทธ์ควรได้คะแนนชัดเจนกว่าเดินสุ่ม"
     assert run["env_version"] == "1.0.0"
     assert run["config_hash"].startswith("sha256:")
 
@@ -105,7 +109,7 @@ def test_submit_run_and_see_score_on_leaderboard(system):
 
 def test_episodes_and_replays_are_available(system):
     arena, teams, client, worker = system
-    body = submit(client, teams[0], GOLD_AGENT).json()
+    body = submit(client, teams[0], STRATEGY_AGENT).json()
     worker.run_once()
 
     run_id = client.get(
@@ -123,7 +127,7 @@ def test_episodes_and_replays_are_available(system):
 
 def test_leaderboard_ranks_teams_and_shows_next_target(system):
     arena, teams, client, worker = system
-    submit(client, teams[0], GOLD_AGENT)
+    submit(client, teams[0], STRATEGY_AGENT)
     submit(client, teams[1], BRONZE_AGENT)
     worker.drain()
 
@@ -159,27 +163,27 @@ def test_quota_is_enforced_and_dry_run_is_free(system):
     team = teams[0]
 
     for _ in range(5):
-        assert submit(client, team, GOLD_AGENT).status_code == 201
+        assert submit(client, team, STRATEGY_AGENT).status_code == 201
         worker.run_once()  # ต้องรันให้จบก่อน ไม่งั้นติดกติกา 1 งาน/ทีม
 
-    over = submit(client, team, GOLD_AGENT)
+    over = submit(client, team, STRATEGY_AGENT)
     assert over.status_code == 429
     assert "dry run ไม่กินโควตา" in over.json()["detail"]
 
-    assert submit(client, team, GOLD_AGENT, dry_run="true").status_code == 201
+    assert submit(client, team, STRATEGY_AGENT, dry_run="true").status_code == 201
 
 
 def test_one_running_job_per_team(system):
     _arena, teams, client, _worker = system
-    assert submit(client, teams[0], GOLD_AGENT).status_code == 201
-    second = submit(client, teams[0], GOLD_AGENT)
+    assert submit(client, teams[0], STRATEGY_AGENT).status_code == 201
+    second = submit(client, teams[0], STRATEGY_AGENT)
     assert second.status_code == 409
     assert "1 งานพร้อมกันต่อทีม" in second.json()["detail"]
 
 
 def test_cannot_read_another_teams_submission(system):
     _arena, teams, client, _worker = system
-    body = submit(client, teams[0], GOLD_AGENT).json()
+    body = submit(client, teams[0], STRATEGY_AGENT).json()
     assert (
         client.get(f"/api/submissions/{body['submission_id']}", headers=auth(teams[1])).status_code
         == 403
@@ -199,7 +203,7 @@ def test_final_pick_is_capped_at_two(system):
     team = teams[0]
     ids = []
     for _ in range(3):
-        ids.append(submit(client, team, GOLD_AGENT).json()["submission_id"])
+        ids.append(submit(client, team, STRATEGY_AGENT).json()["submission_id"])
         worker.run_once()
 
     for sid in ids[:2]:
@@ -214,7 +218,7 @@ def test_private_run_uses_only_final_picks(system):
     ซึ่งทำให้ private พังด้วยเหตุผลเดียวกับ public เป๊ะ"""
     arena, teams, client, worker = system
     for _ in range(2):
-        submit(client, teams[0], GOLD_AGENT)
+        submit(client, teams[0], STRATEGY_AGENT)
         worker.run_once()
     submit(client, teams[1], BRONZE_AGENT)
     worker.run_once()
@@ -231,7 +235,7 @@ def test_private_run_uses_only_final_picks(system):
 
 def test_public_and_private_boards_are_separate(system):
     _arena, teams, client, worker = system
-    submit(client, teams[0], GOLD_AGENT)
+    submit(client, teams[0], STRATEGY_AGENT)
     worker.run_once()
 
     public = client.get(f"/api/competitions/{SLUG}/leaderboard", headers=auth(teams[0])).json()
@@ -247,7 +251,7 @@ def test_public_and_private_boards_are_separate(system):
 
 def test_everything_is_audited(system):
     arena, teams, client, worker = system
-    body = submit(client, teams[0], GOLD_AGENT).json()
+    body = submit(client, teams[0], STRATEGY_AGENT).json()
     worker.run_once()
 
     actions = {e.action for e in arena.store.audit}

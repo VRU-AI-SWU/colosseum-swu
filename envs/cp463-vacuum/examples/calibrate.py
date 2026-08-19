@@ -28,7 +28,7 @@ from pathlib import Path
 import numpy as np
 
 from vacuum import load_config
-from vacuum.baselines import BASELINES
+from vacuum.baselines import BASELINES, INSTRUCTOR_LEVELS
 from vacuum.rollout import evaluate
 
 from vacuum.config import CONFIG_DIR
@@ -51,6 +51,21 @@ def bootstrap_ci(scores: np.ndarray, n: int = BOOTSTRAP_N) -> tuple[float, float
     idx = rng.integers(0, len(scores), size=(n, len(scores)))
     means = scores[idx].mean(axis=1)
     return float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))
+
+
+def require_instructor_baselines() -> None:
+    """การทดลอง 1–3 เทียบกับ Gold/Diamond ซึ่งโค้ดอยู่ฝั่งผู้สอน
+
+    สคริปต์นี้ถูกแพ็กไปกับ starter kit เพื่อให้นิสิต*อ่านวิธีวัด*ได้ แต่รันเองไม่ครบ
+    เพราะหมุดที่ใช้เทียบเป็นของลับ (README §10.4)
+    """
+    missing = [lv for lv in INSTRUCTOR_LEVELS if lv not in BASELINES]
+    if missing:
+        raise SystemExit(
+            f"ต้องมี baseline ฝั่งผู้สอน ({', '.join(missing)}) ถึงจะรันการทดลองนี้ได้\n"
+            "ตั้ง ARENA_SECRETS ให้ชี้ไปที่ clone ของ colosseum-hypogeum ก่อน\n"
+            "นิสิตอ่านสคริปต์นี้เพื่อดูวิธีวัดได้ แต่รันไม่ได้ — หมุดที่ใช้เทียบไม่ได้แจก"
+        )
 
 
 def run(config, level: str, seeds: list[int]) -> dict:
@@ -116,7 +131,7 @@ def experiment_3(seeds: list[int]) -> dict:
         cfg = load_config(CONFIG_DIR / f"{phase}.yaml")
         levels = {level: run(cfg, level, seeds) for level in BASELINES}
         gaps = {}
-        order = ["bronze", "silver", "gold"]
+        order = [lv for lv in ("bronze", "silver", "gold", "diamond") if lv in BASELINES]
         for lo_name, hi_name in zip(order, order[1:]):
             lo, hi = levels[lo_name], levels[hi_name]
             gaps[f"{lo_name}→{hi_name}"] = {
@@ -198,6 +213,8 @@ def main() -> None:
     parser.add_argument("--policy", default=None, help="module:Class ของ learned policy (การทดลองที่ 1)")
     parser.add_argument("--out", default="calibration-report.md")
     args = parser.parse_args()
+
+    require_instructor_baselines()
 
     seeds = list(range(CALIBRATION_SEED_BASE, CALIBRATION_SEED_BASE + args.seeds))
     policy = load_policy(args.policy)

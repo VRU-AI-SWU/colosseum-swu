@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 
 from vacuum import __version__, load_config
-from vacuum.baselines import BASELINES
+from vacuum.baselines import BASELINES, INSTRUCTOR_LEVELS, instructor_agents_path
 from vacuum.rollout import evaluate
 
 from vacuum.config import CONFIG_DIR
@@ -50,8 +50,35 @@ def main() -> None:
                   f"completed={summary.n_completed}/{len(SEEDS)}")
         report["phases"][phase] = {"config_hash": config.config_hash, "scores": scores}
 
-    OUT.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(f"\nเขียน {OUT}")
+    # แยกสองไฟล์: ค่าของ baseline ที่แจกโค้ด vs ที่ไม่แจก
+    def subset(levels):
+        return {
+            **{k: v for k, v in report.items() if k != "phases"},
+            "phases": {
+                phase: {
+                    "config_hash": e["config_hash"],
+                    "scores": {k: v for k, v in e["scores"].items() if k in levels},
+                }
+                for phase, e in report["phases"].items()
+            },
+        }
+
+    public_levels = {k for k in BASELINES if k not in INSTRUCTOR_LEVELS}
+    OUT.write_text(
+        json.dumps(subset(public_levels), indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    print(f"\nเขียน {OUT}  (baseline ที่แจกโค้ด)")
+
+    secret_dir = instructor_agents_path()
+    if secret_dir is not None and any(k in BASELINES for k in INSTRUCTOR_LEVELS):
+        secret_out = secret_dir / "golden_instructor.json"
+        secret_out.write_text(
+            json.dumps(subset(set(INSTRUCTOR_LEVELS)), indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        print(f"เขียน {secret_out}  🔒 (baseline ที่ไม่แจกโค้ด)")
+    else:
+        print("⚠️ ไม่ได้ตั้ง ARENA_SECRETS — ไม่ได้ generate golden ของ gold/diamond")
 
 
 if __name__ == "__main__":

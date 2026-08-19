@@ -65,8 +65,8 @@ def test_docker_scores_match_in_process(baseline_submission):
     from vacuum.rollout import evaluate
 
     seeds = [70001, 70002]
-    expected, _ = evaluate(load_config(MAIN), BASELINES["gold"], seeds)
-    result = _run(baseline_submission("gold"), seeds=seeds)
+    expected, _ = evaluate(load_config(MAIN), BASELINES["silver"], seeds)
+    result = _run(baseline_submission("silver"), seeds=seeds)
 
     assert result.ok, f"{result.status}: {result.detail}\n{result.log}"
     assert result.summary.score == pytest.approx(expected.score, abs=1e-12)

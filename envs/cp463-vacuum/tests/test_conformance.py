@@ -311,7 +311,7 @@ def test_replay_roundtrip(main):
     config = main
     env = VacuumEnv(config)
     obs, _ = env.reset(seed=70003)
-    agent = BASELINES["gold"](agent_config(config))
+    agent = BASELINES["silver"](agent_config(config))
     agent.reset({})
 
     live = [(env.x, env.y, env.dirt.copy(), env.visited.copy(), 0, 0, 0, 0, 0)]
@@ -347,7 +347,7 @@ def test_replay_size_budget(main):
     config = main
     env = VacuumEnv(config)
     obs, _ = env.reset(seed=70004)
-    agent = BASELINES["gold"](agent_config(config))
+    agent = BASELINES["silver"](agent_config(config))
     agent.reset({})
     while True:
         obs, _, term, trunc, _ = env.step(agent.act(obs))
@@ -362,28 +362,58 @@ def test_replay_size_budget(main):
 
 @pytest.mark.slow
 def test_golden_baselines():
-    """Gold baseline บน seed ชุดคงที่ → คะแนนตรงค่าที่บันทึกไว้ (จับ regression ทุกชนิด)
+    """คะแนน baseline บน seed ชุดคงที่ → ตรงค่าที่บันทึกไว้ (จับ regression ทุกชนิด)
 
-    ⚠️ ค่าใน golden_baselines.json ตอนนี้เป็น **ค่าชั่วคราว** ที่ generate จาก config
-    ก่อนการ calibrate (§15) — เมื่อ calibrate เสร็จและตรึงค่า config แล้ว
-    ต้อง generate ใหม่ด้วย `python -m tests.make_golden` และขึ้น env_version
+    golden ถูกแยกสองไฟล์ตามว่าโค้ดของ baseline นั้นแจกให้นิสิตหรือไม่
+
+        vacuum/golden_baselines.json                          bronze · silver
+        $ARENA_SECRETS/agents/cp463-vacuum/golden_instructor.json   🔒 gold · diamond
+
+    เครื่องที่ไม่มีของลับจะตรวจได้แค่ชุดแรก ซึ่งเป็นสิ่งที่นิสิตตรวจได้เหมือนกัน
     """
-    if not GOLDEN_PATH.exists():
-        pytest.skip("ยังไม่มี golden_baselines.json — รัน `python tests/make_golden.py` ก่อน")
+    from vacuum.baselines import instructor_agents_path
 
-    golden = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
-    for phase, entry in golden["phases"].items():
-        config = load_config(CONFIG_DIR / f"{phase}.yaml")
-        assert config.config_hash == entry["config_hash"], (
-            f"{phase}: config เปลี่ยนไปจากตอน generate golden — "
-            f"ต้องขึ้น env_version และ rejudge ทุก submission"
-        )
-        for level, expected in entry["scores"].items():
-            score, _ = evaluate(
-                config, BASELINES[level], [int(s) for s in golden["seeds"]]
+    checked = 0
+    sources = [GOLDEN_PATH]
+    if (secret_dir := instructor_agents_path()) is not None:
+        sources.append(secret_dir / "golden_instructor.json")
+
+    for path in sources:
+        if not path.exists():
+            continue
+        golden = json.loads(path.read_text(encoding="utf-8"))
+        for phase, entry in golden["phases"].items():
+            config = load_config(CONFIG_DIR / f"{phase}.yaml")
+            assert config.config_hash == entry["config_hash"], (
+                f"{phase}: config เปลี่ยนไปจากตอน generate golden — "
+                f"ต้องขึ้น env_version และ rejudge ทุก submission"
             )
-            assert score.score == pytest.approx(expected["score"], abs=1e-9), f"{phase}/{level}"
-            assert score.n_completed == expected["n_completed"], f"{phase}/{level}"
+            for level, expected in entry["scores"].items():
+                assert level in BASELINES, f"{level} ไม่มีให้เรียกใช้ในสภาพแวดล้อมนี้"
+                score, _ = evaluate(
+                    config, BASELINES[level], [int(s) for s in golden["seeds"]]
+                )
+                assert score.score == pytest.approx(expected["score"], abs=1e-9), f"{phase}/{level}"
+                assert score.n_completed == expected["n_completed"], f"{phase}/{level}"
+                checked += 1
+
+    assert checked >= 6, "อย่างน้อยต้องตรวจ bronze/silver ครบ 3 phase"
+
+
+def test_students_cannot_see_instructor_baselines(monkeypatch):
+    """โค้ดของ Gold/Diamond ต้องไม่อยู่ในแพ็กเกจที่นิสิตติดตั้ง (README §10.4)
+
+    ถ้าวันหนึ่งมีคนย้ายกลับเข้ามา เทสต์นี้จะฟ้องก่อนที่มันจะหลุดไปกับ wheel
+    """
+    from vacuum.baselines import PUBLIC_BASELINES, all_baselines
+
+    monkeypatch.delenv("ARENA_SECRETS", raising=False)
+    assert sorted(all_baselines()) == ["bronze", "silver"]
+    assert sorted(PUBLIC_BASELINES) == ["bronze", "silver"]
+
+    import vacuum.baselines.common as common
+
+        assert not hasattr(common, banned), f"{banned} ไม่ควรอยู่ในแพ็กเกจที่แจกให้นิสิต"
 
 
 # ── #12 ─────────────────────────────────────────────────────────────
@@ -459,8 +489,8 @@ def test_agent_never_sees_seed_or_layout(main):
 def test_episode_order_does_not_affect_scores(main):
     """สลับลำดับ episode แล้วคะแนนต้องไม่เปลี่ยน — จับ state ที่รั่วข้าม episode"""
     seeds = TEST_SEEDS
-    forward, _ = evaluate(main, BASELINES["gold"], seeds)
-    backward, _ = evaluate(main, BASELINES["gold"], list(reversed(seeds)))
+    forward, _ = evaluate(main, BASELINES["silver"], seeds)
+    backward, _ = evaluate(main, BASELINES["silver"], list(reversed(seeds)))
     assert sorted(b.score for b in forward.per_episode) == pytest.approx(
         sorted(b.score for b in backward.per_episode)
     )

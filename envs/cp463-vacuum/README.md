@@ -21,11 +21,11 @@ uv venv --python 3.11 && uv pip install -e ".[dev]"
 
 ```python
 from vacuum import phase_config, VacuumEnv
-from vacuum.baselines import BFSCoverageAgent
+from vacuum.baselines import BASELINES
 from vacuum.rollout import evaluate
 
 config = phase_config("main")      # config ถูกแพ็กมากับแพ็กเกจ
-score, results = evaluate(config, BFSCoverageAgent, range(1, 31))
+score, results = evaluate(config, BASELINES["silver"], range(1, 31))
 print(score.score, score.n_completed)
 ```
 

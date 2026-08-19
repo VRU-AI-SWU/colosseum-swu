@@ -143,7 +143,7 @@ def check_golden_scores() -> str:
             + "\n      → environment ในเครื่องคุณให้ผลไม่ตรงกับตัวที่ใช้ตัดสิน"
         )
     n = sum(len(e["scores"]) for e in golden["phases"].values())
-    return f"{n} ค่า × {len(seeds)} seed ตรงทุกตัว"
+    return f"{n} ค่า × {len(seeds)} seed ตรงทุกตัว (bronze/silver ทั้ง 3 phase)"
 
 
 CHECKS = [

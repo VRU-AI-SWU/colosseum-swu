@@ -157,7 +157,7 @@ policy ที่เรียนรู้มาทนต่อ observation ที
 
 นี่คือการแก้ข้อสรุปเรื่องคันโยก **ครั้งที่สาม** และครั้งนี้มีหลักฐานที่หนักที่สุด
 
-`BeliefBFSAgent` ([โค้ด](../../../../../envs/cp463-vacuum/vacuum/baselines/belief_bfs.py))
+`BeliefBFSAgent` (โค้ดอยู่ที่ `colosseum-hypogeum/agents/cp463-vacuum/belief_bfs.py` 🔒)
 ใช้ตรรกะการวางแผนเหมือน Gold **ทุกบรรทัด** ต่างกันจุดเดียว: มันสะสมหลักฐานด้วย log-odds
 แทนที่จะเชื่อค่าที่เซนเซอร์บอกล่าสุด — ราว 40 บรรทัด และใช้ค่า `sensor_noise` ที่**ประกาศไว้ใน config ตรงๆ**
 

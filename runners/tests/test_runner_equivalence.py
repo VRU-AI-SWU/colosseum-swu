@@ -88,7 +88,7 @@ def test_replay_is_written(tmp_path, baseline_submission):
     result = run_submission(
         env_plugin="vacuum.arena:PLUGIN",
         config_path=CONFIGS / "main.yaml",
-        submission_dir=baseline_submission("gold"),
+        submission_dir=baseline_submission("silver"),
         seeds=[70001, 70002],
         replay_dir=tmp_path / "replays",
     )
