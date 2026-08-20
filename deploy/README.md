@@ -4,13 +4,17 @@
 ([README §10.4](../README.md#104-ขอบเขตความไว้วางใจ-trust-boundaries))
 
 ```
-SSD ของระบบ                          HDD "colosseum" — ที่สำรองอย่างเดียว
+nvme0n1 → /                          nvme1n1 → /media/ratchainant/hdd
 ~/VRU-AI/projects/colosseum/         $HDD/backup/
 ├── app/       โค้ด + .venv           ├── db/        สำเนา arena.db ย้อนหลัง 14 วัน
 ├── secrets/   🔒 hypogeum            └── artifacts/ mirror ของ artifacts
 ├── data/      arena.db (+ -wal)
 └── data/artifacts/  zip + replay
 ```
+
+> ⚠️ **ดิสก์ที่ mount ที่ `/media/ratchainant/hdd` เป็น NVMe SSD 2TB ไม่ใช่จานหมุน**
+> ชื่อ mountpoint ทำให้เข้าใจผิด · และมันไม่ใช่ดิสก์เปล่า — ใช้ไปแล้ว 85% (เหลือ 276 GB)
+> ซึ่งยังพอสำหรับ backup ของเรา แต่ต้องรู้ไว้ว่ามีของอื่นอยู่
 
 **ระบบทั้งหมดอยู่บน SSD · HDD เป็นที่สำรองอย่างเดียว**
 
@@ -28,7 +32,7 @@ audit trail หายพร้อมกัน กู้ไม่ได้ · ด
 
 | | ขนาดจริง |
 |---|---|
-| **Docker (image + build cache)** | **14.3 GB** — ในนั้นเป็น cache ที่ลบได้ 11.3 GB |
+| **Docker บนเครื่องจริง** | **24.9 GB** — เป็น image ของ*งานอื่น*บนเครื่องนี้ ลบได้ 21.9 GB · build cache แค่ 2.7 GB |
 | `.venv` | 64 MB |
 | image `arena/vacuum:cpu` | 365 MB |
 | replay ต่อหนึ่ง run (30 episode) | 120 KB |
@@ -48,10 +52,14 @@ build ซ้ำหลายรอบตอนพัฒนา image ส่วน�
 docker builder prune -af
 ```
 
-**ตั้งใจไม่ย้าย `data-root` ไป HDD** ถึงแม้จะดูตรงจุด — container start ต้องอ่าน
-image layer จากจานหมุน (เราสตาร์ท 4 container ต่อ submission) นิสิตจะรู้สึกว่า
-"ส่งงานแล้วช้า" และถ้า HDD พังกลางเทอม ระบบให้คะแนนหยุดทั้งหมด ไม่ใช่แค่ข้อมูลหาย
-จ่ายแพงกว่าที่ได้มาก เทียบกับ prune ที่แก้ปัญหาเดียวกันด้วยคำสั่งเดียว
+⛔ **ห้าม `docker system prune -a` บนเครื่องนี้** — เครื่องนี้ใช้ร่วมกับงานอื่น
+คำสั่งนั้นจะลบ image ของงานอื่นที่ไม่ได้รันอยู่ตอนนั้นไปด้วย (21.9 GB ที่ "ลบได้"
+ส่วนใหญ่คือของคนอื่น) · `arena/vacuum:cpu` เพิ่มแค่ 365 MB
+
+**ตั้งใจไม่ย้าย `data-root`** — ทั้งสองลูกเป็น NVMe เหมือนกัน ย้ายไปก็ไม่ได้อะไรเพิ่ม
+แต่ได้จุดพังเพิ่มมาหนึ่งจุด (mount order) และถ้าดิสก์ปลายทางมีปัญหา ระบบให้คะแนน
+หยุดทั้งหมด ไม่ใช่แค่ข้อมูลหาย · Arena ใช้พื้นที่รวมทั้งเทอมราว 5–10 GB ซึ่ง 191 GB
+ที่ว่างบน `/` รับได้สบาย
 
 > เขียนสำหรับ **Linux Mint** (ฐาน Ubuntu) ซึ่งเป็นเครื่องที่ใช้จริง · เครื่อง dev บน
 > macOS ใช้คำสั่งเดียวกันได้ยกเว้นส่วน systemd กับ `apt`
@@ -74,7 +82,7 @@ Mint ไม่มี `python3.11` ใน repo มาตรฐาน ไม่ว
 | Mint | ฐาน | python3 ที่ได้ |
 |---|---|---|
 | 21.x | Ubuntu 22.04 | 3.10 |
-| 22.x | Ubuntu 24.04 | 3.12 |
+| **22.3 (เครื่องนี้)** | Ubuntu 24.04 | **3.12** |
 
 **เวอร์ชันนี้เป็น load-bearing ห้ามใช้ตัวที่ใกล้เคียง** —
 [`pyproject.toml`](../envs/cp463-vacuum/pyproject.toml) ตรึงไว้ที่ `==3.11.*` คู่กับ
@@ -101,7 +109,7 @@ sudo usermod -aG docker $USER
 ตั้งตัวแปรสองตัวนี้ก่อน แล้วคำสั่งที่เหลือคัดลอกไปวางได้เลย
 
 ```bash
-export ARENA=~/VRU-AI/projects/colosseum && export HDD=/path/to/hdd/colosseum
+export ARENA=~/VRU-AI/projects/colosseum && export HDD=/media/ratchainant/hdd/colosseum
 ```
 
 ```bash

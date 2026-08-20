@@ -1,5 +1,7 @@
 # Arena — สำรองข้อมูลไปดิสก์อีกลูก (ทำงานตาม arena-backup.timer)
 #
+# ปลายทางชื่อ /media/ratchainant/hdd แต่จริงๆ เป็น NVMe SSD 2TB ไม่ใช่จานหมุน
+#
 #   sudo cp deploy/systemd/arena-backup.{service,timer} /etc/systemd/system/
 #   sudo systemctl enable --now arena-backup.timer
 #
@@ -9,7 +11,7 @@
 Description=Arena — สำรอง arena.db + artifacts ไปดิสก์สำรอง
 # ไม่ต้องหยุดบริการก่อนสำรอง — สคริปต์ใช้ SQLite backup API ซึ่งทำงานได้
 # ขณะมีคนเขียนอยู่ · แต่ดิสก์ปลายทางต้อง mount แล้วจริงๆ
-RequiresMountsFor=/media/ratchainant/colosseum
+RequiresMountsFor=/media/ratchainant/hdd
 
 [Service]
 Type=oneshot
@@ -19,7 +21,7 @@ WorkingDirectory=/home/ratchainant/VRU-AI/projects/colosseum/app
 ExecStart=/home/ratchainant/VRU-AI/projects/colosseum/app/.venv/bin/python tools/backup.py \
     --db /home/ratchainant/VRU-AI/projects/colosseum/data/arena.db \
     --artifacts /home/ratchainant/VRU-AI/projects/colosseum/data/artifacts \
-    --dest /media/ratchainant/colosseum/backup \
+    --dest /media/ratchainant/hdd/colosseum/backup \
     --keep 14
 
 # ถ้าดิสก์สำรองไม่ได้ mount สคริปต์จะ exit 1 พร้อมบอกเหตุผล — ปล่อยให้ล้มดังๆ
