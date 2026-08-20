@@ -49,7 +49,9 @@ body {
 }
 .hero img {
   width: 100%; height: 100%; object-fit: cover;
-  object-position: center 42%;  /* ดันให้เห็นตัวอาคาร ไม่ใช่ท้องฟ้ากับพื้นถนน */
+  /* ไฟล์ถูกครอบตัดมาแล้วตอน export (2.6:1 จุดสนใจที่ 42% ของความสูง)
+     จึงไม่ต้องขยับตรงนี้ — และไม่ต้องแบกพิกเซลที่ไม่มีวันถูกแสดง */
+  object-position: center;
   display: block;
 }
 /* ฝ้าไล่จากล่าง — ทำให้ตัวหนังสือมีพื้นเข้มรองรับเสมอ ไม่ว่ารูปตรงนั้นจะสว่างแค่ไหน */
@@ -167,7 +169,7 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
 <body>
 
 <div class="hero">
-  <img src="colosseum.jpg" alt="โคลอสเซียม กรุงโรม" loading="eager" fetchpriority="high">
+  <img src="colosseum.webp" alt="โคลอสเซียม กรุงโรม" loading="eager" fetchpriority="high">
   <div class="hero-text">
     <h1>Colosseum</h1>
     <div class="sub">CP463 · ARTIFICIAL INTELLIGENCE · 1/2026</div>
