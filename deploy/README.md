@@ -244,6 +244,48 @@ request ที่เกินไม่เคยถึง API เรา จึง
 เพราะการรับ submission ทำแค่การตรวจแบบ static ที่ไม่รันโค้ด (วัดได้ 1.9 วิ สำหรับไฟล์
 25 MB ซึ่งส่วนใหญ่เป็นเวลาส่งข้อมูล) ส่วนการให้คะแนนเกิดแบบ async ที่ worker
 
+## สถานะที่ติดตั้งไว้จริง (20 ส.ค. 2026)
+
+| | |
+|---|---|
+| เครื่อง | `gpu-linux-server` · Linux Mint 22.3 · `10.1.137.113` (LAN `enp5s0`) |
+| เข้าถึงเพื่อดูแล | `ssh gpu-linux-server` ผ่าน Tailscale หรือ mDNS ในวง LAN |
+| โค้ด + ของลับ | `~/VRU-AI/projects/colosseum/{app,secrets,data}` |
+| tunnel | `porta-triumphalis` → `colosseum-api.vru-ai.com` |
+| หน้าเว็บ | `colosseum.vru-ai.com` — Worker + static assets ([`web/`](../web/)) |
+| สำรองข้อมูล | ทุกคืน 03:00 → `/media/ratchainant/hdd/colosseum/backup` (NVMe ลูกที่สอง) |
+| service | `arena-api` · `cloudflared-porta-triumphalis` · `arena-backup.timer` — enabled ทั้งหมด |
+
+ยืนยันแล้วว่าทุกอย่างขึ้นเองหลัง reboot จริง (เจ้าของเครื่อง restart เอง 20 ส.ค. 14:25 —
+service ขึ้นครบภายใน 47 วินาที ข้อมูลไม่หาย HDD mount กลับมาเอง)
+
+## ⚠️ เน็ตของมหาวิทยาลัยมี captive portal ที่หมดอายุทุก 3 ชั่วโมง
+
+`ipass.swu.ac.th` ให้ session ละ 3 ชั่วโมง ต้องกด Refresh เอง — **นี่คือสาเหตุที่พบบ่อยที่สุด
+ของอาการ "ระบบล่ม" ที่ไม่ได้เกิดจากโค้ด**
+
+อาการ: HTTPS **ทุกโดเมน**ล้มพร้อมกัน และ cert ที่ได้กลายเป็น `CN=*.swu.ac.th`
+ซึ่งไม่ตรงกับ hostname ที่ขอ
+
+```bash
+echo | openssl s_client -connect github.com:443 -servername github.com 2>/dev/null | openssl x509 -noout -subject
+```
+
+ได้ `*.swu.ac.th` = หลุด session · ได้ `CN=github.com` = เน็ตปกติ
+
+**ตรวจว่ากระทบทุกโดเมนหรือเฉพาะโดเมนเรา ก่อนจะไปไล่หาสาเหตุที่โค้ดเสมอ** —
+ถ้า github กับ google ก็เข้าไม่ได้ ปัญหาไม่ได้อยู่ที่ tunnel หรือ deploy
+
+⚠️ **ยังไม่ได้แก้สำหรับเครื่องเซิร์ฟเวอร์** — ถ้า session ของเครื่อง GPU หมดตอนกลางดึก
+tunnel จะหลุดโดยที่ process ไม่ตาย `Restart=always` จึงไม่ช่วยเลย ระบบดับเงียบๆ
+ทางออกที่มีอยู่ (ยังไม่ได้ทำ)
+
+  · สลับเครื่อง GPU ไป wifi `SCI@SWU` / `Sci@WiFi` ซึ่ง**ไม่มี timeout** —
+    ติดตรงที่จุดติดตั้งสัญญาณอ่อน IT กำลังแก้ให้
+  · ขอ IT ลงทะเบียน MAC ของเครื่องเพื่อยกเว้น captive portal (ทางที่ถูกต้องที่สุด)
+  · เครื่อง GPU ใช้บัญชีเดียวกับเครื่องทำงาน — portal มองเห็นทั้งสอง session
+    และมีปุ่ม log out ข้าม IP ได้ ควรแยกบัญชีถ้าทำได้
+
 ## เดินเครื่องประจำวัน
 
 | | คำสั่ง |
