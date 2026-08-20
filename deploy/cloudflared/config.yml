@@ -1,4 +1,4 @@
-# cloudflared — เครื่อง runner ในมหาวิทยาลัย
+# cloudflared — เครื่อง GPU ในมหาวิทยาลัย (ที่ที่ API และ /srv/arena/secrets/ อยู่)
 #
 # คัดลอกไปที่ ~/.cloudflared/config.yml แล้วแทน <TUNNEL-ID> ด้วยค่าที่ได้จาก
 #   cloudflared tunnel create porta-triumphalis     (หรือดูซ้ำด้วย cloudflared tunnel list)
