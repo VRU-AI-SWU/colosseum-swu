@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Colosseum — CP463</title>
+<meta name="description" content="Leaderboard ของ course project วิชา CP463 (Artificial Intelligence) มศว">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --stone:   #e9e4d9;   /* travertine — หินที่ใช้สร้างโคลอสเซียมจริง */
+  --stone-2: #dfd8c9;
+  --ink:     #2a2521;
+  --muted:   #6f665c;
+  --rule:    #c9bfad;
+  --blood:   #8c2f24;   /* แดงของธงโรมัน — ใช้เน้นอย่างเดียว ไม่ใช้เป็นพื้น */
+  --gold:    #a8832f;
+  --you:     #f5efe1;
+  --radius: 2px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --stone: #171513; --stone-2: #221f1b; --ink: #e8e1d4; --muted: #9a9083;
+    --rule: #3a352e; --blood: #c95a4a; --gold: #d0a94c; --you: #26221c;
+  }
+  :root:not([data-theme="light"]) body { background: #171513; }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--stone); color: var(--ink);
+  font-family: "IBM Plex Sans Thai", system-ui, -apple-system, sans-serif;
+  font-size: 15px; line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 860px; margin: 0 auto; padding: 0 20px 80px; }
+
+/* ── หัวเรื่อง ── */
+header { padding: 56px 0 0; text-align: center; }
+h1 {
+  font-family: Cinzel, Georgia, serif; font-weight: 600;
+  font-size: clamp(30px, 7vw, 46px); letter-spacing: .16em;
+  margin: 0; text-transform: uppercase;
+}
+.sub { color: var(--muted); font-size: 13px; letter-spacing: .1em; margin-top: 6px; }
+/* ซุ้มโค้ง — ลายเดียวของทั้งหน้า อ้างถึงอาเขตชั้นล่างของโคลอสเซียม */
+.arcade { display: block; width: 100%; max-width: 420px; margin: 22px auto 0; }
+.arcade path { fill: none; stroke: var(--rule); stroke-width: 1.25; }
+
+/* ── แถบเป้าหมายถัดไป ── */
+.target {
+  margin: 34px 0 0; padding: 16px 20px;
+  border: 1px solid var(--rule); border-left: 3px solid var(--blood);
+  background: var(--stone-2); border-radius: var(--radius);
+}
+.target b { font-weight: 600; }
+.target .gap { color: var(--blood); font-variant-numeric: tabular-nums; }
+
+/* ── ตาราง ── */
+table { width: 100%; border-collapse: collapse; margin-top: 28px; }
+caption {
+  text-align: left; color: var(--muted); font-size: 12px;
+  letter-spacing: .12em; text-transform: uppercase; padding-bottom: 10px;
+}
+th {
+  font-weight: 500; font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--muted); text-align: left; padding: 0 10px 8px;
+  border-bottom: 1px solid var(--rule);
+}
+th.n, td.n { text-align: right; font-variant-numeric: tabular-nums; }
+td { padding: 11px 10px; border-bottom: 1px solid var(--rule); }
+tr.you td { background: var(--you); }
+tr.you .name::after {
+  content: "คุณ"; margin-left: 8px; font-size: 10px; letter-spacing: .1em;
+  color: var(--blood); border: 1px solid var(--blood); padding: 1px 5px; border-radius: 999px;
+}
+.rank { font-family: Cinzel, Georgia, serif; color: var(--muted); width: 3.5em; }
+tr.first .rank { color: var(--gold); }
+.score { font-weight: 600; width: 6em; }
+.name { font-weight: 500; }
+tr.mark td { background: transparent; color: var(--muted); }
+tr.mark .name { font-style: italic; font-weight: 400; }
+tr.mark .score { font-weight: 500; }
+.mv { font-size: 12px; color: var(--muted); width: 3em; }
+.mv.up { color: var(--gold); } .mv.down { color: var(--blood); }
+.meta { font-size: 12px; color: var(--muted); }
+
+/* ── ท้ายหน้า ── */
+footer {
+  margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--rule);
+  display: flex; flex-wrap: wrap; gap: 14px 22px;
+  font-size: 12px; color: var(--muted); align-items: center;
+}
+footer a { color: var(--muted); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.dot.live { background: #4a7c46; }
+.dot.down { background: var(--blood); }
+
+/* ── กล่องใส่โทเคน ── */
+.gate { margin-top: 40px; padding: 22px; border: 1px solid var(--rule); border-radius: var(--radius); }
+.gate h2 { font-family: Cinzel, Georgia, serif; font-size: 15px; letter-spacing: .1em; margin: 0 0 8px; }
+.gate p { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+input {
+  flex: 1 1 220px; padding: 9px 11px; font: inherit; font-size: 14px;
+  border: 1px solid var(--rule); border-radius: var(--radius);
+  background: var(--stone-2); color: var(--ink);
+}
+button {
+  padding: 9px 18px; font: inherit; font-size: 14px; cursor: pointer;
+  border: 1px solid var(--blood); background: var(--blood); color: #fff;
+  border-radius: var(--radius); letter-spacing: .04em;
+}
+button.ghost { background: transparent; color: var(--muted); border-color: var(--rule); }
+.err { color: var(--blood); font-size: 13px; margin-top: 12px; }
+[hidden] { display: none !important; }
+.scroll { overflow-x: auto; }
+
+/* ── จอแคบ ── ตัดคอลัมน์รองออกแทนที่จะให้เลื่อนแนวนอน
+   อันดับ ชื่อ และคะแนน คือสิ่งที่คนเปิดดูบนมือถือมาหา ที่เหลือดูบนจอใหญ่ได้ */
+@media (max-width: 560px) {
+  th:nth-child(4), td:nth-child(4),
+  th:nth-child(5), td:nth-child(5) { display: none; }
+  .wrap { padding: 0 14px 60px; }
+  header { padding-top: 36px; }
+  .sub { font-size: 11px; letter-spacing: .06em; }
+  th, td { padding-left: 6px; padding-right: 6px; }
+  .rank { width: 2.4em; }
+  .score { width: 5em; }
+  footer { gap: 10px 16px; }
+}
+tr.you .name::after { white-space: nowrap; display: inline-block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Colosseum</h1>
+    <div class="sub">CP463 · ARTIFICIAL INTELLIGENCE · 1/2026</div>
+    <svg class="arcade" viewBox="0 0 420 26" aria-hidden="true">
+      <path d="M2 26V13a12 12 0 0124 0v13M34 26V13a12 12 0 0124 0v13M66 26V13a12 12 0 0124 0v13
+               M98 26V13a12 12 0 0124 0v13M130 26V13a12 12 0 0124 0v13M162 26V13a12 12 0 0124 0v13
+               M194 26V13a12 12 0 0124 0v13M226 26V13a12 12 0 0124 0v13M258 26V13a12 12 0 0124 0v13
+               M290 26V13a12 12 0 0124 0v13M322 26V13a12 12 0 0124 0v13M354 26V13a12 12 0 0124 0v13
+               M386 26V13a12 12 0 0124 0v13M0 26h420"/>
+    </svg>
+  </header>
+
+  <section class="gate" id="gate" hidden>
+    <h2>เข้าสู่สนาม</h2>
+    <p>ใส่โทเคนของทีมที่ได้รับจากผู้สอน — เก็บไว้ในเบราว์เซอร์นี้เท่านั้น ไม่ถูกส่งไปที่อื่น</p>
+    <div class="row">
+      <input id="token" placeholder="team-…" autocomplete="off" spellcheck="false">
+      <button id="enter">ดู leaderboard</button>
+    </div>
+    <div class="err" id="gate-err" hidden></div>
+  </section>
+
+  <main id="board" hidden>
+    <div class="target" id="target" hidden></div>
+    <div class="scroll">
+      <table>
+        <caption id="cap">public leaderboard</caption>
+        <thead>
+          <tr>
+            <th class="rank">#</th>
+            <th>ทีม</th>
+            <th class="n">คะแนน</th>
+            <th class="n">ดูดครบ</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <footer>
+      <span><span class="dot" id="dot"></span> <span id="status">กำลังเชื่อมต่อ…</span></span>
+      <span id="updated"></span>
+      <a href="https://vru-ai.com/">VRU&nbsp;AI&nbsp;Lab</a>
+      <button class="ghost" id="logout" style="margin-left:auto">เปลี่ยนทีม</button>
+    </footer>
+  </main>
+
+  <div class="err" id="err" hidden></div>
+</div>
+
+<script>
+// ปลายทางของ API — เดาจากที่ที่หน้านี้ถูกเสิร์ฟ จึงไม่ต้องมีขั้นตอน build
+// ตอนพัฒนาเปิดจาก localhost ก็ชี้ไป arena serve ในเครื่อง ส่วนบน Pages ชี้ไป tunnel
+const API = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)
+  ? "http://localhost:8000"
+  : "https://colosseum-api.vru-ai.com";
+const SLUG = "cp463-vacuum-1-2026";
+const KEY = "colosseum.token";
+const REFRESH_MS = 30000;
+
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => (n === null || n === undefined) ? "—" : n.toFixed(4);
+
+let token = localStorage.getItem(KEY) || "";
+let timer = null;
+
+function show(view) {
+  $("gate").hidden = view !== "gate";
+  $("board").hidden = view !== "board";
+}
+
+async function api(path) {
+  const res = await fetch(API + path, { headers: { Authorization: "Bearer " + token } });
+  if (!res.ok) throw Object.assign(new Error(await res.text()), { status: res.status });
+  return res.json();
+}
+
+function renderTarget(t, you) {
+  const el = $("target");
+  if (!t) {
+    el.hidden = false;
+    el.innerHTML = you
+      ? "ผ่านหมุดของผู้สอนครบทุกระดับแล้ว — เป้าหมายถัดไปคือทีมที่อยู่เหนือคุณ"
+      : "ยังไม่มีผลของทีมคุณ — ส่ง agent ตัวแรกด้วย <b>arena submit</b>";
+    return;
+  }
+  const gap = you ? (t.score - you.score) : null;
+  el.hidden = false;
+  el.innerHTML = `เป้าหมายถัดไป <b>${t.name}</b> ที่ <b>${fmt(t.score)}</b>` +
+    (gap !== null ? ` — ห่างอีก <span class="gap">${gap.toFixed(4)}</span>` : "");
+}
+
+function renderRows(rows) {
+  const MOVE = { up: ["▲", "up"], down: ["▼", "down"], new: ["ใหม่", ""], same: ["·", ""] };
+  $("rows").innerHTML = rows.map((r) => {
+    if (r.type === "baseline") {
+      return `<tr class="mark"><td class="rank">—</td><td class="name">${r.name}</td>` +
+             `<td class="n score">${fmt(r.score)}</td><td class="n meta"></td><td></td></tr>`;
+    }
+    const [glyph, cls] = MOVE[r.movement] || ["", ""];
+    const m = r.metrics || {};
+    const total = Array.isArray(m.episodes) ? m.episodes.length : null;
+    const done = m.n_completed === undefined ? ""
+               : total ? `${m.n_completed}/${total}` : m.n_completed;
+    return `<tr class="${r.is_you ? "you " : ""}${r.rank === 1 ? "first" : ""}">` +
+      `<td class="rank">${r.rank}</td>` +
+      `<td class="name">${escapeHtml(r.name)}</td>` +
+      `<td class="n score">${fmt(r.score)}</td>` +
+      `<td class="n meta">${done}</td>` +
+      `<td class="mv ${cls}">${glyph}</td></tr>`;
+  }).join("");
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+async function refresh() {
+  try {
+    const board = await api(`/api/competitions/${SLUG}/leaderboard`);
+    const teams = board.rows.filter((r) => r.type === "team");
+    renderRows(board.rows);
+    renderTarget(board.next_target, teams.find((r) => r.is_you));
+    $("cap").textContent = `${board.kind} leaderboard · ${teams.length} ทีม`;
+    $("updated").textContent = "อัพเดต " + new Date().toLocaleTimeString("th-TH");
+    $("err").hidden = true;
+    show("board");
+  } catch (e) {
+    if (e.status === 401) { logout("โทเคนไม่ถูกต้อง — ขอจากผู้สอนอีกครั้ง"); return; }
+    $("err").hidden = false;
+    $("err").textContent = "ดึงข้อมูลไม่ได้: " + (e.message || e);
+  }
+  try {
+    const h = await api("/api/health");
+    const depth = (h.queue_depth.cpu || 0) + (h.queue_depth.gpu || 0);
+    $("dot").className = "dot live";
+    $("status").textContent = depth || h.running
+      ? `กำลังรัน ${h.running} · รอคิว ${depth}`
+      : "คิวว่าง";
+  } catch {
+    $("dot").className = "dot down";
+    $("status").textContent = "ต่อ runner ไม่ได้";
+  }
+}
+
+function start() {
+  clearInterval(timer);
+  refresh();
+  timer = setInterval(refresh, REFRESH_MS);
+}
+
+function logout(msg) {
+  clearInterval(timer);
+  token = "";
+  localStorage.removeItem(KEY);
+  show("gate");
+  $("gate-err").hidden = !msg;
+  $("gate-err").textContent = msg || "";
+}
+
+$("enter").addEventListener("click", () => {
+  const v = $("token").value.trim();
+  if (!v) return;
+  token = v;
+  localStorage.setItem(KEY, v);
+  $("gate-err").hidden = true;
+  start();
+});
+$("token").addEventListener("keydown", (e) => { if (e.key === "Enter") $("enter").click(); });
+$("logout").addEventListener("click", () => logout(""));
+
+if (token) start(); else show("gate");
+</script>
+</body>
+</html>
