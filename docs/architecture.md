@@ -1,6 +1,7 @@
 # สถาปัตยกรรม — สิ่งที่มีจริงวันนี้
 
-**เอกสารนี้อธิบายระบบที่รันได้จริง ณ วันที่ 20 ส.ค. 2026** ส่วน
+**เอกสารนี้อธิบายระบบที่รันได้จริง ณ วันที่ 20 ส.ค. 2026** — ตอนนี้ระบบ**ขึ้นจริงแล้ว**
+ที่ `colosseum-api.vru-ai.com` บนเครื่อง GPU ในมหาวิทยาลัย ส่วน
 [README §10](../README.md#10-สถาปัตยกรรมระบบ) เป็น**เป้าหมายที่ออกแบบไว้** ซึ่งบางส่วน
 ยังไม่ได้สร้าง การอ่าน §10 อย่างเดียวจะเข้าใจผิดว่าระบบทำอะไรได้บ้าง
 
@@ -18,8 +19,8 @@ flowchart TB
         edge["colosseum-api.vru-ai.com<br/>Cloudflare edge"]
     end
 
-    subgraph uni["เครื่อง GPU ในมหาวิทยาลัย"]
-        cfd["cloudflared<br/>porta-triumphalis"]
+    subgraph uni["เครื่อง GPU ในมหาวิทยาลัย ✅ ขึ้นแล้ว"]
+        cfd["cloudflared<br/>porta-triumphalis<br/>systemd · Restart=always"]
         subgraph proc["arena serve — process เดียว ✅"]
             api["FastAPI<br/>core/api.py"]
             worker["Worker thread<br/>runners/worker.py"]
@@ -177,14 +178,25 @@ flowchart LR
 คือของนิสิตและมันอยู่บนเครื่องเดียวกับเฉลย การถอยไป subprocess เงียบๆ ในโหมดนั้นคือ
 การรันโค้ดที่ไม่ไว้ใจไว้ข้างๆ ของลับ · เทสต์อยู่ที่ `core/tests/test_cli_sandbox.py`
 
-### 4.3 ที่ยังเหลือ
+### 4.3 🔴 โทเคนของทีมเดาได้ ทั้งที่ API เปิดสาธารณะแล้ว
+
+โทเคนคือ `team-1`, `team-2`, `team-3` ([`core/wiring.py`](../core/wiring.py)) ซึ่งเดาถูก
+ตั้งแต่ครั้งแรก · ตอนที่มันรันแค่บน localhost เรื่องนี้ไม่สำคัญ แต่ตอนนี้
+`colosseum-api.vru-ai.com` อยู่บนอินเทอร์เน็ตแล้ว ใครที่รู้ URL ส่งงานในนามทีมใดก็ได้
+กินโควตาของทีมนั้น และเห็นคะแนนรายตอนของเขา
+
+วันนี้ความเสี่ยงยังต่ำเพราะนิสิตยังไม่ได้รับ URL — **ต้องปิดก่อนแจก**
+ทางที่เร็วที่สุดคือครอบ Cloudflare Access ให้บังคับล็อกอิน `@g.swu.ac.th` ก่อนถึง API
+โดยไม่ต้องแตะโค้ด แล้วค่อยทำ Google OAuth ในตัวตามที่ [README §11](../README.md) วางไว้
+
+### 4.4 ที่ยังเหลือ
 
 | | สถานะ |
 |---|---|
 | หน้าเว็บ leaderboard | ✅ เขียนแล้ว ([`web/`](../web/)) — ยังไม่ได้ deploy ขึ้น Pages |
-| Google OAuth | ยังใช้ team token แบบ `team-1` |
+| Google OAuth | ยังใช้ team token — ดู §4.3 |
 | runner daemon + WebSocket | ยังไม่มี — worker เป็น thread |
-| เพดานไฟล์บน named tunnel | ยังไม่วัด (ที่วัดไปเป็น quick tunnel) |
+| เพดานไฟล์บน named tunnel | ✅ วัดแล้ว **100 MiB** · `arena submit` ตรวจให้ที่ 95 MB |
 | replay viewer | ยังไม่มี — มีแต่ไฟล์ `.vrp` |
 
 ---

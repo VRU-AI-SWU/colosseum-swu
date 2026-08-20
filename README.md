@@ -820,7 +820,8 @@ python examples/calibrate.py     # การทดลอง §15
 | [`envs/cp463-vacuum`](envs/cp463-vacuum/) | ✅ v1.0.0 · conformance test 32 ข้อผ่าน · calibrate แล้ว ([รายงาน](docs/competitions/CP463/1-2026/vacuum-robot/calibration-2026-08.md)) · หมุด baseline ตรึงบน public seeds แล้ว ([`core/baseline_pins/`](core/baseline_pins/)) |
 | [`runners/`](runners/) | ✅ โปรโตคอลแยก process · Docker sandbox · submission validation · worker daemon |
 | [`core/`](core/) | 🟡 domain · คิว fair-share · leaderboard · REST API · CLI — **ยังเก็บข้อมูลในหน่วยความจำ** |
-| `web/` | ✅ หน้า leaderboard — ไฟล์เดียว ไม่มี build step ([`web/`](web/)) · ยังไม่ได้ deploy |
+| `web/` | ✅ หน้า leaderboard ([`web/`](web/)) · ยังไม่ได้ deploy ขึ้น Pages |
+| **ระบบที่รันอยู่จริง** | ✅ `colosseum-api.vru-ai.com` บนเครื่อง GPU ในมหาวิทยาลัย — API + worker + Docker sandbox + tunnel + สำรองข้อมูลรายคืน ([deploy/](deploy/)) |
 
 **วงจรที่ปิดครบแล้ว** — อัพโหลด zip → ตรวจแบบ static → เข้าคิว → worker หยิบไปรันใน
 Docker sandbox → คะแนนขึ้น leaderboard พร้อม replay ทุก episode
