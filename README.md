@@ -543,11 +543,15 @@ runner process (trusted)              sandbox container (untrusted)
 
 ```
 เครื่อง GPU ในมหาวิทยาลัย
-├── /srv/arena/app/        ← โค้ดแพลตฟอร์ม (repo สาธารณะ)
-├── /srv/arena/envs/       ← environment package (สาธารณะ)
-└── /srv/arena/secrets/    ← 🔒 clone จาก private repo · mount read-only เข้าเฉพาะ runner process
-    └── cp463-1-2026.yaml     ไม่เข้า container ของนิสิตเด็ดขาด
+~/VRU-AI/projects/colosseum/
+├── app/        ← โค้ดแพลตฟอร์ม + environment package (repo สาธารณะ)
+├── data/       ← arena.db + artifacts
+└── secrets/    ← 🔒 clone จาก private repo · โหมด 700 · ไม่เข้า container ของนิสิตเด็ดขาด
+    └── cp463-1-2026/vacuum/seeds.yaml
 ```
+
+> path จริงที่ติดตั้งไว้ ณ ส.ค. 2026 — ร่างแรกเขียนเป็น `/srv/arena/` ซึ่งไม่ได้ใช้
+> วิธีติดตั้งทั้งหมดอยู่ที่ [deploy/README.md](deploy/README.md)
 
 เก็บประวัติและสำรองใน **private repo แยก** ไม่ใช่ไฟล์ลอยบนเครื่อง — เพื่อให้ย้อนดูได้ว่าเคยใช้ seed ชุดไหนถ้าต้องเปลี่ยนกลางเทอม
 

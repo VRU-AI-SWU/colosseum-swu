@@ -19,7 +19,7 @@ flowchart TB
         edge["colosseum-api.vru-ai.com<br/>Cloudflare edge"]
     end
 
-    subgraph uni["เครื่อง GPU ในมหาวิทยาลัย ✅ ขึ้นแล้ว"]
+    subgraph uni["เครื่อง GPU ในมหาวิทยาลัย (Linux Mint) ✅ ขึ้นแล้ว"]
         cfd["cloudflared<br/>porta-triumphalis<br/>systemd · Restart=always"]
         subgraph proc["arena serve — process เดียว ✅"]
             api["FastAPI<br/>core/api.py"]
@@ -27,12 +27,12 @@ flowchart TB
         end
         db[("SQLite<br/>arena.db")]
         art[("artifacts/<br/>zip + replay")]
-        secrets[["🔒 /srv/arena/secrets/<br/>seeds.yaml · โค้ดเฉลย"]]
+        secrets[["🔒 ~/VRU-AI/projects/colosseum/secrets/<br/>seeds.yaml · โค้ดเฉลย"]]
         sandbox["sandbox ที่รัน agent ของนิสิต"]
     end
 
     student["นิสิต<br/>arena submit"] -->|"HTTPS"| edge
-    page -.->|"fetch JSON · ต้องมี CORS"| edge
+    page -->|"fetch JSON · CORS ตั้งแล้ว"| edge
     edge <-->|"QUIC · UDP 7844<br/>cloudflared ต่อ *ออกไป*"| cfd
     cfd -->|"127.0.0.1:8000"| api
     api <--> worker
@@ -43,7 +43,6 @@ flowchart TB
     worker -->|"อ่านตอนรับงาน"| secrets
     worker -->|"obs / action<br/>ผ่าน stdin/stdout"| sandbox
 
-    style page stroke-dasharray: 5 5
     style secrets fill:#fff3cd,stroke:#856404
 ```
 
