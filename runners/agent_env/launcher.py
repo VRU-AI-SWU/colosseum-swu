@@ -143,6 +143,23 @@ class DockerLauncher:
     docker: str = "docker"
     extra_args: list[str] = field(default_factory=list)
 
+    @classmethod
+    def available(cls, image: str = "arena/vacuum:cpu", docker: str = "docker") -> bool:
+        """มี docker และมี image อยู่จริงไหม
+
+        ตรวจ image ด้วยไม่ใช่แค่ตัว docker เพราะ daemon ที่รันอยู่แต่ไม่มี image
+        จะพังตอน `docker run` ซึ่งเป็นตอนที่ agent ของนิสิตกำลังรอผลอยู่แล้ว
+        """
+        import shutil
+
+        if shutil.which(docker) is None:
+            return False
+        try:
+            subprocess.run([docker, "image", "inspect", image], capture_output=True, check=True)
+            return True
+        except (subprocess.CalledProcessError, OSError):
+            return False
+
     def start(self, submission_dir: Path) -> AgentProcess:
         submission = Path(submission_dir).resolve()
         cmd = [

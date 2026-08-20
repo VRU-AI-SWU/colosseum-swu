@@ -23,9 +23,17 @@ from core.queue import JobQueue, LeaseExpired
 from core.store import ArtifactStore, Store
 from runners.agent_env.launcher import Launcher, SubprocessLauncher
 from runners.agent_env.runner import RunResult, run_submission
+from runners.agent_env.validate import smoke_test
 from runners.seeds import SecretsUnavailable, expected_config_hash, load_seeds
 
 HEARTBEAT_EVERY = 20.0
+
+#: run ที่ต้องผ่าน smoke test ก่อน — **ไม่รวม private กับ rejudge** โดยตั้งใจ
+#:
+#: submission ที่มาถึงรอบ private ผ่าน smoke test ตอนรัน public มาแล้ว การตรวจซ้ำ
+#: มีแต่ทางเสีย: ถ้ามันล้มด้วยเหตุบังเอิญ (docker สะดุด) final pick ของทีมนั้นจะถูก
+#: ปฏิเสธในรอบตัดเกรด ซึ่งเป็นจังหวะที่แก้ตัวไม่ได้แล้ว
+SMOKE_TESTED_KINDS = frozenset({RunKind.PUBLIC, RunKind.DRYRUN})
 
 
 class ConfigDrift(RuntimeError):
@@ -112,6 +120,18 @@ class Worker:
         workdir = self.workdir / run.id
         try:
             submission_dir = self.artifacts.extract(submission.artifact_url, workdir)
+
+            if run.kind in SMOKE_TESTED_KINDS:
+                smoke = smoke_test(
+                    env_plugin=competition.env_plugin,
+                    config_path=competition.config_path,
+                    submission_dir=submission_dir,
+                    launcher=self.launcher,
+                )
+                if not smoke.ok:
+                    self._report_failure(run, str(smoke), log=smoke.detail)
+                    return
+
             result = run_submission(
                 env_plugin=competition.env_plugin,
                 config_path=competition.config_path,

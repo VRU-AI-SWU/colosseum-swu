@@ -217,6 +217,49 @@ def test_broken_submission_is_rejected_with_a_fix(system):
     assert "Agent" in problem["fix"]
 
 
+def test_state_leaking_agent_is_rejected_by_the_worker(system):
+    """agent ที่ `reset()` ไม่สะอาดต้องถูกปฏิเสธ ไม่ใช่ได้คะแนนต่ำเงียบๆ
+
+    starter kit บอกนิสิตว่า "ระบบตรวจข้อนี้ตอนรับ submission และ**ปฏิเสธ**ถ้าไม่ผ่าน"
+    ซึ่งไม่จริงอยู่พักหนึ่ง — `smoke_test()` เขียนครบและมีเทสต์ของตัวเอง แต่ไม่มีใคร
+    เรียกมันนอกจากเทสต์ เทสต์นี้จึงตรวจ**การต่อสาย** ไม่ใช่ตรวจตัวฟังก์ชัน
+    """
+    _arena, teams, client, worker = system
+    leaky = """
+    class Agent:
+        def __init__(self, config):
+            self.steps = 0          # ไม่ถูกล้างใน reset() — รั่วข้าม episode
+        def reset(self, episode_info):
+            pass
+        def act(self, observation):
+            self.steps += 1
+            return 4 if self.steps <= 30 else 5
+    """
+    body = submit(client, teams[0], leaky).json()
+    worker.run_once()
+
+    run = client.get(
+        f"/api/submissions/{body['submission_id']}", headers=auth(teams[0])
+    ).json()["runs"][0]
+    assert run["status"] == "failed", "agent ที่ state รั่วต้องไม่ได้คะแนน"
+    assert "reset()" in run["error"], f"error ต้องบอกวิธีแก้: {run['error']}"
+
+
+def test_private_run_skips_smoke_test(system):
+    """รอบตัดเกรดต้องไม่ตรวจซ้ำ — submission พวกนี้ผ่าน smoke test ตอน public มาแล้ว
+
+    ถ้าตรวจซ้ำแล้วมันล้มด้วยเหตุบังเอิญ (docker สะดุด) final pick ของทีมนั้นจะถูก
+    ปฏิเสธในจังหวะที่แก้ตัวไม่ได้แล้ว
+    """
+    from runners.worker import SMOKE_TESTED_KINDS
+
+    from core.domain import RunKind
+
+    assert RunKind.PRIVATE not in SMOKE_TESTED_KINDS
+    assert RunKind.REJUDGE not in SMOKE_TESTED_KINDS
+    assert SMOKE_TESTED_KINDS == {RunKind.PUBLIC, RunKind.DRYRUN}
+
+
 def test_quota_is_enforced_and_dry_run_is_free(system):
     arena, teams, client, worker = system
     team = teams[0]

@@ -86,6 +86,12 @@ ARENA_SECRETS=/path/to/colosseum-hypogeum python -m core.cli serve --host 127.0.
 cloudflared tunnel run porta-triumphalis
 ```
 
+`--real-seeds` บังคับให้ใช้ Docker sandbox เสมอ — ถ้า image ยังไม่ได้ build มันจะไม่ยอมเริ่ม
+
+```bash
+docker build -t arena/vacuum:cpu -f runners/agent_env/images/Dockerfile.cpu .
+```
+
 ⚠️ **`--host 127.0.0.1` ไม่ใช่ `0.0.0.0`** — ให้เข้าถึงได้ทางเดียวคือผ่าน tunnel
 ถ้า bind กว้างกว่านี้ ใครก็ตามที่อยู่บนเครือข่ายมหาวิทยาลัยจะยิง API ได้ตรงๆ
 โดยข้าม Cloudflare ทั้งหมด ซึ่งทำให้ rate limit และ Access ที่จะใส่ทีหลังไร้ความหมาย

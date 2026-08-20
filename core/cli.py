@@ -317,6 +317,53 @@ def cmd_leaderboard(args) -> int:
     return 0
 
 
+def _pick_launcher(args, DockerLauncher, SubprocessLauncher):
+    """เลือกตัวรัน agent — คืน `(launcher, คำอธิบาย)` หรือ `(None, _)` ถ้าต้องหยุด
+
+    `--sandbox auto` (ค่าเริ่มต้น) ใช้ Docker ถ้ามี image พร้อม ไม่งั้นถอยไปใช้ subprocess
+    พร้อมเตือนดังๆ — เพราะการพัฒนาบนเครื่องที่ยังไม่ได้ build image ต้องทำได้
+
+    ⚠️ **`--real-seeds` บังคับ Docker** — ถ้ากำลังให้คะแนนจริงด้วย seed จริง แปลว่า
+    โค้ดที่รันคือของนิสิต และมันต้องอยู่ใน container ที่ไม่มีเน็ต ไม่ใช่ root
+    เขียน rootfs ไม่ได้ ([README §4.1](../README.md)) การถอยไปใช้ subprocess เงียบๆ
+    ในโหมดนั้นคือการรันโค้ดที่ไม่ไว้ใจบนเครื่องที่มีเฉลยอยู่
+    """
+    want = args.sandbox
+    ready = DockerLauncher.available()
+
+    if want == "subprocess":
+        if args.real_seeds:
+            print(
+                "✗ --sandbox subprocess ใช้กับ --real-seeds ไม่ได้\n"
+                "  โหมดนั้นรันโค้ดของนิสิตด้วย seed จริงบนเครื่องที่มีเฉลยอยู่\n"
+                "  โค้ดนั้นต้องอยู่ใน container — build image ก่อนด้วย\n"
+                "  docker build -t arena/vacuum:cpu -f runners/agent_env/images/Dockerfile.cpu .",
+                file=sys.stderr,
+            )
+            return None, ""
+        return SubprocessLauncher(), "subprocess ⚠️ ไม่มี container ห่อ — dev เท่านั้น"
+
+    if want == "docker" or args.real_seeds:
+        if not ready:
+            print(
+                "✗ ต้องใช้ Docker sandbox แต่ยังไม่พร้อม\n"
+                "  ตรวจว่า docker daemon รันอยู่ และมี image arena/vacuum:cpu\n"
+                "  docker build -t arena/vacuum:cpu -f runners/agent_env/images/Dockerfile.cpu .",
+                file=sys.stderr,
+            )
+            return None, ""
+        return DockerLauncher(), "docker · network none · non-root · read-only rootfs"
+
+    if ready:
+        return DockerLauncher(), "docker (auto) · network none · non-root · read-only rootfs"
+    print(
+        "⚠️ ไม่พบ image arena/vacuum:cpu — ถอยไปใช้ subprocess\n"
+        "   โค้ดของนิสิตจะรันโดยไม่มี container ห่อ ห้ามใช้แบบนี้กับของจริง",
+        file=sys.stderr,
+    )
+    return SubprocessLauncher(), "subprocess (auto fallback) ⚠️ ไม่มี container ห่อ"
+
+
 def cmd_serve(args) -> int:
     """รัน API + worker ในกระบวนการเดียว — **สำหรับ dev เท่านั้น**"""
     import threading
@@ -325,9 +372,14 @@ def cmd_serve(args) -> int:
 
     from core.api import create_app
     from core.wiring import CP463_VACUUM_LADDER, demo_arena
+    from runners.agent_env.launcher import DockerLauncher, SubprocessLauncher
     from runners.worker import Worker
 
     root = Path(args.data).resolve()
+
+    launcher, sandbox_note = _pick_launcher(args, DockerLauncher, SubprocessLauncher)
+    if launcher is None:
+        return 1
     db_path = None if args.ephemeral else root / "arena.db"
     arena, teams = demo_arena(root / "artifacts", teams=args.teams, db_path=db_path)
     worker = Worker(
@@ -336,11 +388,13 @@ def cmd_serve(args) -> int:
         queue=arena.queue,
         artifacts=arena.artifacts,
         workdir=root / "work",
+        launcher=launcher,
         allow_seed_fallback=not args.real_seeds,
     )
     threading.Thread(target=worker.serve_forever, daemon=True).start()
 
     print(f"โทเคนของทีม: {', '.join(t.id for t in teams)}")
+    print(f"sandbox    : {sandbox_note}")
     if db_path is None:
         print("⚠️ --ephemeral — ข้อมูลหายเมื่อปิด process")
     else:
@@ -418,6 +472,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--data", default=".arena-dev")
     p.add_argument("--teams", type=int, default=3)
+    p.add_argument(
+        "--sandbox",
+        choices=("auto", "docker", "subprocess"),
+        default="auto",
+        help="ตัวรัน agent · auto = ใช้ docker ถ้ามี image พร้อม · --real-seeds บังคับ docker",
+    )
     p.add_argument(
         "--ephemeral",
         action="store_true",
