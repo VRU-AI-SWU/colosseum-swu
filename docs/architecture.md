@@ -203,7 +203,7 @@ colosseum-swu/                    (สาธารณะ)
 │   ├── worker.py     หยิบงาน · โหลด seed · รายงานผล
 │   └── agent_env/    protocol · launcher · sandbox
 ├── envs/          โจทย์ · หนึ่งโฟลเดอร์ต่อหนึ่ง competition
-├── deploy/        cloudflared
+├── deploy/        ติดตั้งเครื่อง runner ตั้งแต่ศูนย์ · systemd · cloudflared
 └── docs/          เอกสารนี้ · สเปคของโจทย์ · task template
 
 colosseum-hypogeum/               (ส่วนตัว · clone เฉพาะเครื่อง GPU)

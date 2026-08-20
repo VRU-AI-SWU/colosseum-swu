@@ -1,0 +1,52 @@
+# Arena — API + worker (process เดียว ดู docs/architecture.md §1)
+#
+#   sudo cp deploy/systemd/arena-api.service /etc/systemd/system/
+#   sudo systemctl enable --now arena-api
+#
+# แก้ User= ให้ตรงกับผู้ใช้ที่อยู่ในกลุ่ม docker และเป็นเจ้าของ /srv/arena
+
+[Unit]
+Description=Arena API + worker (Colosseum)
+# ต้องรอ docker ให้พร้อมก่อน ไม่งั้น --real-seeds จะไม่ยอมเริ่มเพราะหา image ไม่เจอ
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=arena
+WorkingDirectory=/srv/arena/app
+
+# seed อยู่ที่นี่ที่เดียว — ไม่มีสำเนาบน cloud (README §10.4)
+Environment=ARENA_SECRETS=/srv/arena/secrets
+
+# --host 127.0.0.1 ไม่ใช่ 0.0.0.0 โดยตั้งใจ: ทางเข้าเดียวคือผ่าน tunnel
+# ถ้า bind กว้างกว่านี้ ใครที่อยู่บนเครือข่ายมหาวิทยาลัยจะยิง API ได้ตรงๆ
+# โดยข้าม Cloudflare ทั้งหมด ทำให้ rate limit และ Access ที่จะใส่ทีหลังไร้ความหมาย
+#
+# ไม่ต้องใส่ --sandbox เพราะ --real-seeds บังคับ Docker อยู่แล้ว
+ExecStart=/srv/arena/app/.venv/bin/python -m core.cli serve \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --data /srv/arena/data \
+    --real-seeds \
+    --allow-origin https://colosseum.vru-ai.com
+
+Restart=always
+RestartSec=5
+# ให้ worker รันงานที่ค้างอยู่จนจบก่อนตาย — งานหนึ่งใช้เวลาไม่ถึงนาที
+KillSignal=SIGTERM
+TimeoutStopSec=120
+
+# ลดผลกระทบถ้าวันหนึ่งมีช่องโหว่ในตัว API เอง
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/srv/arena/data
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
