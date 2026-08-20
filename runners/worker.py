@@ -150,16 +150,20 @@ class Worker:
             return
 
         summary = result.summary
+        # ⚠️ **ห้ามส่งค่า seed ข้ามเส้นนี้** — สิ่งที่ report ไปจะไปโผล่ที่ API แล้วถึงมือนิสิต
+        # README §10.4 จัดค่า public seed เป็นความลับรองจาก private: รู้แล้ว overfit ได้
+        # ทำให้ feedback ระหว่างเทอมเสียคุณค่ากับทุกคน · นิสิตต้องการแค่ "ตอนไหนพัง"
+        # ซึ่งเลขลำดับตอบได้เท่ากัน และลำดับคงที่เพราะ seed ถูกรันตามลำดับใน seeds.yaml
         episodes = [
             {
-                "seed": e.seed,
+                "episode": i,
                 "score": e.breakdown.score,
                 "status": e.status,
                 "coverage": getattr(e.breakdown, "coverage", None),
                 "t_end": getattr(e.breakdown, "t_end", None),
                 "replay_bytes": e.replay_bytes,
             }
-            for e in result.episodes
+            for i, e in enumerate(result.episodes, 1)
         ]
         self.queue.report(
             run.id,

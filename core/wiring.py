@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import json
+
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -27,14 +29,36 @@ def agent_env_validator(archive_url: str, whitelist: frozenset[str]):
 
 VALIDATORS = {"agent_env": agent_env_validator}
 
-#: หมุด baseline ที่วัดจริงแล้ว — README §6.2 บอกว่าต้อง **ตรึงไว้ทั้งเทอม**
-#: ค่าชุดนี้มาจากชุด conformance · ค่าที่ใช้ตัดสินเกรดต้องรันบน public seeds อีกครั้ง
-CP463_VACUUM_LADDER = [
-    BaselineMark("bronze", "🥉 Bronze", 0.243796, "sha256:f58cc4e51a1e4f8"),
-    BaselineMark("silver", "🥈 Silver", 0.810008, "sha256:f58cc4e51a1e4f8"),
-    BaselineMark("gold", "🥇 Gold", 1.716052, "sha256:f58cc4e51a1e4f8"),
-    BaselineMark("diamond", "💎 Diamond", 1.803565, "sha256:f58cc4e51a1e4f8"),
-]
+PIN_DIR = REPO / "core" / "baseline_pins"
+
+LABELS = {
+    "bronze": "🥉 Bronze",
+    "silver": "🥈 Silver",
+    "gold": "🥇 Gold",
+    "diamond": "💎 Diamond",
+}
+
+
+def baseline_ladder(slug: str, phase: str) -> list[BaselineMark]:
+    """หมุด baseline ของ phase หนึ่ง — อ่านจากไฟล์ที่ `tools/pin_baselines.py` ตรึงไว้
+
+    ค่าเหล่านี้วัดบน **public seeds ชุดจริง** ซึ่งเป็นชุดเดียวกับที่ให้คะแนนนิสิต
+    จึงเทียบกับ leaderboard ได้ตรงๆ (ค่าชุดเดิมมาจากชุด conformance ซึ่งเทียบไม่ได้)
+
+    README §6.2 สั่งให้ตรึงไว้ทั้งเทอม — การอ่านจากไฟล์แทนการคำนวณสดคือสิ่งที่ทำให้
+    หมุดไม่ขยับ ถ้า environment เปลี่ยนจน `--check` ไม่ผ่าน แปลว่าต้องขึ้น env_version
+    และ rejudge ไม่ใช่แก้ตัวเลขในไฟล์เฉยๆ
+    """
+    data = json.loads((PIN_DIR / f"{slug}.json").read_text(encoding="utf-8"))
+    entry = data["phases"][phase]
+    return [
+        BaselineMark(level, LABELS[level], values["score"], entry["config_hash"])
+        for level, values in entry["levels"].items()
+    ]
+
+
+#: ladder ของ phase ที่กำลังแข่ง — README §6.2 บอกว่าต้อง **ตรึงไว้ทั้งเทอม**
+CP463_VACUUM_LADDER = baseline_ladder("cp463-vacuum-1-2026", "main")
 
 
 def demo_arena(root: Path, *, teams: int = 3) -> tuple[Arena, list[Team]]:

@@ -1,0 +1,167 @@
+{
+  "competition": "cp463-vacuum-1-2026",
+  "env_version": "1.0.0",
+  "seed_set": "public",
+  "bootstrap": {
+    "n": 5000,
+    "seed": 12345,
+    "paired": true
+  },
+  "note": "คะแนนบน public seeds ชุดจริง — ตรึงทั้งเทอม (README §6.2) ไฟล์นี้ไม่มีค่า seed มีแต่คะแนน จึงอยู่ใน repo สาธารณะได้ (README §10.4)",
+  "phases": {
+    "warmup": {
+      "config_hash": "sha256:08559dc77c2a3dc598b3f87e7442db513fea66e6949b45604e778ed01328eb7b",
+      "levels": {
+        "bronze": {
+          "score": 0.129817,
+          "n_completed": 0,
+          "n_seeds": 30
+        },
+        "silver": {
+          "score": 0.784345,
+          "n_completed": 7,
+          "n_seeds": 30
+        },
+        "gold": {
+          "score": 1.751723,
+          "n_completed": 30,
+          "n_seeds": 30
+        },
+        "diamond": {
+          "score": 1.751723,
+          "n_completed": 30,
+          "n_seeds": 30
+        }
+      },
+      "gaps": {
+        "bronze->silver": {
+          "gap": 0.654529,
+          "ci95": [
+            0.46752,
+            0.864382
+          ],
+          "separable": true
+        },
+        "silver->gold": {
+          "gap": 0.967377,
+          "ci95": [
+            0.75668,
+            1.156184
+          ],
+          "separable": true
+        },
+        "gold->diamond": {
+          "gap": 0.0,
+          "ci95": [
+            0.0,
+            0.0
+          ],
+          "separable": false,
+          "identical_by_design": true
+        }
+      }
+    },
+    "main": {
+      "config_hash": "sha256:f58cc4e51a1e4f828c792e61631189ea8a37380713af7f5821a6aad2ff82e4a5",
+      "levels": {
+        "bronze": {
+          "score": 0.273189,
+          "n_completed": 0,
+          "n_seeds": 30
+        },
+        "silver": {
+          "score": 0.740675,
+          "n_completed": 2,
+          "n_seeds": 30
+        },
+        "gold": {
+          "score": 1.547276,
+          "n_completed": 23,
+          "n_seeds": 30
+        },
+        "diamond": {
+          "score": 1.809521,
+          "n_completed": 30,
+          "n_seeds": 30
+        }
+      },
+      "gaps": {
+        "bronze->silver": {
+          "gap": 0.467487,
+          "ci95": [
+            0.382233,
+            0.584209
+          ],
+          "separable": true
+        },
+        "silver->gold": {
+          "gap": 0.806601,
+          "ci95": [
+            0.628793,
+            0.967298
+          ],
+          "separable": true
+        },
+        "gold->diamond": {
+          "gap": 0.262245,
+          "ci95": [
+            0.126528,
+            0.428843
+          ],
+          "separable": true
+        }
+      }
+    },
+    "final": {
+      "config_hash": "sha256:7cd2c555fbeb003e0f2853e043576fc7a16c2d9dcfb8a12e7028a10d828cb49f",
+      "levels": {
+        "bronze": {
+          "score": 0.143747,
+          "n_completed": 0,
+          "n_seeds": 30
+        },
+        "silver": {
+          "score": 0.558592,
+          "n_completed": 0,
+          "n_seeds": 30
+        },
+        "gold": {
+          "score": 1.095123,
+          "n_completed": 10,
+          "n_seeds": 30
+        },
+        "diamond": {
+          "score": 1.724731,
+          "n_completed": 28,
+          "n_seeds": 30
+        }
+      },
+      "gaps": {
+        "bronze->silver": {
+          "gap": 0.414846,
+          "ci95": [
+            0.377192,
+            0.452143
+          ],
+          "separable": true
+        },
+        "silver->gold": {
+          "gap": 0.536531,
+          "ci95": [
+            0.367051,
+            0.714448
+          ],
+          "separable": true
+        },
+        "gold->diamond": {
+          "gap": 0.629608,
+          "ci95": [
+            0.396188,
+            0.830244
+          ],
+          "separable": true
+        }
+      }
+    }
+  }
+}

@@ -120,9 +120,39 @@ def test_episodes_and_replays_are_available(system):
     assert len(episodes["episodes"]) == 10
     assert all(e["status"] == "ok" for e in episodes["episodes"])
     assert all(e["replay_bytes"] > 0 for e in episodes["episodes"])
+    assert [e["episode"] for e in episodes["episodes"]] == list(range(1, 11))
 
     replays = list((arena.artifacts.replay_path(run_id)).glob("*.vrp"))
     assert len(replays) == 10
+
+
+def test_api_never_reveals_seed_values(system):
+    """ค่า seed ต้องไม่เดินทางข้ามเส้น worker → API → นิสิต
+
+    README §10.4 จัดค่า public seed เป็นความลับรองจาก private เพราะรู้แล้ว overfit ได้
+    เดิม worker ใส่ `"seed": e.seed` ลง metrics ทำให้ค่าจริงโผล่ทั้งใน leaderboard
+    และ endpoint รายตอน — พบตอน dry-run เต็มระบบ ไม่ใช่ตอนรีวิวโค้ด
+    """
+    from runners.seeds import FALLBACK_SEEDS
+
+    arena, teams, client, worker = system
+    body = submit(client, teams[0], STRATEGY_AGENT).json()
+    worker.run_once()
+    run_id = client.get(
+        f"/api/submissions/{body['submission_id']}", headers=auth(teams[0])
+    ).json()["runs"][0]["id"]
+
+    surfaces = [
+        client.get(f"/api/runs/{run_id}/episodes", headers=auth(teams[0])).text,
+        client.get(f"/api/submissions/{body['submission_id']}", headers=auth(teams[0])).text,
+        client.get(
+            f"/api/competitions/{SLUG}/leaderboard", headers=auth(teams[0])
+        ).text,
+    ]
+    for payload in surfaces:
+        assert '"seed"' not in payload
+        leaked = [s for s in FALLBACK_SEEDS if str(s) in payload]
+        assert not leaked, f"ค่า seed หลุดออกทาง API: {leaked[:3]}"
 
 
 def test_leaderboard_ranks_teams_and_shows_next_target(system):

@@ -776,7 +776,7 @@ python examples/calibrate.py     # การทดลอง §15
 
 | ก้อน | สถานะ |
 |---|---|
-| [`envs/cp463-vacuum`](envs/cp463-vacuum/) | ✅ v1.0.0 · conformance test 31 ข้อผ่าน · calibrate แล้ว ([รายงาน](docs/competitions/CP463/1-2026/vacuum-robot/calibration-2026-08.md)) |
+| [`envs/cp463-vacuum`](envs/cp463-vacuum/) | ✅ v1.0.0 · conformance test 32 ข้อผ่าน · calibrate แล้ว ([รายงาน](docs/competitions/CP463/1-2026/vacuum-robot/calibration-2026-08.md)) · หมุด baseline ตรึงบน public seeds แล้ว ([`core/baseline_pins/`](core/baseline_pins/)) |
 | [`runners/`](runners/) | ✅ โปรโตคอลแยก process · Docker sandbox · submission validation · worker daemon |
 | [`core/`](core/) | 🟡 domain · คิว fair-share · leaderboard · REST API · CLI — **ยังเก็บข้อมูลในหน่วยความจำ** |
 | `web/` | ⬜ ยังไม่เริ่ม |

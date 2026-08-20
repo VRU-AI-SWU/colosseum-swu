@@ -874,7 +874,7 @@ hardware-independent scoring ทำให้การคิดใหม่ทุ
 | `max_steps` ทั้ง 3 phase | ✅ ตรึงแล้ว (250 / 1500 / 3000) |
 | `action_noise` · `sticky_dirt` | ✅ ตรึงแล้ว (0 / 0.10 / 0.15) — เก็บไว้เพราะไม่เสียหาย ไม่ใช่เพราะมันทำหน้าที่ตามที่ออกแบบ |
 | `obstacle_density` ของ Final | ✅ คงเดิม 0.22 — ไม่พบว่าเป็นตัวคุมความยาก |
-| คะแนน golden ของ baseline | ⚠️ generate แล้วบน **ชุด conformance (70001+)** สำหรับ test #11 · ยัง**ไม่ได้**รันบน public seeds ซึ่งเป็นค่าที่ไปเป็น threshold เกรด |
+| คะแนน golden ของ baseline | ✅ **ตรึงแล้วทั้งสองชุด** — ชุด conformance (70001+) สำหรับ test #11 · public seeds สำหรับหมุดบน leaderboard ([`core/baseline_pins/`](../../../../../core/baseline_pins/)) |
 
 ### รอบต่อไปต้องทำอะไร
 
@@ -883,4 +883,9 @@ hardware-independent scoring ทำให้การคิดใหม่ทุ
    (ทางเลือก C+D ของ [template §5](../../../../task-templates/agent-vs-environment-rl.md#5-ปัญหาที่ต้องตัดสินใจ-planning-ชนะ-learning))
    แล้วประกาศให้ชัดตั้งแต่วันแรกว่า planner ก็ได้คะแนนเต็มส่วน leaderboard
 2. **ตัดสินว่า Gold คือ planner ที่ไร้เดียงสาเรื่อง noise หรือไม่** — กระทบเส้นแบ่งเกรดโดยตรง
-3. รัน baseline ทั้งชุดบน **public seeds** แล้วตรึงค่าเป็น threshold เกรด
+3. ~~รัน baseline ทั้งชุดบน **public seeds** แล้วตรึงค่าเป็น threshold เกรด~~
+   ✅ **เสร็จแล้ว (ส.ค. 2026)** — `python tools/pin_baselines.py` · ทุกช่องว่างแยกกันได้ทางสถิติ
+   ระหว่างทางพบว่า `config_hash` ของ Final ที่บันทึกใน `seeds.yaml` ไม่ตรงกับ config ปัจจุบัน
+   (seed ถูก generate ตอน `sensor_noise: 0.01` แล้ว config ขยับเป็น 0.02 ในรอบ calibrate ที่ 2
+   โดยไม่ได้ generate seed ใหม่) — ค่า seed ไม่เปลี่ยนเพราะผังห้องไม่ขึ้นกับ `sensor_noise`
+   แต่สถิติความยากที่บันทึกไว้เป็นของเก่า จึง generate ใหม่ทั้งไฟล์ด้วย master seed เดิม

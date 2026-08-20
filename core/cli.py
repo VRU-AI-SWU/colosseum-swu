@@ -335,12 +335,20 @@ def cmd_serve(args) -> int:
         queue=arena.queue,
         artifacts=arena.artifacts,
         workdir=root / "work",
-        allow_seed_fallback=True,
+        allow_seed_fallback=not args.real_seeds,
     )
     threading.Thread(target=worker.serve_forever, daemon=True).start()
 
     print(f"โทเคนของทีม: {', '.join(t.id for t in teams)}")
-    print(f"⚠️ โหมด dev — ข้อมูลอยู่ในหน่วยความจำ และใช้ seed สำรองที่ไม่ใช่ของจริง")
+    if args.real_seeds:
+        from runners.seeds import secrets_root
+
+        if secrets_root() is None:
+            print("✗ --real-seeds ต้องตั้ง ARENA_SECRETS ให้ชี้ไปที่ clone ของ colosseum-hypogeum")
+            return 1
+        print("⚠️ โหมด dev (ข้อมูลอยู่ในหน่วยความจำ) แต่ใช้ **seed ชุดจริง** — คะแนนเทียบ leaderboard ได้")
+    else:
+        print(f"⚠️ โหมด dev — ข้อมูลอยู่ในหน่วยความจำ และใช้ seed สำรองที่ไม่ใช่ของจริง")
     uvicorn.run(
         create_app(arena, baselines={"cp463-vacuum-1-2026": CP463_VACUUM_LADDER}),
         host=args.host,
@@ -395,6 +403,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--data", default=".arena-dev")
     p.add_argument("--teams", type=int, default=3)
+    p.add_argument(
+        "--real-seeds",
+        action="store_true",
+        help="ใช้ seed ชุดจริงจาก ARENA_SECRETS แทน seed สำรอง — คะแนนที่ได้เทียบ leaderboard ได้",
+    )
     p.set_defaults(func=cmd_serve)
 
     args = parser.parse_args(argv)
