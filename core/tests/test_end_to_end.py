@@ -143,16 +143,31 @@ def test_api_never_reveals_seed_values(system):
     ).json()["runs"][0]["id"]
 
     surfaces = [
-        client.get(f"/api/runs/{run_id}/episodes", headers=auth(teams[0])).text,
-        client.get(f"/api/submissions/{body['submission_id']}", headers=auth(teams[0])).text,
-        client.get(
-            f"/api/competitions/{SLUG}/leaderboard", headers=auth(teams[0])
-        ).text,
+        client.get(f"/api/runs/{run_id}/episodes", headers=auth(teams[0])).json(),
+        client.get(f"/api/submissions/{body['submission_id']}", headers=auth(teams[0])).json(),
+        client.get(f"/api/competitions/{SLUG}/leaderboard", headers=auth(teams[0])).json(),
     ]
+
+    def walk(node, path="$"):
+        """เดินทีละ key/value — **ห้ามใช้ substring บน JSON ทั้งก้อน**
+
+        รุ่นแรกของเทสต์นี้เช็ค `str(seed) in payload` ซึ่ง flaky ~5% ต่อการรัน
+        เพราะ payload เต็มไปด้วยคะแนนทศนิยมยาวอย่าง 0.7406754781040912
+        ลำดับเลข 5 ตัวของ seed ไปโผล่ในนั้นโดยบังเอิญได้เรื่อยๆ
+        """
+        if isinstance(node, dict):
+            for key, value in node.items():
+                assert key != "seed", f"{path}: ยังมีคีย์ 'seed' อยู่"
+                walk(value, f"{path}.{key}")
+        elif isinstance(node, list):
+            for i, value in enumerate(node):
+                walk(value, f"{path}[{i}]")
+        elif isinstance(node, int) and not isinstance(node, bool):
+            assert node not in seeds, f"{path}: ค่า seed ({node}) หลุดออกทาง API"
+
+    seeds = set(FALLBACK_SEEDS)
     for payload in surfaces:
-        assert '"seed"' not in payload
-        leaked = [s for s in FALLBACK_SEEDS if str(s) in payload]
-        assert not leaked, f"ค่า seed หลุดออกทาง API: {leaked[:3]}"
+        walk(payload)
 
 
 def test_cors_allows_only_the_configured_web_origin(system, tmp_path):

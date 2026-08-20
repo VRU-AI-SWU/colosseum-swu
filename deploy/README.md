@@ -128,8 +128,12 @@ git clone git@github.com:VRU-AI-SWU/colosseum-hypogeum.git secrets && chmod 700 
 `DockerLauncher` mount เฉพาะโฟลเดอร์ submission เข้าไปแบบ read-only เท่านั้น
 
 ```bash
-cd $ARENA/app && uv venv --python 3.11 && uv pip install -e envs/cp463-vacuum -e .
+cd $ARENA/app && uv venv --python 3.11 && uv pip install -e envs/cp463-vacuum -e ".[api,cli,dev]"
 ```
+
+`[api]` เป็นสิ่งที่ขาดไม่ได้ — `fastapi` กับ `uvicorn` อยู่ใน extra ตัวนั้น
+ลืมแล้ว `arena serve` จะพังตอนสตาร์ทด้วย `ModuleNotFoundError` · `[dev]` ให้ pytest
+สำหรับขั้นตรวจข้างล่าง · `[cli]` ให้ httpx ไว้ยิง API จากเครื่องเดียวกัน
 
 ยืนยันว่าได้ 3.11 จริง — ข้อนี้พลาดแล้วเงียบ
 
