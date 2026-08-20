@@ -4,19 +4,25 @@
 ([README §10.4](../README.md#104-ขอบเขตความไว้วางใจ-trust-boundaries))
 
 ```
-SSD ของระบบ                              HDD "colosseum"
-~/VRU-AI/projects/colosseum/             $HDD/
-├── app/       โค้ดแพลตฟอร์ม               ├── artifacts/   zip ของนิสิต + replay
-├── secrets/   🔒 hypogeum                │   ├── submissions/
-├── data/      arena.db (+ -wal)         │   └── replays/
-└── app/.venv/ ~64 MB                    └── work/        แตก zip ชั่วคราว
+SSD ของระบบ                          HDD "colosseum" — ที่สำรองอย่างเดียว
+~/VRU-AI/projects/colosseum/         $HDD/backup/
+├── app/       โค้ด + .venv           ├── db/        สำเนา arena.db ย้อนหลัง 14 วัน
+├── secrets/   🔒 hypogeum            └── artifacts/ mirror ของ artifacts
+├── data/      arena.db (+ -wal)
+└── data/artifacts/  zip + replay
 ```
 
-เกณฑ์ที่ใช้แบ่ง: **เล็ก+เขียนบ่อย อยู่ SSD · ใหญ่+เขียนครั้งเดียว อยู่ HDD**
-`arena.db` ถูกเขียนทุกครั้งที่สถานะงานเปลี่ยน แต่ทั้งไฟล์เล็กมาก ส่วน artifacts
-เขียนครั้งเดียวแล้วแทบไม่อ่านอีก จนกว่าจะมีคนขอดู replay
+**ระบบทั้งหมดอยู่บน SSD · HDD เป็นที่สำรองอย่างเดียว**
 
-### ⚠️ ตัวกินพื้นที่ที่ใหญ่ที่สุดไม่ได้อยู่ใน `--data`
+เหตุผลที่ไม่ย้ายของร้อนไป HDD: ความเสี่ยงที่ใหญ่กว่า "พื้นที่จะเต็ม" คือ **ตอนนี้
+ไม่มีสำเนาอะไรเลย** ถ้า SSD พังกลางเทอม คะแนนทั้งเทอม submission ทุกชิ้น และ
+audit trail หายพร้อมกัน กู้ไม่ได้ · ดิสก์ลูกที่สองมีค่ากับเรามากกว่าในฐานะที่สำรอง
+
+ส่วนพื้นที่: artifacts โตช้ากว่าที่กลัว — replay 120 KB ต่อ run และ zip ถูก dedup
+ด้วย sha256 อยู่แล้ว ทั้งเทอมประมาณหลัก GB เดียว ถ้าวันหนึ่งไม่พอจริงค่อยซื้อ SSD
+เพิ่ม หรือย้ายเฉพาะ artifacts ด้วย `--artifacts` ซึ่งรองรับไว้แล้ว
+
+### พื้นที่ — วัดของจริงแล้วเป็นแบบนี้
 
 วัดจากเครื่อง dev ที่ใช้งานมาไม่กี่วัน
 
@@ -32,17 +38,20 @@ SSD ของระบบ                              HDD "colosseum"
 Docker เก็บของไว้ที่ `/var/lib/docker` บน **SSD ของระบบ** ซึ่งอยู่นอกการแบ่งที่วางไว้
 และมันโตทุกครั้งที่ `docker build` — ถ้าไม่จัดการ มันจะเต็มก่อน artifacts หลายเท่า
 
-ทางแก้ที่ตรงจุดที่สุดคือย้าย Docker ไปอยู่บน HDD ด้วย
+**แต่ 11.3 GB ในนั้นเป็น build cache ซึ่งเป็นขยะสะสม ไม่ใช่สภาพนิ่ง** — เครื่องนี้
+build ซ้ำหลายรอบตอนพัฒนา image ส่วนเครื่อง production build ราว 2–3 ครั้งทั้งเทอม
+สภาพนิ่งจริงคือ base image + `arena/vacuum:cpu` ≈ 1–2 GB
 
-```bash
-sudo mkdir -p $HDD/docker && echo '{"data-root": "'$HDD'/docker"}' | sudo tee /etc/docker/daemon.json && sudo systemctl restart docker
-```
-
-ถ้าไม่อยากย้าย อย่างน้อยต้องล้าง cache หลัง build ทุกครั้ง
+ทางแก้จึงเป็นบรรทัดเดียว ไม่ต้องย้าย Docker ไปไหน
 
 ```bash
 docker builder prune -af
 ```
+
+**ตั้งใจไม่ย้าย `data-root` ไป HDD** ถึงแม้จะดูตรงจุด — container start ต้องอ่าน
+image layer จากจานหมุน (เราสตาร์ท 4 container ต่อ submission) นิสิตจะรู้สึกว่า
+"ส่งงานแล้วช้า" และถ้า HDD พังกลางเทอม ระบบให้คะแนนหยุดทั้งหมด ไม่ใช่แค่ข้อมูลหาย
+จ่ายแพงกว่าที่ได้มาก เทียบกับ prune ที่แก้ปัญหาเดียวกันด้วยคำสั่งเดียว
 
 > เขียนสำหรับ **Linux Mint** (ฐาน Ubuntu) ซึ่งเป็นเครื่องที่ใช้จริง · เครื่อง dev บน
 > macOS ใช้คำสั่งเดียวกันได้ยกเว้นส่วน systemd กับ `apt`
@@ -92,11 +101,11 @@ sudo usermod -aG docker $USER
 ตั้งตัวแปรสองตัวนี้ก่อน แล้วคำสั่งที่เหลือคัดลอกไปวางได้เลย
 
 ```bash
-export ARENA=~/VRU-AI/projects/colosseum && export HDD=/media/$USER/colosseum
+export ARENA=~/VRU-AI/projects/colosseum && export HDD=/path/to/hdd/colosseum
 ```
 
 ```bash
-mkdir -p $ARENA && cd $ARENA && mkdir -p $HDD/artifacts $HDD/work
+mkdir -p $ARENA && cd $ARENA && mkdir -p $HDD/backup
 ```
 
 ```bash
@@ -184,6 +193,18 @@ sudo cp $ARENA/app/deploy/systemd/arena-api.service /etc/systemd/system/ && sudo
 sudo cloudflared service install && sudo systemctl enable --now cloudflared
 ```
 
+สำรองข้อมูลทุกคืนตี 3 — **แก้ path ในสองไฟล์ให้ตรงกับเครื่องก่อน**
+
+```bash
+sudo cp $ARENA/app/deploy/systemd/arena-backup.{service,timer} /etc/systemd/system/ && sudo systemctl enable --now arena-backup.timer
+```
+
+ทดสอบว่ามันทำงานจริงเลยทันที ไม่ต้องรอถึงตี 3
+
+```bash
+sudo systemctl start arena-backup && journalctl -u arena-backup -n 20 --no-pager
+```
+
 ตรวจว่าทั้งสองขึ้นแล้ว
 
 ```bash
@@ -212,7 +233,9 @@ dd if=/dev/zero of=/tmp/blob.bin bs=1M count=105 && curl -s -o /dev/null -w "%{h
 |---|---|
 | ดู log | `journalctl -u arena-api -f` |
 | อัพเดตโค้ด | `cd $ARENA/app && git pull && sudo systemctl restart arena-api` |
-| สำรองข้อมูล | `$ARENA/data/` (เล็ก · สำคัญที่สุด) **และ** `$HDD/artifacts/` |
+| สำรองข้อมูล | อัตโนมัติทุกคืน · ดูผลด้วย `journalctl -u arena-backup -n 20` |
+| กู้ข้อมูล | หยุดบริการ → คัดลอกสำเนาจาก `$HDD/backup/db/` ทับ `data/arena.db` (ลบ `-wal`/`-shm` เดิมด้วย) → สตาร์ทใหม่ |
+| ล้าง docker cache | `docker builder prune -af` หลัง build ทุกครั้ง |
 | ดูสถานะ tunnel | Cloudflare dashboard → Zero Trust → Networks → Tunnels |
 
 ### เข้าถึงเพื่อดูแลระบบ

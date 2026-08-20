@@ -26,13 +26,12 @@ Environment=ARENA_SECRETS=/home/ratchainant/VRU-AI/projects/colosseum/secrets
 # โดยข้าม Cloudflare ทั้งหมด ทำให้ rate limit และ Access ที่จะใส่ทีหลังไร้ความหมาย
 #
 # ไม่ต้องใส่ --sandbox เพราะ --real-seeds บังคับ Docker อยู่แล้ว
-# --data     เล็ก เขียนบ่อย → SSD
-# --artifacts ใหญ่ เขียนครั้งเดียว → HDD (โฟลเดอร์ work/ ตามไปอยู่ข้างๆ เอง)
+# ทั้ง arena.db และ artifacts อยู่บน SSD — HDD เป็นที่สำรองอย่างเดียว (ดู deploy/README.md)
+# ถ้าวันหนึ่ง SSD ไม่พอ ย้ายเฉพาะ artifacts ได้ด้วย --artifacts /path/to/hdd/artifacts
 ExecStart=/home/ratchainant/VRU-AI/projects/colosseum/app/.venv/bin/python -m core.cli serve \
     --host 127.0.0.1 \
     --port 8000 \
     --data /home/ratchainant/VRU-AI/projects/colosseum/data \
-    --artifacts /media/ratchainant/colosseum/artifacts \
     --real-seeds \
     --allow-origin https://colosseum.vru-ai.com
 
@@ -47,11 +46,10 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 # ProtectHome=read-only ใช้ไม่ได้เพราะทั้งระบบอยู่ใน home — ระบุ path ที่เขียนได้แทน
-ReadWritePaths=/home/ratchainant/VRU-AI/projects/colosseum/data /media/ratchainant/colosseum
+ReadWritePaths=/home/ratchainant/VRU-AI/projects/colosseum/data
 
-# HDD ต้อง mount เสร็จก่อน ไม่งั้น artifacts จะถูกเขียนลง mountpoint ว่างๆ บน SSD
-# แล้วหายไปตอน HDD mount ทับ
-RequiresMountsFor=/media/ratchainant/colosseum
+# ไม่ต้อง RequiresMountsFor เพราะบริการนี้ไม่แตะ HDD เลย — การสำรองแยกไปอยู่ที่
+# arena-backup.service ซึ่งมี RequiresMountsFor ของตัวเอง
 
 StandardOutput=journal
 StandardError=journal
