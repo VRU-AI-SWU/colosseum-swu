@@ -10,22 +10,42 @@
 └── /srv/arena/secrets/    🔒 clone จาก colosseum-hypogeum
 ```
 
-> เอกสารนี้เขียนสำหรับ Linux · เครื่อง dev บน macOS ใช้คำสั่งเดียวกันได้ยกเว้นส่วน
-> systemd กับ `apt` · **ห้ามตั้ง tunnel บนเครื่อง dev** — กุญแจของ tunnel จะกระจาย
-> ไปอยู่หลายเครื่องโดยไม่จำเป็น
+> เขียนสำหรับ **Linux Mint** (ฐาน Ubuntu) ซึ่งเป็นเครื่องที่ใช้จริง · เครื่อง dev บน
+> macOS ใช้คำสั่งเดียวกันได้ยกเว้นส่วน systemd กับ `apt`
+>
+> **ห้ามตั้ง tunnel บนเครื่อง dev** — กุญแจของ tunnel จะกระจายไปอยู่หลายเครื่อง
+> โดยไม่จำเป็น
 
 ---
 
 ## 1. ของที่ต้องมีก่อน
 
 ```bash
-sudo apt update && sudo apt install -y python3.11 python3.11-venv git docker.io
+sudo apt update && sudo apt install -y git docker.io
 ```
 
-`python3.11` เป็น **load-bearing** — [`envs/cp463-vacuum/pyproject.toml`](../envs/cp463-vacuum/pyproject.toml)
-ตรึงไว้ที่ `==3.11.*` คู่กับ `numpy==2.1.*` เพราะ `numpy.random.Generator` ไม่การันตี
-stream ข้ามเวอร์ชัน · เปลี่ยนเวอร์ชันแล้ว **ผังห้องของ seed เดิมจะเปลี่ยน**
-คะแนนทั้งหมดที่เคยประกาศไปจะใช้เทียบไม่ได้
+### ⚠️ Python 3.11 — `apt install python3.11` ใช้ไม่ได้บน Mint
+
+Mint ไม่มี `python3.11` ใน repo มาตรฐาน ไม่ว่ารุ่นไหน
+
+| Mint | ฐาน | python3 ที่ได้ |
+|---|---|---|
+| 21.x | Ubuntu 22.04 | 3.10 |
+| 22.x | Ubuntu 24.04 | 3.12 |
+
+**เวอร์ชันนี้เป็น load-bearing ห้ามใช้ตัวที่ใกล้เคียง** —
+[`pyproject.toml`](../envs/cp463-vacuum/pyproject.toml) ตรึงไว้ที่ `==3.11.*` คู่กับ
+`numpy==2.1.*` เพราะ `numpy.random.Generator` ไม่การันตี stream ข้ามเวอร์ชัน
+ใช้ 3.10 หรือ 3.12 แล้ว **ผังห้องของ seed เดิมจะเปลี่ยน** คะแนนทุกค่าที่ประกาศไปแล้ว
+รวมถึงหมุด baseline จะใช้เทียบไม่ได้ทันที และจะไม่มีอะไรฟ้อง นอกจาก `pin_baselines --check`
+ในข้อ 4
+
+ใช้ `uv` ดึง Python 3.11 มาต่างหาก — ไม่ต้องเพิ่ม PPA และไม่แตะ Python ของระบบ
+(เป็นตัวเดียวกับที่ repo นี้ใช้ build wheel อยู่แล้ว)
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh && uv python install 3.11
+```
 
 ให้ผู้ใช้ที่จะรันบริการเข้ากลุ่ม docker แล้ว login ใหม่
 
@@ -51,7 +71,13 @@ git clone git@github.com:VRU-AI-SWU/colosseum-hypogeum.git secrets && chmod 700 
 `DockerLauncher` mount เฉพาะโฟลเดอร์ submission เข้าไปแบบ read-only เท่านั้น
 
 ```bash
-cd /srv/arena/app && python3.11 -m venv .venv && .venv/bin/pip install -e envs/cp463-vacuum -e .
+cd /srv/arena/app && uv venv --python 3.11 && uv pip install -e envs/cp463-vacuum -e .
+```
+
+ยืนยันว่าได้ 3.11 จริง — ข้อนี้พลาดแล้วเงียบ
+
+```bash
+/srv/arena/app/.venv/bin/python -VV && /srv/arena/app/.venv/bin/python -c "import numpy; print(numpy.__version__)"
 ```
 
 ตรวจว่า environment ตรงกับตอน calibrate
@@ -148,6 +174,20 @@ dd if=/dev/zero of=/tmp/blob.bin bs=1M count=105 && curl -s -o /dev/null -w "%{h
 | อัพเดตโค้ด | `cd /srv/arena/app && git pull && sudo systemctl restart arena-api` |
 | สำรองข้อมูล | คัดลอก `/srv/arena/data/` ทั้งโฟลเดอร์ (มี `arena.db` + `-wal` + artifacts) |
 | ดูสถานะ tunnel | Cloudflare dashboard → Zero Trust → Networks → Tunnels |
+
+### เข้าถึงเพื่อดูแลระบบ
+
+API bind ที่ `127.0.0.1` เท่านั้น ทางเข้าจากภายนอกจึงมีทางเดียวคือ tunnel
+เวลาผู้สอนต้องการยิง API ตรงๆ (เช่นสั่ง private run ตอนตัดเกรด) ให้ทำ port forward
+ผ่าน Tailscale แทนการเปิด bind ให้กว้างขึ้น
+
+```bash
+ssh -L 8000:127.0.0.1:8000 gpu-linux-server
+```
+
+**อย่าเปลี่ยนไป bind ที่ IP ของ tailnet** ถึงแม้จะดูสะดวกกว่า — ทุกอุปกรณ์ใน tailnet
+จะยิง API ได้โดยข้าม Cloudflare ทั้งหมด ทำให้ rate limit และ Access ที่จะใส่ทีหลัง
+ไม่มีความหมาย และเป็นทางเข้าที่ไม่มีใครจำได้ว่ามีอยู่
 
 ⚠️ **สำรอง `arena.db-wal` ไปด้วยเสมอ** — คัดลอกแค่ `arena.db` ตอนที่บริการกำลังรัน
 จะได้ไฟล์ที่ข้อมูลไม่ครบ เพราะ transaction ล่าสุดยังอยู่ใน WAL
