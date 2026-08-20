@@ -391,6 +391,30 @@ class Predictor:
 
 **ground truth และ private seeds อยู่ที่ on-prem เท่านั้น** ไม่ต้องอัพขึ้น cloud → ลดความเสี่ยงข้อมูลรั่ว
 
+#### วัดจริงแล้ว: `cloudflared` ทำงานได้บนเครือข่ายมหาวิทยาลัย (ส.ค. 2026)
+
+ข้อกังวลคือมหาวิทยาลัยทำ TLS interception — ตอน build Docker image เคยได้ cert
+`*.swu.ac.th` แทนของจริงจาก `registry-1.docker.io` จนต้องปิด buildkit ถ้าเกิดแบบเดียวกัน
+กับ tunnel แผนทั้งหมดต้องเปลี่ยนรูป **ผลคือไม่เกิด**
+
+| สิ่งที่วัด | ผล |
+|---|---|
+| cert ที่ `region1.v2.argotunnel.com:7844` | ออกโดย CloudFlare, Inc. — **ไม่ถูกสวม** |
+| โปรโตคอลที่ใช้จริง | **QUIC** (UDP 7844) ไม่ต้อง fallback · edge ที่ `bkk06` / `sin07` |
+| latency ที่เพิ่มจาก tunnel | ~70–90 ms |
+| อัพโหลด multipart | 105 MB ผ่านใน 4.7 วินาที |
+| request ที่ใช้เวลานาน | 110 วินาทีผ่าน ไม่โดนตัด |
+| WebSocket | ต่อได้ใน 0.86 วินาที · ถือสาย 35 heartbeat ไม่หลุด |
+
+**เหตุผลที่ TLS interception ไม่กระทบ**: proxy ของมหาวิทยาลัยดักที่พอร์ต 443 ซึ่งเป็น
+ทางของ HTTP ส่วน cloudflared คุยกับ edge ผ่าน **UDP 7844** เป็นทางหลัก ซึ่ง proxy
+แบบ HTTP ไม่แตะเลย — และถึงจะถูกบังคับให้ fallback มาที่ TCP 7844 พอร์ตนั้นก็ไม่ถูกดักเช่นกัน
+
+⚠️ **ตัวเลขข้างบนมาจาก quick tunnel (`trycloudflare.com`) ไม่ใช่ named tunnel บนโดเมนจริง**
+เพดานที่ Cloudflare ประกาศไว้สำหรับ zone แผน Free คือ request body 100 MB และ origin
+timeout 100 วินาที (error 524) ซึ่ง quick tunnel ไม่ได้บังคับ — **ต้องวัดซ้ำหลังตั้ง named
+tunnel บน `vru-ai.com`** ก่อนตัดสินใจว่าจะให้นิสิตอัพโหลดไฟล์ได้ใหญ่แค่ไหน
+
 ### 10.2 Job Lifecycle
 
 ```
