@@ -1,0 +1,30 @@
+// Colosseum — หน้า leaderboard (Worker ที่เสิร์ฟ static asset อย่างเดียว)
+//
+//   npx wrangler deploy          deploy ขึ้น production
+//   npx wrangler versions upload อัพโหลดเวอร์ชันทดสอบโดยไม่แตะ production
+//
+// ทำแบบเดียวกับ vru-ai-web ที่เสิร์ฟเว็บแล็บอยู่แล้ว — สอดคล้องกันและเป็นทางที่
+// Cloudflare ผลักเป็นหลักแทน Pages
+//
+// **ไม่มี `main`** จึงไม่มีโค้ด Worker ทำงานเลย ทุก request ถูกเสิร์ฟจาก ./web ตรงๆ
+// ไม่มีอะไรให้เขียนผิดและไม่มีค่าใช้จ่ายต่อ request
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "colosseum",
+  "compatibility_date": "2026-08-20",
+  "assets": {
+    // ชี้ที่ ./web ไม่ใช่ ./ เพื่อไม่ให้ซอร์สโค้ดทั้ง repo ถูกอัพขึ้นไป
+    "directory": "./web",
+    // หน้าเดียวจบ — path ที่ไม่มีไฟล์ตรงกันให้คืน index.html แทน 404
+    // ที่อ่านไม่รู้เรื่องสำหรับนิสิตที่พิมพ์ URL ผิด
+    "not_found_handling": "single-page-application"
+  },
+  // ผูกโดเมนจริงจากไฟล์นี้ ไม่ใช่กดใน dashboard — จะได้เห็นจากในโค้ดว่า
+  // อะไรชี้มาที่นี่ และ deploy ครั้งถัดไปไม่ทำให้หลุด
+  "routes": [
+    { "pattern": "colosseum.vru-ai.com", "custom_domain": true }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

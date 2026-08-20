@@ -26,21 +26,22 @@ python3 -m http.server 4321 --directory web --bind 127.0.0.1
 
 แล้วเปิด <http://localhost:4321> ใส่โทเคน `team-1`
 
-## deploy ขึ้น Cloudflare Pages
+## deploy
 
-ตั้ง project ให้ชี้มาที่โฟลเดอร์นี้ — ไม่ต้องใส่คำสั่ง build
-
-| ตั้งค่า | ค่า |
-|---|---|
-| Build command | (เว้นว่าง) |
-| Build output directory | `web` |
-| Custom domain | `colosseum.vru-ai.com` |
-
-จากนั้นฝั่ง API ต้องอนุญาต origin นั้น — แก้คำสั่ง `arena serve` บนเครื่อง GPU เป็น
+เป็น **Worker ที่เสิร์ฟ static asset อย่างเดียว** ไม่ใช่ Pages — แบบเดียวกับ `vru-ai-web`
+ที่เสิร์ฟเว็บแล็บอยู่แล้ว ตั้งค่าทั้งหมดอยู่ใน [`wrangler.jsonc`](../wrangler.jsonc) ที่ราก repo
+รวมถึงการผูกโดเมน จึงเห็นจากในโค้ดได้ว่าอะไรชี้มาที่นี่
 
 ```bash
---allow-origin https://colosseum.vru-ai.com
+npx wrangler deploy
 ```
+
+ขึ้น <https://colosseum.vru-ai.com> · ฝั่ง API อนุญาต origin นี้ไว้แล้วใน
+[`deploy/systemd/arena-api.service`](../deploy/systemd/arena-api.service)
+(`--allow-origin https://colosseum.vru-ai.com`)
+
+ไฟล์ทุกไฟล์ใน `web/` ถูกเสิร์ฟสาธารณะ — ของที่ไม่ควรให้นิสิตเห็นต้องใส่ใน `.assetsignore`
+(README นี้อยู่ในนั้นแล้ว)
 
 ## สิ่งที่หน้านี้ทำและไม่ทำ
 

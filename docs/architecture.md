@@ -15,7 +15,7 @@
 ```mermaid
 flowchart TB
     subgraph cloud["Cloudflare"]
-        page["colosseum.vru-ai.com<br/>หน้าเว็บ leaderboard<br/>— เขียนแล้ว ยังไม่ deploy —"]
+        page["colosseum.vru-ai.com<br/>หน้าเว็บ leaderboard<br/>Worker + static assets ✅"]
         edge["colosseum-api.vru-ai.com<br/>Cloudflare edge"]
     end
 
@@ -60,7 +60,7 @@ flowchart TB
 | runner เป็น daemon แยกเครื่อง ต่อ WebSocket เข้ามา | worker เป็น **thread ใน process เดียวกับ API** | ยังกระจายงานข้ามเครื่องไม่ได้ · WebSocket ที่วาดไว้ยังไม่มีอยู่จริง |
 | Postgres + Redis | **SQLite** write-through ([`core/db.py`](../core/db.py)) | รองรับ process เดียว ซึ่งพอดีกับข้อบน |
 | Object Storage | โฟลเดอร์บนดิสก์ ([`core/store.py`](../core/store.py)) | ต้องสำรองไฟล์เอง |
-| หน้าเว็บ leaderboard | ✅ [`web/index.html`](../web/index.html) — ยังไม่ได้ deploy | ส่งงานยังต้องใช้ `arena submit` โดยตั้งใจ |
+| หน้าเว็บ leaderboard | ✅ ขึ้นแล้ว — Worker + static assets | ส่งงานยังต้องใช้ `arena submit` โดยตั้งใจ |
 
 ---
 
@@ -193,7 +193,7 @@ flowchart LR
 
 | | สถานะ |
 |---|---|
-| หน้าเว็บ leaderboard | ✅ เขียนแล้ว ([`web/`](../web/)) — ยังไม่ได้ deploy ขึ้น Pages |
+| หน้าเว็บ leaderboard | ✅ ขึ้นแล้วที่ `colosseum.vru-ai.com` ([`web/`](../web/)) |
 | Google OAuth | ยังใช้ team token — ดู §4.3 |
 | runner daemon + WebSocket | ยังไม่มี — worker เป็น thread |
 | เพดานไฟล์บน named tunnel | ✅ วัดแล้ว **100 MiB** · `arena submit` ตรวจให้ที่ 95 MB |
