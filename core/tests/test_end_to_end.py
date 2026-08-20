@@ -155,6 +155,35 @@ def test_api_never_reveals_seed_values(system):
         assert not leaked, f"ค่า seed หลุดออกทาง API: {leaked[:3]}"
 
 
+def test_cors_allows_only_the_configured_web_origin(system, tmp_path):
+    """หน้าเว็บอยู่คนละ origin กับ API จึงต้องมี CORS — แต่ต้องเปิดให้โดเมนเดียว
+
+    ทุก endpoint ยืนยันตัวตนด้วย Bearer token การเปิด `*` แปลว่าหน้าเว็บใดก็ตามที่
+    นิสิตเปิดอยู่ ยิง request ในนามของทีมได้ถ้าดักโทเคนไปได้
+    """
+    arena, _teams, _client, _worker = system
+    web = "https://colosseum.vru-ai.com"
+    guarded = TestClient(create_app(arena, allow_origins=[web]))
+
+    assert guarded.get("/api/health", headers={"Origin": web}).headers.get(
+        "access-control-allow-origin"
+    ) == web
+    assert (
+        guarded.get("/api/health", headers={"Origin": "https://evil.example"}).headers.get(
+            "access-control-allow-origin"
+        )
+        is None
+    )
+
+    # ไม่ตั้งค่า = ไม่เปิดให้ใครเลย ซึ่งถูกต้องสำหรับ dev ที่เรียกผ่าน localhost หรือ CLI
+    assert (
+        TestClient(create_app(arena))
+        .get("/api/health", headers={"Origin": web})
+        .headers.get("access-control-allow-origin")
+        is None
+    )
+
+
 def test_leaderboard_ranks_teams_and_shows_next_target(system):
     arena, teams, client, worker = system
     submit(client, teams[0], STRATEGY_AGENT)

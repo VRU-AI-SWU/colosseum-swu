@@ -361,7 +361,11 @@ def cmd_serve(args) -> int:
     else:
         print(f"⚠️ โหมด dev — ข้อมูลอยู่ในหน่วยความจำ และใช้ seed สำรองที่ไม่ใช่ของจริง")
     uvicorn.run(
-        create_app(arena, baselines={"cp463-vacuum-1-2026": CP463_VACUUM_LADDER}),
+        create_app(
+            arena,
+            baselines={"cp463-vacuum-1-2026": CP463_VACUUM_LADDER},
+            allow_origins=args.allow_origin or None,
+        ),
         host=args.host,
         port=args.port,
         log_level="warning",
@@ -418,6 +422,12 @@ def main(argv: list[str] | None = None) -> int:
         "--ephemeral",
         action="store_true",
         help="ไม่บันทึกลงดิสก์ — ข้อมูลหายเมื่อปิด (ค่าเริ่มต้นคือบันทึกลง <data>/arena.db)",
+    )
+    p.add_argument(
+        "--allow-origin",
+        action="append",
+        metavar="URL",
+        help="โดเมนของหน้าเว็บที่เรียก API นี้ได้ (ใส่ซ้ำได้) เช่น https://colosseum.vru-ai.com",
     )
     p.add_argument(
         "--real-seeds",

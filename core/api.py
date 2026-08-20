@@ -29,15 +29,39 @@ from core.domain import (
     RunStatus,
     Team,
 )
+from fastapi.middleware.cors import CORSMiddleware
+
 from core.leaderboard import BaselineMark, build, insert_baselines, next_target
 from core.service import Arena, SubmissionRejected, TooManyFinalPicks
 
 
 def create_app(
-    arena: Arena, baselines: Optional[dict[str, list[BaselineMark]]] = None
+    arena: Arena,
+    baselines: Optional[dict[str, list[BaselineMark]]] = None,
+    allow_origins: Optional[list] = None,
 ) -> FastAPI:
+    """`allow_origins` = โดเมนของหน้าเว็บที่เรียก API นี้ได้ (README §10.1)
+
+    ต้องตั้งเพราะหน้าเว็บอยู่บน Cloudflare Pages (`colosseum.vru-ai.com`) ส่วน API
+    อยู่บนเครื่องในมหาวิทยาลัยหลัง tunnel (`colosseum-api.vru-ai.com`) — คนละ origin
+    เบราว์เซอร์จึงบล็อกทุก request จนกว่าจะมี CORS header
+
+    **ห้ามใส่ `"*"`** — endpoint ทั้งหมดยืนยันตัวตนด้วย `Authorization: Bearer <team token>`
+    การเปิดให้ทุกโดเมนเรียกได้ แปลว่าหน้าเว็บใดก็ตามที่นิสิตเปิดอยู่ ยิง request
+    ในนามของทีมได้ถ้าดักโทเคนไปได้ · ไม่ส่งมาเลย = ไม่เปิด CORS ให้ใคร ซึ่งถูกต้อง
+    สำหรับตอน dev ที่เรียกผ่าน localhost หรือ CLI
+    """
     app = FastAPI(title="Arena", version="0.1.0")
     baselines = baselines or {}
+
+    if allow_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(allow_origins),
+            allow_credentials=False,  # เราใช้ Bearer header ไม่ใช่ cookie
+            allow_methods=["GET", "POST"],
+            allow_headers=["Authorization", "Content-Type"],
+        )
 
     def current_team(authorization: Annotated[Optional[str], Header()] = None) -> Team:
         token = (authorization or "").removeprefix("Bearer ").strip()

@@ -1,0 +1,32 @@
+# cloudflared — เครื่อง runner ในมหาวิทยาลัย
+#
+# คัดลอกไปที่ ~/.cloudflared/config.yml แล้วแทน <TUNNEL-ID> ด้วยค่าที่ได้จาก
+#   cloudflared tunnel create swu-runner-01     (หรือดูซ้ำด้วย cloudflared tunnel list)
+#
+# วิธีติดตั้งเต็มอยู่ที่ README.md ข้างไฟล์นี้
+
+tunnel: <TUNNEL-ID>
+credentials-file: /Users/rucci/.cloudflared/<TUNNEL-ID>.json
+
+# QUIC (UDP 7844) เป็นทางหลัก — วัดแล้วว่าใช้ได้บนเครือข่ายมหาวิทยาลัย และเป็นเหตุผล
+# ที่ TLS interception ที่พอร์ต 443 ไม่กระทบ tunnel เลย (README §10.1)
+protocol: quic
+
+# ทน network สะดุดโดยไม่ทิ้งงานที่กำลังรัน
+retries: 5
+grace-period: 30s
+
+ingress:
+  - hostname: colosseum-api.vru-ai.com
+    service: http://127.0.0.1:8000
+    originRequest:
+      # การอัพโหลด submission ใหญ่ได้ถึงหลักสิบ MB และการตรวจไฟล์ตอนรับใช้เวลาสักครู่
+      # ค่า default 30 วินาทีสั้นเกินไปจนตัดกลางคัน
+      connectTimeout: 30s
+      # ⚠️ ห้ามเปิด noTLSVerify — origin เป็น http บน localhost อยู่แล้ว
+      # การเปิดทิ้งไว้จะกลายเป็นช่องโหว่ทันทีที่วันหนึ่งย้าย origin ไปเครื่องอื่น
+      httpHostHeader: colosseum-api.vru-ai.com
+
+  # ทุกอย่างที่ไม่ตรง hostname ข้างบนต้องถูกปฏิเสธ — ไม่ใช่ส่งต่อไปที่ origin
+  # (ingress rule สุดท้ายบังคับให้ต้องมี)
+  - service: http_status:404
