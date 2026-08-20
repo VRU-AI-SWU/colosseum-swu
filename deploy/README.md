@@ -4,10 +4,44 @@
 ([README §10.4](../README.md#104-ขอบเขตความไว้วางใจ-trust-boundaries))
 
 ```
-เครื่อง GPU ในมหาวิทยาลัย
-├── /srv/arena/app/        โค้ดแพลตฟอร์ม (repo สาธารณะ)
-├── /srv/arena/data/       arena.db + artifacts ที่นิสิตอัพโหลด
-└── /srv/arena/secrets/    🔒 clone จาก colosseum-hypogeum
+SSD ของระบบ                              HDD "colosseum"
+~/VRU-AI/projects/colosseum/             $HDD/
+├── app/       โค้ดแพลตฟอร์ม               ├── artifacts/   zip ของนิสิต + replay
+├── secrets/   🔒 hypogeum                │   ├── submissions/
+├── data/      arena.db (+ -wal)         │   └── replays/
+└── app/.venv/ ~64 MB                    └── work/        แตก zip ชั่วคราว
+```
+
+เกณฑ์ที่ใช้แบ่ง: **เล็ก+เขียนบ่อย อยู่ SSD · ใหญ่+เขียนครั้งเดียว อยู่ HDD**
+`arena.db` ถูกเขียนทุกครั้งที่สถานะงานเปลี่ยน แต่ทั้งไฟล์เล็กมาก ส่วน artifacts
+เขียนครั้งเดียวแล้วแทบไม่อ่านอีก จนกว่าจะมีคนขอดู replay
+
+### ⚠️ ตัวกินพื้นที่ที่ใหญ่ที่สุดไม่ได้อยู่ใน `--data`
+
+วัดจากเครื่อง dev ที่ใช้งานมาไม่กี่วัน
+
+| | ขนาดจริง |
+|---|---|
+| **Docker (image + build cache)** | **14.3 GB** — ในนั้นเป็น cache ที่ลบได้ 11.3 GB |
+| `.venv` | 64 MB |
+| image `arena/vacuum:cpu` | 365 MB |
+| replay ต่อหนึ่ง run (30 episode) | 120 KB |
+| zip ของ agent ที่ไม่มี weights | 8 KB |
+| `arena.db` | 4 KB |
+
+Docker เก็บของไว้ที่ `/var/lib/docker` บน **SSD ของระบบ** ซึ่งอยู่นอกการแบ่งที่วางไว้
+และมันโตทุกครั้งที่ `docker build` — ถ้าไม่จัดการ มันจะเต็มก่อน artifacts หลายเท่า
+
+ทางแก้ที่ตรงจุดที่สุดคือย้าย Docker ไปอยู่บน HDD ด้วย
+
+```bash
+sudo mkdir -p $HDD/docker && echo '{"data-root": "'$HDD'/docker"}' | sudo tee /etc/docker/daemon.json && sudo systemctl restart docker
+```
+
+ถ้าไม่อยากย้าย อย่างน้อยต้องล้าง cache หลัง build ทุกครั้ง
+
+```bash
+docker builder prune -af
 ```
 
 > เขียนสำหรับ **Linux Mint** (ฐาน Ubuntu) ซึ่งเป็นเครื่องที่ใช้จริง · เครื่อง dev บน
@@ -55,8 +89,14 @@ sudo usermod -aG docker $USER
 
 ## 2. โค้ดกับของลับ
 
+ตั้งตัวแปรสองตัวนี้ก่อน แล้วคำสั่งที่เหลือคัดลอกไปวางได้เลย
+
 ```bash
-sudo mkdir -p /srv/arena && sudo chown $USER /srv/arena && cd /srv/arena
+export ARENA=~/VRU-AI/projects/colosseum && export HDD=/media/$USER/colosseum
+```
+
+```bash
+mkdir -p $ARENA && cd $ARENA && mkdir -p $HDD/artifacts $HDD/work
 ```
 
 ```bash
@@ -71,19 +111,19 @@ git clone git@github.com:VRU-AI-SWU/colosseum-hypogeum.git secrets && chmod 700 
 `DockerLauncher` mount เฉพาะโฟลเดอร์ submission เข้าไปแบบ read-only เท่านั้น
 
 ```bash
-cd /srv/arena/app && uv venv --python 3.11 && uv pip install -e envs/cp463-vacuum -e .
+cd $ARENA/app && uv venv --python 3.11 && uv pip install -e envs/cp463-vacuum -e .
 ```
 
 ยืนยันว่าได้ 3.11 จริง — ข้อนี้พลาดแล้วเงียบ
 
 ```bash
-/srv/arena/app/.venv/bin/python -VV && /srv/arena/app/.venv/bin/python -c "import numpy; print(numpy.__version__)"
+$ARENA/app/.venv/bin/python -VV && $ARENA/app/.venv/bin/python -c "import numpy; print(numpy.__version__)"
 ```
 
 ตรวจว่า environment ตรงกับตอน calibrate
 
 ```bash
-cd /srv/arena/app && ARENA_SECRETS=/srv/arena/secrets .venv/bin/python -m pytest core/tests runners/tests envs/cp463-vacuum/tests -q
+cd $ARENA/app && ARENA_SECRETS=$ARENA/secrets .venv/bin/python -m pytest core/tests runners/tests envs/cp463-vacuum/tests -q
 ```
 
 ## 3. Docker image ของ sandbox
@@ -91,7 +131,7 @@ cd /srv/arena/app && ARENA_SECRETS=/srv/arena/secrets .venv/bin/python -m pytest
 **บังคับ** — `--real-seeds` ไม่ยอมเริ่มถ้าไม่มี image นี้
 
 ```bash
-cd /srv/arena/app && docker build -t arena/vacuum:cpu -f runners/agent_env/images/Dockerfile.cpu .
+cd $ARENA/app && docker build -t arena/vacuum:cpu -f runners/agent_env/images/Dockerfile.cpu .
 ```
 
 > ถ้า build ล้มด้วย TLS error ที่ `registry-1.docker.io` — เครือข่ายมหาวิทยาลัยเคยส่ง
@@ -103,7 +143,7 @@ cd /srv/arena/app && docker build -t arena/vacuum:cpu -f runners/agent_env/image
 แปลว่า environment ต่างกันจริง และคะแนนของนิสิตจะเทียบข้ามเครื่องไม่ได้
 
 ```bash
-cd /srv/arena/app && ARENA_SECRETS=/srv/arena/secrets .venv/bin/python tools/pin_baselines.py --check
+cd $ARENA/app && ARENA_SECRETS=$ARENA/secrets .venv/bin/python tools/pin_baselines.py --check
 ```
 
 ## 5. Cloudflare Tunnel
@@ -137,7 +177,7 @@ cloudflared tunnel route dns porta-triumphalis colosseum-api.vru-ai.com
 จะดับจริงในสัปดาห์ที่นิสิตกำลังเร่งส่งงาน
 
 ```bash
-sudo cp /srv/arena/app/deploy/systemd/arena-api.service /etc/systemd/system/ && sudo systemctl enable --now arena-api
+sudo cp $ARENA/app/deploy/systemd/arena-api.service /etc/systemd/system/ && sudo systemctl enable --now arena-api
 ```
 
 ```bash
@@ -171,8 +211,8 @@ dd if=/dev/zero of=/tmp/blob.bin bs=1M count=105 && curl -s -o /dev/null -w "%{h
 | | คำสั่ง |
 |---|---|
 | ดู log | `journalctl -u arena-api -f` |
-| อัพเดตโค้ด | `cd /srv/arena/app && git pull && sudo systemctl restart arena-api` |
-| สำรองข้อมูล | คัดลอก `/srv/arena/data/` ทั้งโฟลเดอร์ (มี `arena.db` + `-wal` + artifacts) |
+| อัพเดตโค้ด | `cd $ARENA/app && git pull && sudo systemctl restart arena-api` |
+| สำรองข้อมูล | `$ARENA/data/` (เล็ก · สำคัญที่สุด) **และ** `$HDD/artifacts/` |
 | ดูสถานะ tunnel | Cloudflare dashboard → Zero Trust → Networks → Tunnels |
 
 ### เข้าถึงเพื่อดูแลระบบ

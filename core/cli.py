@@ -381,13 +381,18 @@ def cmd_serve(args) -> int:
     if launcher is None:
         return 1
     db_path = None if args.ephemeral else root / "arena.db"
-    arena, teams = demo_arena(root / "artifacts", teams=args.teams, db_path=db_path)
+    # แยก metadata ออกจาก blob ได้ — สองอย่างนี้โตคนละอัตราและอยากอยู่คนละสื่อ
+    #   arena.db   เล็ก · เขียนบ่อย · อยากอยู่บน SSD
+    #   artifacts/ ใหญ่ · เขียนครั้งเดียวอ่านนานๆ ครั้ง · อยู่บน HDD ได้สบาย
+    # ตรงกับที่ README §11 วางไว้ว่าปลายทางคือ Postgres + object storage คนละที่
+    artifacts = Path(args.artifacts).resolve() if args.artifacts else root / "artifacts"
+    arena, teams = demo_arena(artifacts, teams=args.teams, db_path=db_path)
     worker = Worker(
         runner_id="dev-worker",
         store=arena.store,
         queue=arena.queue,
         artifacts=arena.artifacts,
-        workdir=root / "work",
+        workdir=artifacts.parent / "work",  # แตก zip ข้างๆ ที่เก็บ ไม่ข้ามสื่อ
         launcher=launcher,
         allow_seed_fallback=not args.real_seeds,
     )
@@ -400,6 +405,7 @@ def cmd_serve(args) -> int:
     else:
         counts = arena.store.db.stats()
         print(f"ฐานข้อมูล  : {db_path}")
+        print(f"artifacts  : {artifacts}")
         print(
             "ของเดิมที่โหลดมา: "
             + " · ".join(f"{k} {v}" for k, v in counts.items() if v)
@@ -472,6 +478,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--data", default=".arena-dev")
     p.add_argument("--teams", type=int, default=3)
+    p.add_argument(
+        "--artifacts",
+        metavar="DIR",
+        help="ที่เก็บ zip ของนิสิตกับไฟล์ replay (ค่าเริ่มต้น <data>/artifacts) "
+             "— แยกไปไว้บนดิสก์อื่นได้ เพราะเป็นส่วนที่โตเร็วที่สุด",
+    )
     p.add_argument(
         "--sandbox",
         choices=("auto", "docker", "subprocess"),
