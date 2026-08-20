@@ -61,13 +61,27 @@ def baseline_ladder(slug: str, phase: str) -> list[BaselineMark]:
 CP463_VACUUM_LADDER = baseline_ladder("cp463-vacuum-1-2026", "main")
 
 
-def demo_arena(root: Path, *, teams: int = 3) -> tuple[Arena, list[Team]]:
+def demo_arena(
+    root: Path, *, teams: int = 3, db_path: Path | str | None = None
+) -> tuple[Arena, list[Team]]:
     """Arena ที่พร้อมใช้สำหรับ dev และเทสต์ — มี CP463 Competition 1 ลงทะเบียนไว้แล้ว
 
     โทเคนของทีมคือ `team-1`, `team-2`, ... (ของชั่วคราวจนกว่าจะมี OAuth)
+
+    **idempotent** — เรียกซ้ำบนฐานข้อมูลเดิมจะใช้ competition กับทีมชุดเดิม ไม่สร้างใหม่
+    ถ้าสร้างใหม่ทุกครั้ง submission ที่ส่งไปก่อนรีสตาร์ทจะชี้ไป competition id ที่ไม่มีใครใช้
+    แล้ว leaderboard จะว่างทั้งที่ข้อมูลยังอยู่ครบ
     """
-    arena = build_arena(root, validators=VALIDATORS)
+    arena = build_arena(root, validators=VALIDATORS, db_path=db_path)
     now = datetime.now(timezone.utc)
+
+    existing = arena.store.competition_by_slug("cp463-vacuum-1-2026")
+    if existing is not None:
+        return arena, [
+            arena.store.teams[f"team-{i}"]
+            for i in range(1, teams + 1)
+            if f"team-{i}" in arena.store.teams
+        ]
 
     competition = Competition(
         id=new_id(),
@@ -89,7 +103,7 @@ def demo_arena(root: Path, *, teams: int = 3) -> tuple[Arena, list[Team]]:
             )
         ],
     )
-    arena.store.competitions[competition.id] = competition
+    arena.store.save_competition(competition)
 
     created = []
     for i in range(1, teams + 1):
@@ -99,7 +113,7 @@ def demo_arena(root: Path, *, teams: int = 3) -> tuple[Arena, list[Team]]:
             name=f"ทีมที่ {i}",
             member_ids=[f"user-{i}"],
         )
-        arena.store.teams[team.id] = team  # id ทำหน้าที่เป็นโทเคนไปก่อน
+        arena.store.save_team(team)  # id ทำหน้าที่เป็นโทเคนไปก่อน
         created.append(team)
 
     return arena, created

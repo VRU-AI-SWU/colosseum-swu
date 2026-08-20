@@ -26,6 +26,7 @@ from core.domain import (
     new_id,
     utcnow,
 )
+from core.db import Database
 from core.queue import JobQueue, check_quota
 from core.store import ArtifactStore, Store, runs_of
 
@@ -129,7 +130,7 @@ class Arena:
             note=note,
             created_at=now,
         )
-        self.store.submissions[submission.id] = submission
+        self.store.save_submission(submission)
 
         run = self.queue.enqueue(
             Run(
@@ -175,6 +176,7 @@ class Arena:
                 )
 
         submission.is_final_pick = picked
+        self.store.save_submission(submission)
         self.store.record(
             "submission.final_pick", "submission", submission_id, actor_id=user_id, picked=picked
         )
@@ -218,8 +220,7 @@ class Arena:
                     kind=RunKind.PRIVATE,
                 )
                 # ข้ามกติกา 1 งาน/ทีม เพราะรอบนี้ผู้สอนเป็นคนสั่ง ไม่ใช่นิสิตส่งเอง
-                self.queue.runs[run.id] = run
-                self.queue._served.setdefault(team_id, 0)
+                self.queue.adopt(run)
                 created.append(run)
         self.store.record(
             "competition.private_run", "competition", competition.id,
@@ -256,11 +257,30 @@ class Arena:
         return competition
 
 
-def build_arena(root: Path, validators: dict[str, Callable] | None = None) -> Arena:
-    """ประกอบ Arena ที่ใช้ที่เก็บแบบ in-memory — สำหรับ dev และเทสต์"""
+def build_arena(
+    root: Path,
+    validators: dict[str, Callable] | None = None,
+    *,
+    db_path: Path | str | None = None,
+) -> Arena:
+    """ประกอบ Arena — ถ้าให้ `db_path` มา สถานะจะอยู่รอดข้ามการรีสตาร์ท
+
+    ไม่ให้ `db_path` = ทำงานในหน่วยความจำล้วน ซึ่งเป็นสิ่งที่เทสต์ส่วนใหญ่ต้องการ
+    (เร็วกว่า และไม่ต้องเก็บกวาดไฟล์)
+    """
+    db = Database(db_path) if db_path is not None else None
+    store = Store(db=db)
+    queue = JobQueue(db=db)
+    if db is not None:
+        store.teams = db.load_teams()
+        store.competitions = db.load_competitions()
+        store.submissions = db.load_submissions()
+        store.audit = db.load_audit()
+        queue.runs = db.load_runs()
+        queue._served = db.load_served()
     return Arena(
-        store=Store(),
-        queue=JobQueue(),
+        store=store,
+        queue=queue,
         artifacts=ArtifactStore(Path(root)),
         validators=dict(validators or {}),
     )

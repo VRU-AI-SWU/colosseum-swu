@@ -12,3 +12,9 @@ __pycache__/
 # ไม่ commit เพราะหนัก (หลักร้อย MB) และ Diamond baseline ตัวจริงต้องอยู่ที่ colosseum-hypogeum
 envs/*/models/
 envs/*/tb/
+
+# ข้อมูลของ arena serve — ฐานข้อมูล SQLite + artifact ที่นิสิตอัพโหลด
+.arena-dev/
+*.db
+*.db-wal
+*.db-shm

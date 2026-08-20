@@ -1,0 +1,376 @@
+"""ที่เก็บถาวรด้วย SQLite — README §11
+
+**รูปแบบ: write-through ไม่ใช่ query layer**
+
+    เขียน  →  แก้ object ในหน่วยความจำ แล้ว `db.save_*(obj)` ทันที
+    อ่าน   →  จาก dict ในหน่วยความจำเหมือนเดิม ไม่แตะ SQLite เลย
+    เริ่ม  →  `build_arena(db_path=...)` ดึงทุกแถวกลับเข้า dict ด้วย `load_*()`
+
+เลือกแบบนี้เพราะตรรกะที่ยากที่สุดของระบบ — fair-share, lease, การนับโควตา — อยู่ใน
+`core/queue.py` และมันถูกทดสอบไว้แล้วในรูปของการทำงานกับ dict การเปลี่ยนไปเป็น
+query layer แปลว่าต้องเขียนตรรกะนั้นใหม่เป็น SQL แล้วพิสูจน์ใหม่ทั้งหมด
+ซึ่งเป็นความเสี่ยงที่ไม่คุ้มกับปัญหาที่กำลังแก้ ("รีสตาร์ทแล้วคะแนนหาย")
+
+**ข้อจำกัดที่ต้องรู้**: working set อยู่ในหน่วยความจำ จึงรองรับ **process เดียว**
+worker ที่รันคนละ process จะไม่เห็นการแก้ของอีกฝั่ง — ตรงกับสถาปัตยกรรมที่ออกแบบไว้
+([README §10.1](../README.md#101-ภาพรวม-hybrid-web-บน-cloud--runner-ในมหาวิทยาลัย))
+ที่ runner ต่อเข้ามาทาง WebSocket ไม่ใช่แชร์ฐานข้อมูลกัน วันที่ต้องมีหลาย process
+จริงๆ คือวันที่ย้ายไป Postgres ซึ่งตอนนั้นค่อยเขียน query layer
+
+⚠️ **ไฟล์นี้ไม่เคยเห็นค่า seed** — เหมือน `core/api.py` seed อยู่ฝั่ง runner เท่านั้น
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from core.domain import (
+    AuditEvent,
+    Competition,
+    EpisodeResult,
+    Phase,
+    Run,
+    RunKind,
+    RunStatus,
+    Submission,
+    Team,
+)
+
+SCHEMA_VERSION = 1
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS teams (
+    id         TEXT PRIMARY KEY,
+    course_id  TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    alias      TEXT,
+    member_ids TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS competitions (
+    id                     TEXT PRIMARY KEY,
+    course_id              TEXT NOT NULL,
+    slug                   TEXT NOT NULL UNIQUE,
+    title                  TEXT NOT NULL,
+    task_type              TEXT NOT NULL,
+    env_plugin             TEXT NOT NULL,
+    config_path            TEXT NOT NULL,
+    opens_at               TEXT NOT NULL,
+    closes_at              TEXT NOT NULL,
+    quota_per_day          INTEGER NOT NULL,
+    max_final_submissions  INTEGER NOT NULL,
+    phases                 TEXT NOT NULL,
+    import_whitelist       TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS submissions (
+    id              TEXT PRIMARY KEY,
+    competition_id  TEXT NOT NULL,
+    team_id         TEXT NOT NULL,
+    submitted_by    TEXT NOT NULL,
+    artifact_url    TEXT NOT NULL,
+    artifact_sha256 TEXT NOT NULL,
+    note            TEXT NOT NULL,
+    is_final_pick   INTEGER NOT NULL,
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_submissions_team
+    ON submissions(team_id, competition_id);
+
+CREATE TABLE IF NOT EXISTS runs (
+    id               TEXT PRIMARY KEY,
+    submission_id    TEXT NOT NULL,
+    competition_id   TEXT NOT NULL,
+    team_id          TEXT NOT NULL,
+    kind             TEXT NOT NULL,
+    status           TEXT NOT NULL,
+    lane             TEXT NOT NULL,
+    config_hash      TEXT,
+    env_version      TEXT,
+    score            REAL,
+    tiebreak         TEXT NOT NULL,
+    metrics          TEXT NOT NULL,
+    episodes         TEXT NOT NULL,
+    error_message    TEXT,
+    attempts         INTEGER NOT NULL,
+    runner_id        TEXT,
+    lease_expires_at TEXT,
+    created_at       TEXT NOT NULL,
+    started_at       TEXT,
+    finished_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_runs_competition ON runs(competition_id, status);
+CREATE INDEX IF NOT EXISTS idx_runs_team ON runs(team_id, competition_id);
+
+CREATE TABLE IF NOT EXISTS audit (
+    id          TEXT PRIMARY KEY,
+    actor_id    TEXT,
+    action      TEXT NOT NULL,
+    target_type TEXT NOT NULL,
+    target_id   TEXT NOT NULL,
+    payload     TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_target ON audit(target_id);
+
+-- ตัวนับ fair-share ของคิว · ต้องอยู่รอดข้ามการรีสตาร์ท ไม่งั้นทีมที่เพิ่งถูกเสิร์ฟ
+-- ไป 5 งานจะกลับมาเท่ากับทีมที่ยังไม่เคยได้คิวเลย
+CREATE TABLE IF NOT EXISTS queue_served (
+    team_id TEXT PRIMARY KEY,
+    count   INTEGER NOT NULL
+);
+"""
+
+
+def _dt(value: datetime | None) -> str | None:
+    return value.isoformat() if value else None
+
+
+def _parse_dt(value: str | None) -> datetime | None:
+    return datetime.fromisoformat(value) if value else None
+
+
+class SchemaMismatch(RuntimeError):
+    """ไฟล์ฐานข้อมูลมาจากคนละเวอร์ชันของ schema — ต้อง migrate ก่อน ห้ามเดา"""
+
+
+class Database:
+    """SQLite ที่เปิดค้างไว้ตลอดอายุ process
+
+    ใช้ WAL เพื่อให้การอ่านไม่บล็อกการเขียน และล็อกด้วย `threading.Lock` เพราะ
+    `arena serve` รัน worker เป็น thread ในกระบวนการเดียวกัน
+    """
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+        self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA foreign_keys=ON")
+        self._conn.executescript(SCHEMA)
+        self._check_version()
+
+    def _check_version(self) -> None:
+        row = self._conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+        if row is None:
+            self._conn.execute(
+                "INSERT INTO meta(key, value) VALUES('schema_version', ?)",
+                (str(SCHEMA_VERSION),),
+            )
+            self._conn.commit()
+            return
+        found = int(row["value"])
+        if found != SCHEMA_VERSION:
+            raise SchemaMismatch(
+                f"{self.path} ใช้ schema เวอร์ชัน {found} แต่โค้ดนี้คาดหวัง {SCHEMA_VERSION}\n"
+                "ต้องเขียน migration ก่อน — การเปิดไฟล์เก่าด้วย schema ใหม่โดยไม่ migrate\n"
+                "จะทำให้ข้อมูลบางส่วนหายไปเงียบๆ ซึ่งแย่กว่าการล้มทันที"
+            )
+
+    def close(self) -> None:
+        """ปิดแบบเรียบร้อย — ยุบ WAL กลับเข้าไฟล์หลักก่อน
+
+        WAL ที่ค้างอยู่ไม่ได้ทำให้ข้อมูลหาย (SQLite กู้เองตอนเปิดครั้งถัดไป) แต่การ
+        คัดลอกเฉพาะ `arena.db` ไปสำรองโดยลืม `-wal` จะได้ไฟล์ที่ข้อมูลไม่ครบ
+        """
+        with self._lock:
+            try:
+                self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except sqlite3.Error:
+                pass  # ปิดให้ได้ไว้ก่อน — checkpoint ล้มไม่ได้ทำให้ข้อมูลหาย
+            self._conn.close()
+
+    def _write(self, sql: str, params: tuple) -> None:
+        with self._lock:
+            self._conn.execute(sql, params)
+            self._conn.commit()
+
+    # ── เขียน ───────────────────────────────────────────────────────
+
+    def save_team(self, team: Team) -> None:
+        self._write(
+            "INSERT OR REPLACE INTO teams(id, course_id, name, alias, member_ids)"
+            " VALUES(?,?,?,?,?)",
+            (team.id, team.course_id, team.name, team.alias, json.dumps(team.member_ids)),
+        )
+
+    def save_competition(self, c: Competition) -> None:
+        phases = [
+            {
+                "id": p.id,
+                "name": p.name,
+                "starts_at": _dt(p.starts_at),
+                "ends_at": _dt(p.ends_at),
+                "config_override": p.config_override,
+            }
+            for p in c.phases
+        ]
+        self._write(
+            "INSERT OR REPLACE INTO competitions(id, course_id, slug, title, task_type,"
+            " env_plugin, config_path, opens_at, closes_at, quota_per_day,"
+            " max_final_submissions, phases, import_whitelist)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                c.id, c.course_id, c.slug, c.title, c.task_type, c.env_plugin, c.config_path,
+                _dt(c.opens_at), _dt(c.closes_at), c.quota_per_day, c.max_final_submissions,
+                json.dumps(phases, ensure_ascii=False),
+                json.dumps(sorted(c.import_whitelist)),
+            ),
+        )
+
+    def save_submission(self, s: Submission) -> None:
+        self._write(
+            "INSERT OR REPLACE INTO submissions(id, competition_id, team_id, submitted_by,"
+            " artifact_url, artifact_sha256, note, is_final_pick, created_at)"
+            " VALUES(?,?,?,?,?,?,?,?,?)",
+            (
+                s.id, s.competition_id, s.team_id, s.submitted_by, s.artifact_url,
+                s.artifact_sha256, s.note, int(s.is_final_pick), _dt(s.created_at),
+            ),
+        )
+
+    def save_run(self, r: Run) -> None:
+        episodes = [
+            {
+                "run_id": e.run_id, "seed": e.seed, "score": e.score,
+                "status": e.status, "metrics": e.metrics, "replay_url": e.replay_url,
+            }
+            for e in r.episodes
+        ]
+        self._write(
+            "INSERT OR REPLACE INTO runs(id, submission_id, competition_id, team_id, kind,"
+            " status, lane, config_hash, env_version, score, tiebreak, metrics, episodes,"
+            " error_message, attempts, runner_id, lease_expires_at, created_at, started_at,"
+            " finished_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                r.id, r.submission_id, r.competition_id, r.team_id, r.kind.value,
+                r.status.value, r.lane, r.config_hash, r.env_version, r.score,
+                json.dumps(list(r.tiebreak)),
+                json.dumps(r.metrics, ensure_ascii=False, default=str),
+                json.dumps(episodes, ensure_ascii=False, default=str),
+                r.error_message, r.attempts, r.runner_id, _dt(r.lease_expires_at),
+                _dt(r.created_at), _dt(r.started_at), _dt(r.finished_at),
+            ),
+        )
+
+    def save_audit(self, e: AuditEvent) -> None:
+        self._write(
+            "INSERT OR REPLACE INTO audit(id, actor_id, action, target_type, target_id,"
+            " payload, created_at) VALUES(?,?,?,?,?,?,?)",
+            (
+                e.id, e.actor_id, e.action, e.target_type, e.target_id,
+                json.dumps(e.payload, ensure_ascii=False, default=str), _dt(e.created_at),
+            ),
+        )
+
+    def save_served(self, team_id: str, count: int) -> None:
+        self._write(
+            "INSERT OR REPLACE INTO queue_served(team_id, count) VALUES(?,?)", (team_id, count)
+        )
+
+    # ── อ่านตอนเริ่ม ─────────────────────────────────────────────────
+
+    def _rows(self, table: str) -> list[sqlite3.Row]:
+        with self._lock:
+            return list(self._conn.execute(f"SELECT * FROM {table}"))
+
+    def load_teams(self) -> dict[str, Team]:
+        return {
+            r["id"]: Team(
+                id=r["id"], course_id=r["course_id"], name=r["name"], alias=r["alias"],
+                member_ids=json.loads(r["member_ids"]),
+            )
+            for r in self._rows("teams")
+        }
+
+    def load_competitions(self) -> dict[str, Competition]:
+        out: dict[str, Competition] = {}
+        for r in self._rows("competitions"):
+            phases = [
+                Phase(
+                    id=p["id"], name=p["name"],
+                    starts_at=_parse_dt(p["starts_at"]), ends_at=_parse_dt(p["ends_at"]),
+                    config_override=p["config_override"],
+                )
+                for p in json.loads(r["phases"])
+            ]
+            out[r["id"]] = Competition(
+                id=r["id"], course_id=r["course_id"], slug=r["slug"], title=r["title"],
+                task_type=r["task_type"], env_plugin=r["env_plugin"],
+                config_path=r["config_path"],
+                opens_at=_parse_dt(r["opens_at"]), closes_at=_parse_dt(r["closes_at"]),
+                quota_per_day=r["quota_per_day"],
+                max_final_submissions=r["max_final_submissions"],
+                phases=phases,
+                import_whitelist=frozenset(json.loads(r["import_whitelist"])),
+            )
+        return out
+
+    def load_submissions(self) -> dict[str, Submission]:
+        return {
+            r["id"]: Submission(
+                id=r["id"], competition_id=r["competition_id"], team_id=r["team_id"],
+                submitted_by=r["submitted_by"], artifact_url=r["artifact_url"],
+                artifact_sha256=r["artifact_sha256"], note=r["note"],
+                is_final_pick=bool(r["is_final_pick"]), created_at=_parse_dt(r["created_at"]),
+            )
+            for r in self._rows("submissions")
+        }
+
+    def load_runs(self) -> dict[str, Run]:
+        out: dict[str, Run] = {}
+        for r in self._rows("runs"):
+            out[r["id"]] = Run(
+                id=r["id"], submission_id=r["submission_id"],
+                competition_id=r["competition_id"], team_id=r["team_id"],
+                kind=RunKind(r["kind"]), status=RunStatus(r["status"]), lane=r["lane"],
+                config_hash=r["config_hash"], env_version=r["env_version"], score=r["score"],
+                tiebreak=tuple(json.loads(r["tiebreak"])),
+                metrics=json.loads(r["metrics"]),
+                error_message=r["error_message"], attempts=r["attempts"],
+                runner_id=r["runner_id"], lease_expires_at=_parse_dt(r["lease_expires_at"]),
+                created_at=_parse_dt(r["created_at"]),
+                started_at=_parse_dt(r["started_at"]),
+                finished_at=_parse_dt(r["finished_at"]),
+                episodes=[
+                    EpisodeResult(
+                        run_id=e["run_id"], seed=e["seed"], score=e["score"],
+                        status=e["status"], metrics=e["metrics"], replay_url=e["replay_url"],
+                    )
+                    for e in json.loads(r["episodes"])
+                ],
+            )
+        return out
+
+    def load_audit(self) -> list[AuditEvent]:
+        events = [
+            AuditEvent(
+                id=r["id"], actor_id=r["actor_id"], action=r["action"],
+                target_type=r["target_type"], target_id=r["target_id"],
+                payload=json.loads(r["payload"]), created_at=_parse_dt(r["created_at"]),
+            )
+            for r in self._rows("audit")
+        ]
+        return sorted(events, key=lambda e: e.created_at)
+
+    def load_served(self) -> dict[str, int]:
+        return {r["team_id"]: r["count"] for r in self._rows("queue_served")}
+
+    def stats(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                table: self._conn.execute(f"SELECT count(*) c FROM {table}").fetchone()["c"]
+                for table in ("teams", "competitions", "submissions", "runs", "audit")
+            }

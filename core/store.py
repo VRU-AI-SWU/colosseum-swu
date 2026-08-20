@@ -1,10 +1,15 @@
-"""ที่เก็บข้อมูลแบบ in-memory + artifact ลงดิสก์
+"""ที่เก็บข้อมูลในหน่วยความจำ (write-through ลง SQLite) + artifact ลงดิสก์
 
-**ตั้งใจให้เป็นของชั่วคราวที่ถอดออกได้** — ตรรกะทางธุรกิจทั้งหมดอยู่ที่ `core/service.py`
+**ตั้งใจให้เป็นของที่ถอดออกได้** — ตรรกะทางธุรกิจทั้งหมดอยู่ที่ `core/service.py`
 ซึ่งคุยกับที่นี่ผ่านเมธอดไม่กี่ตัว การย้ายไป Postgres จึงเป็นการเขียน class ใหม่ที่มี
 เมธอดชุดเดียวกัน ไม่ใช่การรื้อ service
 
-⚠️ **ข้อมูลหายเมื่อ process จบ** — ใช้สำหรับ dev และการทดสอบ end-to-end เท่านั้น
+ถ้าส่ง `db` เข้ามา ทุกการเปลี่ยนแปลงจะถูกเขียนลง SQLite ทันทีและอ่านกลับได้ตอนเริ่ม
+([`core/db.py`](db.py)) · ถ้าไม่ส่ง มันทำงานในหน่วยความจำล้วนเหมือนเดิม ซึ่งเป็น
+สิ่งที่เทสต์ส่วนใหญ่ต้องการ
+
+⚠️ **การแก้ object โดยตรงจะไม่ถูกบันทึก** — ต้องเรียก `save_*` ทุกครั้งหลังแก้
+เป็นราคาของการเลือก write-through แทน query layer (เหตุผลอยู่ใน `core/db.py`)
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from core.db import Database
 from core.domain import AuditEvent, Competition, Run, Submission, Team, new_id, utcnow
 
 
@@ -75,6 +81,27 @@ class Store:
     competitions: dict[str, Competition] = field(default_factory=dict)
     submissions: dict[str, Submission] = field(default_factory=dict)
     audit: list[AuditEvent] = field(default_factory=list)
+    db: Database | None = None
+
+    # ── เขียน (ต้องเรียกทุกครั้งที่แก้ ไม่งั้นของหายตอนรีสตาร์ท) ──────
+
+    def save_team(self, team: Team) -> Team:
+        self.teams[team.id] = team
+        if self.db:
+            self.db.save_team(team)
+        return team
+
+    def save_competition(self, competition: Competition) -> Competition:
+        self.competitions[competition.id] = competition
+        if self.db:
+            self.db.save_competition(competition)
+        return competition
+
+    def save_submission(self, submission: Submission) -> Submission:
+        self.submissions[submission.id] = submission
+        if self.db:
+            self.db.save_submission(submission)
+        return submission
 
     # ── lookup ──────────────────────────────────────────────────────
 
@@ -117,6 +144,8 @@ class Store:
             created_at=utcnow(),
         )
         self.audit.append(event)
+        if self.db:
+            self.db.save_audit(event)
         return event
 
     def events_for(self, target_id: str) -> list[AuditEvent]:

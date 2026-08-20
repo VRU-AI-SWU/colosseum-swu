@@ -328,7 +328,8 @@ def cmd_serve(args) -> int:
     from runners.worker import Worker
 
     root = Path(args.data).resolve()
-    arena, teams = demo_arena(root / "artifacts", teams=args.teams)
+    db_path = None if args.ephemeral else root / "arena.db"
+    arena, teams = demo_arena(root / "artifacts", teams=args.teams, db_path=db_path)
     worker = Worker(
         runner_id="dev-worker",
         store=arena.store,
@@ -340,6 +341,16 @@ def cmd_serve(args) -> int:
     threading.Thread(target=worker.serve_forever, daemon=True).start()
 
     print(f"โทเคนของทีม: {', '.join(t.id for t in teams)}")
+    if db_path is None:
+        print("⚠️ --ephemeral — ข้อมูลหายเมื่อปิด process")
+    else:
+        counts = arena.store.db.stats()
+        print(f"ฐานข้อมูล  : {db_path}")
+        print(
+            "ของเดิมที่โหลดมา: "
+            + " · ".join(f"{k} {v}" for k, v in counts.items() if v)
+            + (" (ว่าง — เริ่มใหม่)" if not any(counts.values()) else "")
+        )
     if args.real_seeds:
         from runners.seeds import secrets_root
 
@@ -403,6 +414,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--data", default=".arena-dev")
     p.add_argument("--teams", type=int, default=3)
+    p.add_argument(
+        "--ephemeral",
+        action="store_true",
+        help="ไม่บันทึกลงดิสก์ — ข้อมูลหายเมื่อปิด (ค่าเริ่มต้นคือบันทึกลง <data>/arena.db)",
+    )
     p.add_argument(
         "--real-seeds",
         action="store_true",

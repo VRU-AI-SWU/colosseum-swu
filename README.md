@@ -645,8 +645,9 @@ auth (Google OAuth) · course/enrollment/team · competition CRUD · โคร�
 ✅ environment + config 3 phase + scorer + baseline agents + conformance test ([`envs/cp463-vacuum`](envs/cp463-vacuum/)) ·
 ✅ runner + sandbox ([`runners/agent_env`](runners/agent_env/)) · ✅ ตรวจสอบ submission ·
 ✅ คิว + โควตา + leaderboard ระดับตรรกะ ([`core`](core/)) ·
-⬜ ผูก `core` กับ Postgres · ⬜ API + CLI อัพโหลด · ⬜ runner daemon ที่ต่อ WebSocket ·
-⬜ หน้าเว็บ leaderboard · ⬜ starter kit ที่แจกนิสิต
+✅ API + CLI อัพโหลด · ✅ ที่เก็บถาวรด้วย SQLite ([`core/db.py`](core/db.py)) ·
+✅ starter kit ที่แจกนิสิต · ✅ ตรึงหมุด baseline บน public seeds ·
+⬜ runner daemon ที่ต่อ WebSocket · ⬜ หน้าเว็บ leaderboard · ⬜ Postgres (เมื่อต้องรันหลาย process)
 
 > เกณฑ์ว่า M1 พร้อมใช้: ทีมทดสอบส่ง agent แล้วเห็นคะแนนขึ้น leaderboard ได้ครบวงจร โดยไม่มีใครต้องเข้า SSH
 
@@ -794,9 +795,15 @@ Docker sandbox → คะแนนขึ้น leaderboard พร้อม repla
   พยายามเอื้อมไปหา environment ผ่าน `gc` · ต่อเน็ต · เขียน rootfs **จริงๆ** แล้วยืนยันว่าทำไม่ได้
   ไม่ใช่อ่านธง `docker run` แล้วเชื่อว่ามันทำงาน
 
-**ที่เหลือก่อนเปิดใช้จริง** — ผูก `core/` เข้ากับ Postgres · Google OAuth แทน team token ·
-runner daemon ที่ต่อ WebSocket ออกมาหา cloud · หน้าเว็บ leaderboard + replay viewer ·
-ตรึงคะแนน baseline บน public seeds
+**ที่เหลือก่อนเปิดใช้จริง** — Google OAuth แทน team token · runner daemon ที่ต่อ WebSocket
+ออกมาหา cloud · หน้าเว็บ leaderboard + replay viewer
+
+> **เรื่อง Postgres** — `core/` ใช้ SQLite แบบ write-through แล้ว ([`core/db.py`](core/db.py))
+> สถานะอยู่รอดข้ามการรีสตาร์ทครบทุกอย่าง รวมถึงงานที่ค้างคิว lease ที่ยังไม่หมดอายุ
+> ตัวนับ fair-share และโควตารายวัน · ข้อจำกัดที่เหลือคือมันรองรับ **process เดียว**
+> ซึ่งตรงกับสถาปัตยกรรมใน [§10.1](#101-ภาพรวม-hybrid-web-บน-cloud--runner-ในมหาวิทยาลัย)
+> ที่ runner ต่อเข้ามาทาง WebSocket ไม่ใช่แชร์ฐานข้อมูล — วันที่ต้องมีหลาย process
+> คือวันที่ย้ายไป Postgres และตอนนั้นต้องเขียน query layer แทน write-through
 
 ### pre-commit hook — กันค่า seed หลุด
 

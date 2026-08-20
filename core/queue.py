@@ -10,8 +10,12 @@
    ถ้างานค้างอยู่ที่ `running` ตลอดกาล ทีมนั้นจะส่งอะไรไม่ได้อีกเลยเพราะติดกติกา 1 งาน/ทีม
 3. **รายงานผลซ้ำต้องไม่นับซ้ำ** — runner อาจส่งผลแล้วเน็ตหลุดก่อนได้ ack แล้วส่งใหม่
 
-ยังเป็น in-memory — โครงสร้างนี้ย้ายไป Postgres ได้ตรงๆ (`SELECT ... FOR UPDATE SKIP LOCKED`)
-โดยตรรกะการเลือกงานไม่เปลี่ยน
+working set อยู่ในหน่วยความจำ และเขียนทะลุลง SQLite ทุกครั้งที่สถานะเปลี่ยน
+([`core/db.py`](db.py)) — ตรรกะการเลือกงานในไฟล์นี้จึงไม่ต้องเปลี่ยนเลย
+โครงสร้างนี้ย้ายไป Postgres ได้ตรงๆ (`SELECT ... FOR UPDATE SKIP LOCKED`) เมื่อถึงวันนั้น
+
+⚠️ **ทุก transition ของ run ต้องจบด้วย `self._persist(run)`** — ถ้าลืม งานที่กำลัง
+รันอยู่จะกลับมาเป็น `queued` หลังรีสตาร์ท หรือแย่กว่านั้นคือคะแนนที่รายงานแล้วหายไป
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Iterable
 
+from core.db import Database
 from core.domain import (
     ACTIVE_RUN_STATUSES,
     Run,
@@ -45,6 +50,17 @@ class JobQueue:
     runs: dict[str, Run] = field(default_factory=dict)
     #: ทีมไหนถูกเสิร์ฟไปแล้วกี่งาน — ใช้จัดลำดับแบบ round-robin
     _served: dict[str, int] = field(default_factory=dict)
+    db: Database | None = None
+
+    def _persist(self, run: Run) -> Run:
+        if self.db:
+            self.db.save_run(run)
+        return run
+
+    def _bump_served(self, team_id: str, delta: int = 1) -> None:
+        self._served[team_id] = self._served.get(team_id, 0) + delta
+        if self.db:
+            self.db.save_served(team_id, self._served[team_id])
 
     # ── ฝั่งผู้ส่งงาน ────────────────────────────────────────────────
 
@@ -57,8 +73,21 @@ class JobQueue:
             )
         run.status = RunStatus.QUEUED
         self.runs[run.id] = run
-        self._served.setdefault(run.team_id, 0)
-        return run
+        if run.team_id not in self._served:
+            self._bump_served(run.team_id, 0)
+        return self._persist(run)
+
+    def adopt(self, run: Run) -> Run:
+        """ใส่งานเข้าคิว**โดยข้ามกติกา 1 งานพร้อมกันต่อทีม**
+
+        มีทางเข้านี้ทางเดียวและตั้งชื่อให้อ่านออก เพราะเดิม `service.start_private_run`
+        เขียนลง `queue.runs` กับ `queue._served` ตรงๆ ซึ่งเลี่ยงทั้งการตรวจและการบันทึก
+        ลงฐานข้อมูล — งาน private ทั้งชุดจะหายไปถ้ารีสตาร์ทระหว่างรอบตัดเกรด
+        """
+        self.runs[run.id] = run
+        if run.team_id not in self._served:
+            self._bump_served(run.team_id, 0)
+        return self._persist(run)
 
     def active_run_for(self, team_id: str, competition_id: str) -> Run | None:
         return next(
@@ -95,8 +124,8 @@ class JobQueue:
         run.attempts += 1
         run.started_at = run.started_at or now
         run.lease_expires_at = now + self.lease_duration
-        self._served[run.team_id] = self._served.get(run.team_id, 0) + 1
-        return run
+        self._bump_served(run.team_id)
+        return self._persist(run)
 
     def heartbeat(self, run_id: str, runner_id: str, *, now: datetime | None = None) -> None:
         """ต่ออายุ lease — runner ต้องเรียกถี่กว่า `lease_duration` เสมอ"""
@@ -105,6 +134,7 @@ class JobQueue:
         if run.status is not RunStatus.RUNNING or run.runner_id != runner_id:
             raise LeaseExpired(f"run {run_id} ไม่ได้อยู่ในมือของ runner {runner_id} แล้ว")
         run.lease_expires_at = now + self.lease_duration
+        self._persist(run)
 
     def requeue_expired(self, now: datetime | None = None) -> list[Run]:
         """งานที่ runner หายไปกลางคัน → กลับเข้าคิว
@@ -130,6 +160,7 @@ class JobQueue:
                 run.runner_id = None
                 run.lease_expires_at = None
                 requeued.append(run)
+            self._persist(run)
         return requeued
 
     def report(
@@ -168,7 +199,7 @@ class JobQueue:
         run.error_message = error_message
         run.finished_at = now
         run.lease_expires_at = None
-        return run
+        return self._persist(run)
 
     # ── สถานะสำหรับหน้าเว็บ ─────────────────────────────────────────
 
