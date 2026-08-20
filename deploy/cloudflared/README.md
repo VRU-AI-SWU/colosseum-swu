@@ -22,11 +22,20 @@
 
 | | คือ | ค่าที่ใช้ |
 |---|---|---|
-| ชื่อ tunnel | ชื่อของ**เครื่อง**ใน Cloudflare account · นิสิตไม่เคยเห็น | `swu-runner-01` |
+| ชื่อ tunnel | ชื่อของ**เครื่อง**ใน Cloudflare account · นิสิตไม่เคยเห็น | `porta-triumphalis` |
 | hostname | ชื่อที่**นิสิตพิมพ์** | `colosseum-api.vru-ai.com` |
 
-ตั้งชื่อ tunnel ตามเครื่องไม่ใช่ตามบริการ เพราะเครื่องเดียวจะรันหลาย competition
+ตั้งชื่อ tunnel ตาม**เครื่อง**ไม่ใช่ตามบริการ เพราะเครื่องเดียวจะรันหลาย competition
 (Vacuum, Tool-use Agent) และปีหน้ายังใช้ชื่อเดิมได้โดยไม่ต้องรื้อ
+
+ชื่อเดินตามธีมของโปรเจกต์ — โคลอสเซียมมีประตูที่ตั้งชื่อไว้หลายบาน ใช้เป็นระบบตั้งชื่อ
+สำหรับเครื่องที่จะเพิ่มทีหลังได้เลย
+
+| tunnel | เครื่อง | ที่มา |
+|---|---|---|
+| `porta-triumphalis` | เครื่อง CPU ในแล็บ (ตัวแรก) | ประตูแห่งชัยชนะ — ทางที่ขบวนผู้ชนะเดินเข้า |
+| `porta-sanivivaria` | เครื่อง GPU (RTX 3090) เมื่อเพิ่ม | ประตูที่ผู้รอดชีวิตเดินออก |
+| `colosseum-hypogeum` | repo ของลับ (มีอยู่แล้ว) | ห้องใต้ดินใต้พื้นสังเวียน ที่ซ่อนของก่อนขึ้นเวที |
 
 ## ติดตั้งครั้งเดียว
 
@@ -37,13 +46,13 @@ cloudflared tunnel login
 ```
 
 ```bash
-cloudflared tunnel create swu-runner-01
+cloudflared tunnel create porta-triumphalis
 ```
 
 ผูก DNS — คำสั่งนี้สร้าง CNAME ในโซน `vru-ai.com` ให้เอง
 
 ```bash
-cloudflared tunnel route dns swu-runner-01 colosseum-api.vru-ai.com
+cloudflared tunnel route dns porta-triumphalis colosseum-api.vru-ai.com
 ```
 
 จากนั้นแก้ `config.yml` ในโฟลเดอร์นี้ ใส่ `<TUNNEL-ID>` ที่ได้จากขั้นที่ 2
@@ -58,7 +67,7 @@ ARENA_SECRETS=/path/to/colosseum-hypogeum python -m core.cli serve --host 127.0.
 ```
 
 ```bash
-cloudflared tunnel run swu-runner-01
+cloudflared tunnel run porta-triumphalis
 ```
 
 ⚠️ **`--host 127.0.0.1` ไม่ใช่ `0.0.0.0`** — ให้เข้าถึงได้ทางเดียวคือผ่าน tunnel

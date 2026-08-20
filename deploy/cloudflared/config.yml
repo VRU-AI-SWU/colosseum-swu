@@ -1,7 +1,7 @@
 # cloudflared — เครื่อง runner ในมหาวิทยาลัย
 #
 # คัดลอกไปที่ ~/.cloudflared/config.yml แล้วแทน <TUNNEL-ID> ด้วยค่าที่ได้จาก
-#   cloudflared tunnel create swu-runner-01     (หรือดูซ้ำด้วย cloudflared tunnel list)
+#   cloudflared tunnel create porta-triumphalis     (หรือดูซ้ำด้วย cloudflared tunnel list)
 #
 # วิธีติดตั้งเต็มอยู่ที่ README.md ข้างไฟล์นี้
 
