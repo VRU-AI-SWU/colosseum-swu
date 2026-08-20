@@ -1,0 +1,42 @@
+# Cloudflare Tunnel — porta-triumphalis
+#
+#   sudo cp deploy/systemd/cloudflared-porta-triumphalis.service /etc/systemd/system/
+#   sudo systemctl enable --now cloudflared-porta-triumphalis
+#
+# ไม่ใช้ `cloudflared service install` โดยตั้งใจ — คำสั่งนั้นคัดลอก credentials
+# ไปไว้ที่ /etc/cloudflared/ แล้วรันเป็น root ทำให้มีสำเนากุญแจสองที่และเจ้าของไม่ชัด
+# unit นี้รันเป็น user เดิมและอ่านจาก ~/.cloudflared/ ที่เดียว
+
+[Unit]
+Description=Cloudflare Tunnel (porta-triumphalis) — ทางเข้าเดียวของ colosseum-api.vru-ai.com
+After=network-online.target arena-api.service
+Wants=network-online.target
+# ไม่ใส่ Requires=arena-api เพราะ tunnel ควรขึ้นได้แม้ API ยังไม่พร้อม —
+# จะได้เห็น 502 ที่บอกว่า "origin ไม่ตอบ" แทนที่จะเป็นโดเมนที่หายไปทั้งอัน
+# ซึ่งแยกแยะสาเหตุยากกว่ามากตอนระบบมีปัญหา
+
+[Service]
+Type=simple
+User=ratchainant
+ExecStart=/home/ratchainant/.local/bin/cloudflared --no-autoupdate \
+    --config /home/ratchainant/.cloudflared/config.yml \
+    tunnel run porta-triumphalis
+
+# --no-autoupdate: อัพเดตเองกลางเทอมแล้วพฤติกรรมเปลี่ยนเป็นความเสี่ยงที่ไม่จำเป็น
+# อัพเดตเมื่อเราตั้งใจ ด้วยการดาวน์โหลด binary ใหม่แล้ว restart
+
+Restart=always
+RestartSec=5
+# ปิดแบบเรียบร้อยให้ connection ที่ค้างอยู่จบก่อน (grace-period ใน config.yml = 30s)
+KillSignal=SIGTERM
+TimeoutStopSec=45
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -169,10 +169,19 @@ cd $ARENA/app && ARENA_SECRETS=$ARENA/secrets .venv/bin/python tools/pin_baselin
 
 ## 5. Cloudflare Tunnel
 
-ติดตั้ง `cloudflared` ตาม [คู่มือของ Cloudflare](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
+ติดตั้ง binary โดยไม่ต้อง sudo — เก็บไว้ที่ `~/.local/bin` แล้วให้ systemd เรียกจากที่นั่น
+
+```bash
+mkdir -p ~/.local/bin && curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o ~/.local/bin/cloudflared && chmod +x ~/.local/bin/cloudflared
+```
+
 แล้วรันสามคำสั่งนี้ — **รันจากโฟลเดอร์ไหนก็ได้** เพราะมันเขียนลง `~/.cloudflared/` เสมอ
 
 ขั้นแรกเปิดเบราว์เซอร์ให้ authorize แล้วเลือกโซน `vru-ai.com`
+
+⚠️ **ต้องล็อกอินด้วยบัญชีที่เป็นเจ้าของโซนนั้น** — หน้า authorize แสดงเฉพาะโซนของบัญชี
+ที่ล็อกอินอยู่ ถ้าเข้าผิดบัญชีจะเห็นตารางว่างเปล่าโดยไม่มีคำอธิบายว่าทำไม
+(บัญชีที่ถูกต้องของเราคือ `vru0ai@g.swu.ac.th`)
 
 ```bash
 cloudflared tunnel login
@@ -202,7 +211,7 @@ sudo cp $ARENA/app/deploy/systemd/arena-api.service /etc/systemd/system/ && sudo
 ```
 
 ```bash
-sudo cloudflared service install && sudo systemctl enable --now cloudflared
+sudo cp $ARENA/app/deploy/systemd/cloudflared-porta-triumphalis.service /etc/systemd/system/ && sudo systemctl enable --now cloudflared-porta-triumphalis
 ```
 
 สำรองข้อมูลทุกคืนตี 3 — **แก้ path ในสองไฟล์ให้ตรงกับเครื่องก่อน**
@@ -225,19 +234,15 @@ systemctl status arena-api cloudflared --no-pager && curl -s https://colosseum-a
 
 ---
 
-## หลังติดตั้งเสร็จ ต้องวัดสองอย่าง
+## เพดานที่วัดไว้แล้ว
 
-ทั้งคู่ยังไม่รู้ค่าจริง เพราะที่วัดไปเป็น quick tunnel ซึ่งไม่บังคับเพดานของ zone
+**เพดานขนาดไฟล์** — ✅ วัดแล้ว: **100 MiB พอดี** (99 MiB ผ่าน · 100 MiB ได้ 413 จาก edge)
+request ที่เกินไม่เคยถึง API เรา จึงส่งข้อความบอกวิธีแก้กลับไม่ได้ — `arena submit`
+ตรวจให้ก่อนอัพโหลดและตัดที่ 95 MB แล้ว
 
-**เพดานขนาดไฟล์** — แผน Free ประกาศไว้ที่ 100 MB · ต้องรู้ค่าจริงก่อนประกาศให้นิสิต
-เพราะทีมที่ส่ง policy ที่เทรนมาอาจมี weights หลักสิบ MB
-
-```bash
-dd if=/dev/zero of=/tmp/blob.bin bs=1M count=105 && curl -s -o /dev/null -w "%{http_code} %{time_total}s\n" -F "file=@/tmp/blob.bin" https://colosseum-api.vru-ai.com/api/health
-```
-
-**timeout ของ request** — Cloudflare ตัดที่ 100 วินาทีด้วย error 524 · การรับ submission
-ต้องจบเร็วกว่านั้นเสมอ (การตรวจแบบ static ไม่รันโค้ด จึงเร็ว) แต่ต้องยืนยัน
+**timeout ของ request** — Cloudflare ตัดที่ 100 วินาทีด้วย error 524 · ไม่กระทบเรา
+เพราะการรับ submission ทำแค่การตรวจแบบ static ที่ไม่รันโค้ด (วัดได้ 1.9 วิ สำหรับไฟล์
+25 MB ซึ่งส่วนใหญ่เป็นเวลาส่งข้อมูล) ส่วนการให้คะแนนเกิดแบบ async ที่ worker
 
 ## เดินเครื่องประจำวัน
 
