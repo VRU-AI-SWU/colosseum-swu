@@ -29,6 +29,14 @@ import zipfile
 from pathlib import Path
 
 DEFAULT_URL = os.environ.get("ARENA_URL", "http://localhost:8000")
+
+#: เพดาน request body ของ Cloudflare แผน Free — **วัดจริงแล้ว** บน
+#: colosseum-api.vru-ai.com เมื่อ ส.ค. 2026: 99 MiB ผ่าน · 100 MiB ได้ 413 จาก edge
+#: ตัดไว้ต่ำกว่านั้นเพื่อเผื่อ multipart framing ซึ่งบวกเพิ่มอีกไม่กี่ร้อยไบต์
+#:
+#: ตรวจฝั่ง CLI เพราะถ้าปล่อยไป Cloudflare จะตอบ 413 เปล่าๆ ที่ edge —
+#: request ไม่เคยถึง API ของเรา จึงไม่มีทางส่งข้อความที่บอกวิธีแก้กลับไปได้เลย
+MAX_UPLOAD_BYTES = 95 * 1024 * 1024
 IGNORED = {".git", "__pycache__", ".venv", ".pytest_cache", "models", "tb", ".DS_Store"}
 
 
@@ -47,7 +55,7 @@ def pack(directory: Path) -> bytes:
     """zip โฟลเดอร์ปัจจุบัน โดยข้ามของที่ไม่ควรส่ง
 
     ข้าม `models/` และ `.venv/` ให้อัตโนมัติ — สองอย่างนี้เป็นสาเหตุที่พบบ่อยที่สุด
-    ที่ทำให้ไฟล์เกินเพดาน 200 MB โดยที่นิสิตไม่รู้ตัว
+    ที่ทำให้ไฟล์เกินเพดาน 95 MB โดยที่นิสิตไม่รู้ตัว
     """
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -245,7 +253,34 @@ def cmd_init(args) -> int:
 
 def cmd_submit(args) -> int:
     data = pack(Path(args.dir).resolve())
-    print(f"แพ็กไฟล์ได้ {len(data) / 1024:.0f} KB")
+    size_mb = len(data) / 1024 / 1024
+    print(f"แพ็กไฟล์ได้ {size_mb:.1f} MB")
+
+    if len(data) > MAX_UPLOAD_BYTES:
+        sys.stdout.flush()  # กัน stderr แซงขึ้นไปอยู่เหนือบรรทัด "แพ็กไฟล์ได้"
+        big = sorted(
+            ((f.stat().st_size, f) for f in Path(args.dir).resolve().rglob("*")
+             if f.is_file() and not any(part in IGNORED for part in f.parts)),
+            reverse=True,
+        )[:3]
+        print(
+            f"\n❌ ไฟล์ใหญ่เกินไป — {size_mb:.1f} MB เกินเพดาน "
+            f"{MAX_UPLOAD_BYTES / 1024 / 1024:.0f} MB\n\n"
+            "ไฟล์ที่ใหญ่ที่สุดในโฟลเดอร์",
+            file=sys.stderr,
+        )
+        for n, f in big:
+            print(f"   {n / 1024 / 1024:>7.1f} MB  {f.relative_to(Path(args.dir).resolve())}",
+                  file=sys.stderr)
+        print(
+            "\nวิธีแก้\n"
+            "   · ถ้าเป็น checkpoint ระหว่างเทรน — ส่งเฉพาะตัวสุดท้ายที่ใช้จริง\n"
+            "   · ถ้าเป็น policy ที่เทรนมา — บันทึกเฉพาะ weights ไม่ใช่ทั้ง optimizer state\n"
+            "     (torch.save(model.state_dict()) ไม่ใช่ torch.save(model))\n"
+            "   · โฟลเดอร์ models/ กับ .venv/ ถูกข้ามให้อัตโนมัติอยู่แล้ว",
+            file=sys.stderr,
+        )
+        return 1
     with _client() as client:
         response = client.post(
             f"/api/competitions/{args.competition}/submissions",

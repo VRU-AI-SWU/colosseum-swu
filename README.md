@@ -417,10 +417,19 @@ class Predictor:
 ทางของ HTTP ส่วน cloudflared คุยกับ edge ผ่าน **UDP 7844** เป็นทางหลัก ซึ่ง proxy
 แบบ HTTP ไม่แตะเลย — และถึงจะถูกบังคับให้ fallback มาที่ TCP 7844 พอร์ตนั้นก็ไม่ถูกดักเช่นกัน
 
-⚠️ **ตัวเลขข้างบนมาจาก quick tunnel (`trycloudflare.com`) ไม่ใช่ named tunnel บนโดเมนจริง**
-เพดานที่ Cloudflare ประกาศไว้สำหรับ zone แผน Free คือ request body 100 MB และ origin
-timeout 100 วินาที (error 524) ซึ่ง quick tunnel ไม่ได้บังคับ — **ต้องวัดซ้ำหลังตั้ง named
-tunnel บน `vru-ai.com`** ก่อนตัดสินใจว่าจะให้นิสิตอัพโหลดไฟล์ได้ใหญ่แค่ไหน
+#### วัดซ้ำบน named tunnel จริงแล้ว (`colosseum-api.vru-ai.com`)
+
+ตัวเลขข้างบนมาจาก quick tunnel ซึ่ง**ไม่บังคับเพดานของ zone** — ของจริงต่างออกไป
+
+| ขนาด upload | quick tunnel | **named tunnel (ของจริง)** |
+|---|---|---|
+| 99 MiB | ผ่าน | ✅ ผ่าน (ถึง origin) |
+| 100 MiB (104,857,600 ไบต์) | ผ่าน | ❌ **413 จาก edge ใน 0.28 วิ** |
+| 105 MiB | ผ่าน | ❌ 413 |
+
+เพดาน **100 MiB พอดี** ตามที่แผน Free ประกาศ · request ที่เกินถูกตัดที่ edge จึง
+**ไม่เคยถึง API ของเรา** — เราส่งข้อความบอกวิธีแก้กลับไปไม่ได้เลย นิสิตจะเห็นแค่ 413 เปล่าๆ
+`arena submit` จึงตรวจขนาดให้ก่อนอัพโหลดและตัดที่ 95 MB เผื่อ multipart framing
 
 ### 10.2 Job Lifecycle
 

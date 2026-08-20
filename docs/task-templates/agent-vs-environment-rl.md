@@ -306,7 +306,7 @@ evaluation:
 | เวลารวมต่อ run | 20 นาที |
 | `step_timeout_ms` | 1000 (ตัวกันงานค้าง ไม่มีผลต่อคะแนน) |
 | RAM | 8 GB |
-| ขนาด submission | 200 MB |
+| ขนาด submission | 95 MB |
 | network | ไม่มี |
 
 ⚠️ **environment ต้องรันคนละ process กับ agent** — ถ้าอยู่ด้วยกัน นิสิตเอื้อมไปอ่าน state ภายในของ environment
@@ -374,7 +374,7 @@ ndarray ส่งเป็น `{"__nd__": {"dtype": str, "shape": [int], "data":
 **การเทรนไม่ได้เกิดบนแพลตฟอร์ม** — นิสิตเทรนบนเครื่องตัวเอง/Colab แพลตฟอร์มประเมินผลอย่างเดียว
 เหตุผลและทางเลือกในอนาคตดู [CP463 §10](../competitions/CP463/1-2026/vacuum-robot/overview.md#10-นโยบายการ-train)
 
-**Artifact ขนาดเล็ก** (policy ทั่วไปไม่เกิน 200 MB) → เก็บถาวรได้ทุก submission ไม่ต้องมีนโยบายลบแบบ deep-learning template
+**Artifact ขนาดเล็ก** (policy ทั่วไปไม่เกิน 95 MB) → เก็บถาวรได้ทุก submission ไม่ต้องมีนโยบายลบแบบ deep-learning template
 
 **Replay ไม่ใช้ GPU และแทบไม่มีต้นทุน** — environment ต้องบันทึก trajectory เป็น **delta ต่อ timestep**
 (ตำแหน่ง/สถานะที่เปลี่ยน + event flags) ไม่ใช่ snapshot ของ state เต็ม การวาดภาพเกิดบนเบราว์เซอร์ของนิสิตทั้งหมด

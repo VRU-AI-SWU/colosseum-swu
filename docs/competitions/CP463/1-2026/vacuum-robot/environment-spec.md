@@ -765,7 +765,7 @@ pyyaml == 6.*
 | ตรวจ | เกณฑ์ |
 |---|---|
 | โครงสร้าง | มี `agent.py` ที่นิยาม `class Agent` และมี `__init__`, `reset`, `act` |
-| ขนาด | zip ≤ 200 MB · ไฟล์เดี่ยว ≤ 100 MB |
+| ขนาด | zip ≤ **95 MB** · `arena submit` ตรวจให้ก่อนอัพโหลด |
 | import | เฉพาะ stdlib + numpy + torch + package ใน whitelist (ประกาศตอนเปิดเทอม) |
 | smoke test | สร้าง agent แล้วรัน 1 episode บน seed ตัวอย่างให้จบได้ |
 | action ที่คืน | ต้องเป็น `int` ใน `[0, 5]` — ถ้าคืนชนิดอื่นหรือนอกช่วง = ปฏิเสธ |
