@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import io
 import zipfile
 
 import pytest
@@ -76,3 +77,24 @@ def test_correct_folder_passes_and_returns_an_absolute_path(tmp_path):
     got = _require_agent_dir(str(tmp_path))
     assert got.is_absolute()
     assert (got / "agent.py").is_file()
+
+
+def test_zip_names_always_use_forward_slashes(tmp_path):
+    """ชื่อใน zip ต้องเป็น `/` เสมอ ไม่ว่าจะแพ็กจากเครื่องอะไร
+
+    รูปแบบ zip กำหนดไว้แบบนั้น และฝั่งเซิร์ฟเวอร์แยกโฟลเดอร์ด้วย `/` ตรงๆ
+    (`core/store.py` `extract` · `validate._resolve_agent_py`) ถ้าไฟล์จากเครื่อง
+    Windows หลุดมาเป็น `my-agent\\agent.py` เซิร์ฟเวอร์จะเห็นเป็นชื่อไฟล์เดียว
+    ยาวๆ แล้วหา agent.py ไม่เจอ
+    """
+    (tmp_path / "agent.py").write_text("class Agent: pass\n")
+    (tmp_path / "helpers").mkdir()
+    (tmp_path / "helpers" / "world.py").write_text("X = 1\n")
+    (tmp_path / "helpers" / "deep").mkdir()
+    (tmp_path / "helpers" / "deep" / "more.py").write_text("Y = 2\n")
+
+    names = zipfile.ZipFile(io.BytesIO(pack(tmp_path))).namelist()
+
+    assert not any("\\" in n for n in names), names
+    assert "helpers/world.py" in names
+    assert "helpers/deep/more.py" in names

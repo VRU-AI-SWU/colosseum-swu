@@ -56,6 +56,12 @@ def pack(directory: Path) -> bytes:
 
     ข้าม `models/` และ `.venv/` ให้อัตโนมัติ — สองอย่างนี้เป็นสาเหตุที่พบบ่อยที่สุด
     ที่ทำให้ไฟล์เกินเพดาน 95 MB โดยที่นิสิตไม่รู้ตัว
+
+    ใช้ `.as_posix()` ตั้งชื่อใน zip เพื่อให้ได้ `/` เสมอ ไม่ว่าจะแพ็กจากเครื่องอะไร —
+    รูปแบบ zip กำหนดให้ใช้ `/` และ `zipfile` ก็แปลง `\\` ให้อยู่แล้ว แต่การพึ่ง
+    การแปลงนั้นแปลว่าไฟล์ที่นิสิต Windows ส่งขึ้นมา ถูกต้องเพราะรายละเอียดภายใน
+    ของ stdlib ไม่ใช่เพราะโค้ดเราตั้งใจ · ถ้าหลุดมาเป็น `my-agent\\agent.py`
+    เซิร์ฟเวอร์จะเห็นเป็นชื่อไฟล์เดียวยาวๆ แล้วหา `agent.py` ไม่เจอ
     """
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -63,7 +69,7 @@ def pack(directory: Path) -> bytes:
             if any(part in IGNORED for part in path.parts):
                 continue
             if path.is_file():
-                zf.write(path, path.relative_to(directory))
+                zf.write(path, path.relative_to(directory).as_posix())
     return buf.getvalue()
 
 
