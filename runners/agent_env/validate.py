@@ -68,6 +68,39 @@ class ValidationReport:
 # ── ชั้นที่ 1: static (ปลอดภัยพอจะรันบน cloud API) ─────────────────
 
 
+def _resolve_agent_py(names: set[str], report: ValidationReport) -> str | None:
+    """หา `agent.py` **ด้วยกติกาเดียวกับที่ `ArtifactStore.extract` ใช้ตอนรัน**
+
+    ต้องตรงกันเป๊ะ ถ้าที่นี่ยอมกว้างกว่า submission จะผ่านการตรวจ **กินโควตาไปหนึ่งครั้ง**
+    แล้วค่อยไปตายตอนรันด้วย `agent_init_failed` ซึ่งคือการเสียโควตาให้ความผิดพลาด
+    ที่บอกได้ตั้งแต่ตอนรับไฟล์ · กติกาคือ *ราก zip* หรือ *ซ้อนหนึ่งชั้นและมีโฟลเดอร์เดียว*
+    ([`core/store.py`](../../core/store.py) `extract`)
+
+    เคสที่พบบ่อยคือรัน `arena submit` จากโฟลเดอร์แม่ที่มีโฟลเดอร์งานหลายอัน
+    (`my-agent/` กับ `my-agent-v2/`) — เดิมผ่านการตรวจแล้วไปพังทีหลัง
+    """
+    if "agent.py" in names:
+        return "agent.py"
+
+    nested = sorted({n.split("/", 1)[0] for n in names if n.count("/") == 1 and n.endswith("/agent.py")})
+    if len(nested) == 1:
+        return f"{nested[0]}/agent.py"
+
+    if len(nested) > 1:
+        report.add(
+            "ambiguous_agent_py",
+            f"มี agent.py อยู่หลายโฟลเดอร์: {', '.join(nested)} — ไม่รู้ว่าจะรันอันไหน",
+            "ส่งทีละโฟลเดอร์งาน — `cd <โฟลเดอร์งาน>` แล้ว `arena submit` หรือระบุ `--dir <โฟลเดอร์งาน>`",
+        )
+    else:
+        report.add(
+            "missing_agent_py",
+            "ไม่พบ agent.py ใน zip",
+            "วาง agent.py ไว้ที่ระดับบนสุดของ zip (ซ้อนได้ไม่เกินหนึ่งชั้น)",
+        )
+    return None
+
+
 def inspect_archive(archive: str | Path) -> ValidationReport:
     """ตรวจ zip โดยไม่แตกไฟล์ลงดิสก์และไม่รันอะไรเลย"""
     report = ValidationReport()
@@ -106,15 +139,10 @@ def inspect_archive(archive: str | Path) -> ValidationReport:
                     )
 
             names = {i.filename for i in infos}
-            if not any(n == "agent.py" or n.endswith("/agent.py") for n in names):
-                report.add(
-                    "missing_agent_py",
-                    "ไม่พบ agent.py ใน zip",
-                    "วาง agent.py ไว้ที่ระดับบนสุดของ zip (ไม่ใช่ในโฟลเดอร์ซ้อน)",
-                )
+            agent_name = _resolve_agent_py(names, report)
+            if agent_name is None:
                 return report
 
-            agent_name = next(n for n in names if n == "agent.py" or n.endswith("/agent.py"))
             source = zf.read(agent_name).decode("utf-8", errors="replace")
             py_sources = {
                 n: zf.read(n).decode("utf-8", errors="replace")
