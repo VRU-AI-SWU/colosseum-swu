@@ -112,8 +112,12 @@ def demo_arena(
             course_id=competition.course_id,
             name=f"ทีมที่ {i}",
             member_ids=[f"user-{i}"],
+            # ⚠️ **โทเคนที่เดาได้ — dev กับเทสต์เท่านั้น**
+            # ทีมจริงได้โทเคนสุ่มจาก `new_token()` เสมอ ตรงนี้ตั้งค่าตายตัวเพื่อให้
+            # เทสต์และการลองใช้ในเครื่องไม่ต้องไปอ่านค่าสุ่มมาก่อนทุกครั้ง
+            token=f"team-{i}",
         )
-        arena.store.save_team(team)  # id ทำหน้าที่เป็นโทเคนไปก่อน
+        arena.store.save_team(team)
         created.append(team)
 
     return arena, created

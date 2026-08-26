@@ -273,6 +273,7 @@ def build_arena(
     queue = JobQueue(db=db)
     if db is not None:
         store.teams = db.load_teams()
+        store.users = db.load_users()
         store.competitions = db.load_competitions()
         store.submissions = db.load_submissions()
         store.audit = db.load_audit()

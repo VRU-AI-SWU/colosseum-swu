@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -39,9 +40,11 @@ from core.domain import (
     RunStatus,
     Submission,
     Team,
+    User,
+    new_invite_code,
 )
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -50,12 +53,27 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 
 CREATE TABLE IF NOT EXISTS teams (
-    id         TEXT PRIMARY KEY,
-    course_id  TEXT NOT NULL,
-    name       TEXT NOT NULL,
-    alias      TEXT,
-    member_ids TEXT NOT NULL
+    id           TEXT PRIMARY KEY,
+    course_id    TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    alias        TEXT,
+    member_ids   TEXT NOT NULL,
+    token        TEXT NOT NULL UNIQUE,
+    invite_code  TEXT NOT NULL,
+    dissolved_at TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_teams_token ON teams(token);
+CREATE INDEX IF NOT EXISTS idx_teams_invite ON teams(invite_code);
+
+CREATE TABLE IF NOT EXISTS users (
+    id         TEXT PRIMARY KEY,
+    email      TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    -- รหัสถาวรจาก Google · ใช้จับคู่แทนอีเมลเพราะอีเมลเปลี่ยนได้ sub ไม่เปลี่ยน
+    google_sub TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_users_sub ON users(google_sub);
 
 CREATE TABLE IF NOT EXISTS competitions (
     id                     TEXT PRIMARY KEY,
@@ -141,7 +159,32 @@ def _parse_dt(value: str | None) -> datetime | None:
 
 
 class SchemaMismatch(RuntimeError):
-    """ไฟล์ฐานข้อมูลมาจากคนละเวอร์ชันของ schema — ต้อง migrate ก่อน ห้ามเดา"""
+    """ไฟล์ฐานข้อมูลมาจากคนละเวอร์ชันของ schema และไม่มี migration ให้ — ห้ามเดา"""
+
+
+def _migrate_1_to_2(conn: sqlite3.Connection) -> None:
+    """v1 → v2 · เพิ่มตาราง users และแยก token ของทีมออกจาก id
+
+    **โทเคนเดิมถูกเก็บไว้เป็น `token = id`** ไม่ได้สุ่มใหม่ — ทีมที่มีอยู่ตั้งค่า
+    `ARENA_TOKEN` ไว้แล้ว การสุ่มใหม่เงียบๆ จะทำให้ `arena submit` ของเขาพังโดย
+    ไม่มีคำอธิบาย · ทีมที่สร้างใหม่หลังจากนี้ได้โทเคนสุ่มเสมอ
+
+    ⚠️ แปลว่าทีมเดิมยังมีโทเคนที่เดาได้อยู่ — ต้องลบทีม demo ทิ้งก่อนเปิดให้นิสิตใช้
+    """
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(teams)")}
+    if "token" not in cols:
+        conn.execute("ALTER TABLE teams ADD COLUMN token TEXT NOT NULL DEFAULT ''")
+        conn.execute("ALTER TABLE teams ADD COLUMN invite_code TEXT NOT NULL DEFAULT ''")
+        conn.execute("ALTER TABLE teams ADD COLUMN dissolved_at TEXT")
+    for row in conn.execute("SELECT id, token, invite_code FROM teams").fetchall():
+        conn.execute(
+            "UPDATE teams SET token = ?, invite_code = ? WHERE id = ?",
+            (row["token"] or row["id"], row["invite_code"] or new_invite_code(), row["id"]),
+        )
+
+
+#: เวอร์ชันปลายทาง → ฟังก์ชันที่พาจากเวอร์ชันก่อนหน้ามาถึงมัน
+MIGRATIONS = {2: _migrate_1_to_2}
 
 
 class Database:
@@ -159,11 +202,28 @@ class Database:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
-        self._conn.executescript(SCHEMA)
+        # ⚠️ ลำดับสำคัญ: migrate ก่อน executescript
+        #
+        # SCHEMA มี index ที่อ้างคอลัมน์ใหม่ (เช่น teams.token) ส่วน
+        # `CREATE TABLE IF NOT EXISTS` ไม่แตะตารางที่มีอยู่แล้ว ถ้ารัน SCHEMA ก่อน
+        # กับไฟล์เวอร์ชันเก่า มันจะล้มที่ `no such column: token` ก่อนที่ migration
+        # จะได้ทำงานเลยสักครั้ง
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
         self._check_version()
+        self._conn.executescript(SCHEMA)
+        self._conn.commit()
 
     def _check_version(self) -> None:
+        """ตั้งเวอร์ชันของไฟล์ใหม่ หรือพาไฟล์เก่าขึ้นมาให้ตรงกับโค้ด"""
         row = self._conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+        if row is None and self._has_tables():
+            # ไฟล์มีตารางแล้วแต่ไม่มี meta — เก่ากว่าตอนที่เริ่มบันทึกเวอร์ชัน
+            row = {"value": "1"}
+            self._conn.execute(
+                "INSERT INTO meta(key, value) VALUES('schema_version', '1')"
+            )
         if row is None:
             self._conn.execute(
                 "INSERT INTO meta(key, value) VALUES('schema_version', ?)",
@@ -172,12 +232,39 @@ class Database:
             self._conn.commit()
             return
         found = int(row["value"])
-        if found != SCHEMA_VERSION:
+        if found == SCHEMA_VERSION:
+            return
+        if found > SCHEMA_VERSION:
+            raise SchemaMismatch(
+                f"{self.path} ใช้ schema เวอร์ชัน {found} ซึ่ง**ใหม่กว่า**โค้ดนี้ ({SCHEMA_VERSION})\n"
+                "น่าจะเปิดด้วยโค้ดเวอร์ชันเก่า — อัพเดตโค้ดก่อน อย่ารันต่อ"
+            )
+
+        missing = [v for v in range(found + 1, SCHEMA_VERSION + 1) if v not in MIGRATIONS]
+        if missing:
             raise SchemaMismatch(
                 f"{self.path} ใช้ schema เวอร์ชัน {found} แต่โค้ดนี้คาดหวัง {SCHEMA_VERSION}\n"
-                "ต้องเขียน migration ก่อน — การเปิดไฟล์เก่าด้วย schema ใหม่โดยไม่ migrate\n"
-                "จะทำให้ข้อมูลบางส่วนหายไปเงียบๆ ซึ่งแย่กว่าการล้มทันที"
+                f"ไม่มี migration สำหรับเวอร์ชัน {missing} — ต้องเขียนก่อน\n"
+                "การเปิดไฟล์เก่าด้วย schema ใหม่โดยไม่ migrate จะทำให้ข้อมูลบางส่วน\n"
+                "หายไปเงียบๆ ซึ่งแย่กว่าการล้มทันที"
             )
+
+        # ทำทั้งชุดใน transaction เดียว — migration ที่ล้มกลางทางแล้วทิ้งไฟล์ไว้ครึ่งๆ
+        # แย่กว่าไม่ได้เริ่มเลย เพราะครั้งถัดไปจะไม่รู้ว่าค้างอยู่ตรงไหน
+        for version in range(found + 1, SCHEMA_VERSION + 1):
+            MIGRATIONS[version](self._conn)
+        self._conn.execute(
+            "UPDATE meta SET value = ? WHERE key = 'schema_version'", (str(SCHEMA_VERSION),)
+        )
+        self._conn.commit()
+        print(f"migrate {self.path.name}: schema {found} → {SCHEMA_VERSION}", file=sys.stderr)
+
+    def _has_tables(self) -> bool:
+        return bool(
+            self._conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='teams'"
+            ).fetchone()
+        )
 
     def close(self) -> None:
         """ปิดแบบเรียบร้อย — ยุบ WAL กลับเข้าไฟล์หลักก่อน
@@ -201,9 +288,20 @@ class Database:
 
     def save_team(self, team: Team) -> None:
         self._write(
-            "INSERT OR REPLACE INTO teams(id, course_id, name, alias, member_ids)"
+            "INSERT OR REPLACE INTO teams(id, course_id, name, alias, member_ids,"
+            " token, invite_code, dissolved_at) VALUES(?,?,?,?,?,?,?,?)",
+            (
+                team.id, team.course_id, team.name, team.alias,
+                json.dumps(team.member_ids), team.token, team.invite_code,
+                _dt(team.dissolved_at),
+            ),
+        )
+
+    def save_user(self, user: User) -> None:
+        self._write(
+            "INSERT OR REPLACE INTO users(id, email, name, google_sub, created_at)"
             " VALUES(?,?,?,?,?)",
-            (team.id, team.course_id, team.name, team.alias, json.dumps(team.member_ids)),
+            (user.id, user.email, user.name, user.google_sub, _dt(user.created_at)),
         )
 
     def save_competition(self, c: Competition) -> None:
@@ -291,8 +389,19 @@ class Database:
             r["id"]: Team(
                 id=r["id"], course_id=r["course_id"], name=r["name"], alias=r["alias"],
                 member_ids=json.loads(r["member_ids"]),
+                token=r["token"], invite_code=r["invite_code"],
+                dissolved_at=_parse_dt(r["dissolved_at"]),
             )
             for r in self._rows("teams")
+        }
+
+    def load_users(self) -> dict[str, User]:
+        return {
+            r["id"]: User(
+                id=r["id"], email=r["email"], name=r["name"],
+                google_sub=r["google_sub"], created_at=_parse_dt(r["created_at"]),
+            )
+            for r in self._rows("users")
         }
 
     def load_competitions(self) -> dict[str, Competition]:
@@ -372,5 +481,5 @@ class Database:
         with self._lock:
             return {
                 table: self._conn.execute(f"SELECT count(*) c FROM {table}").fetchone()["c"]
-                for table in ("teams", "competitions", "submissions", "runs", "audit")
+                for table in ("teams", "users", "competitions", "submissions", "runs", "audit")
             }

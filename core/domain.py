@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import secrets
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -23,6 +24,26 @@ from typing import Any
 
 def new_id() -> str:
     return uuid.uuid4().hex
+
+
+def new_token() -> str:
+    """โทเคนของทีม — **ต้องเดาไม่ได้**
+
+    เดิมใช้ `team-1`, `team-2` ซึ่งเดาถูกตั้งแต่ครั้งแรก ตอนที่ระบบรันบน localhost
+    เรื่องนี้ไม่สำคัญ แต่ API อยู่บนอินเทอร์เน็ตแล้ว ใครที่รู้ URL จะส่งงานในนามทีมใด
+    ก็ได้ กินโควตาของทีมนั้น และเห็นคะแนนรายตอนของเขา
+    """
+    return secrets.token_urlsafe(24)
+
+
+def new_invite_code() -> str:
+    """รหัสเชิญเข้าทีม — สั้นพอที่จะบอกกันด้วยปากได้
+
+    ตัดอักษรที่สับสนออก (0/O, 1/I/L) เพราะนิสิตจะอ่านรหัสนี้ให้เพื่อนฟังในห้องเรียน
+    26 ตัวอักษร ยกกำลัง 6 ≈ 300 ล้าน — เดาสุ่มไม่คุ้มเมื่อมีเพดานการลองผิด
+    """
+    alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+    return "".join(secrets.choice(alphabet) for _ in range(6))
 
 
 def utcnow() -> datetime:
@@ -60,12 +81,38 @@ SCORING_RUN_KINDS = frozenset({RunKind.PUBLIC, RunKind.PRIVATE})
 
 
 @dataclass
+class User:
+    """นิสิตหนึ่งคน — ยืนยันตัวตนด้วย Google Workspace ของมหาวิทยาลัย
+
+    `google_sub` คือรหัสถาวรที่ Google ให้มา ใช้เป็นตัวจับคู่แทนอีเมล เพราะอีเมล
+    เปลี่ยนได้ (เปลี่ยนชื่อ, เปลี่ยนนามสกุล) แต่ `sub` ไม่เปลี่ยน
+    """
+
+    id: str
+    email: str
+    name: str
+    google_sub: str
+    created_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
 class Team:
     id: str
     course_id: str
     name: str
     alias: str | None = None  # ชื่อนิรนามบน leaderboard (README §6.1) ผู้สอนเห็นชื่อจริงเสมอ
     member_ids: list[str] = field(default_factory=list)
+    #: credential ที่ `arena submit` ใช้ — แยกจาก `id` โดยตั้งใจ เดิมสองอย่างนี้เป็นตัวเดียวกัน
+    #: ทำให้ id ที่เดาได้กลายเป็นรหัสผ่านที่เดาได้ไปด้วย
+    token: str = field(default_factory=new_token)
+    #: รหัสให้เพื่อนใช้เข้าทีม
+    invite_code: str = field(default_factory=new_invite_code)
+    #: ทีมเดี่ยวที่สมาชิกย้ายไปอยู่ทีมอื่นแล้ว — เก็บไว้เพื่อ audit แต่ไม่ขึ้น leaderboard
+    dissolved_at: datetime | None = None
+
+    @property
+    def is_active(self) -> bool:
+        return self.dissolved_at is None
 
     def display_name(self, *, reveal: bool) -> str:
         """`reveal=True` สำหรับผู้สอน/TA เท่านั้น"""

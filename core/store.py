@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from core.db import Database
-from core.domain import AuditEvent, Competition, Run, Submission, Team, new_id, utcnow
+from core.domain import AuditEvent, Competition, Run, Submission, Team, User, new_id, utcnow
 
 
 @dataclass
@@ -80,6 +80,7 @@ class Store:
     teams: dict[str, Team] = field(default_factory=dict)
     competitions: dict[str, Competition] = field(default_factory=dict)
     submissions: dict[str, Submission] = field(default_factory=dict)
+    users: dict[str, User] = field(default_factory=dict)
     audit: list[AuditEvent] = field(default_factory=list)
     db: Database | None = None
 
@@ -103,14 +104,49 @@ class Store:
             self.db.save_submission(submission)
         return submission
 
+    def save_user(self, user: User) -> User:
+        self.users[user.id] = user
+        if self.db:
+            self.db.save_user(user)
+        return user
+
     # ── lookup ──────────────────────────────────────────────────────
 
     def competition_by_slug(self, slug: str) -> Competition | None:
         return next((c for c in self.competitions.values() if c.slug == slug), None)
 
     def team_by_token(self, token: str) -> Team | None:
-        """โทเคนของทีมสำหรับ CLI — **ของชั่วคราว** ของจริงใช้ Google OAuth (README §11)"""
-        return self.teams.get(token)
+        """หาทีมจาก `Authorization: Bearer <token>`
+
+        เดิมเป็น `self.teams.get(token)` เพราะ id กับ token เป็นตัวเดียวกัน — id ที่
+        เดาได้จึงกลายเป็นรหัสผ่านที่เดาได้ · ตอนนี้แยกกันแล้ว
+        """
+        if not token:
+            return None
+        return next((t for t in self.teams.values() if t.token == token), None)
+
+    def user_by_google_sub(self, sub: str) -> User | None:
+        return next((u for u in self.users.values() if u.google_sub == sub), None)
+
+    def team_by_invite_code(self, code: str) -> Team | None:
+        """หาทีมจากรหัสเชิญ — ไม่สนตัวพิมพ์เล็กใหญ่เพราะนิสิตพิมพ์เอง"""
+        code = (code or "").strip().upper()
+        if not code:
+            return None
+        return next(
+            (t for t in self.teams.values() if t.invite_code == code and t.is_active), None
+        )
+
+    def team_of(self, user_id: str, course_id: str) -> Team | None:
+        """ทีมที่นิสิตคนนี้อยู่ในวิชานี้ — ทีมที่ยุบแล้วไม่นับ"""
+        return next(
+            (
+                t
+                for t in self.teams.values()
+                if t.course_id == course_id and user_id in t.member_ids and t.is_active
+            ),
+            None,
+        )
 
     def submissions_of(self, team_id: str, competition_id: str) -> list[Submission]:
         return sorted(

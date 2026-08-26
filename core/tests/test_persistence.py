@@ -237,21 +237,57 @@ def test_audit_trail_survives_restart(lab):
 # ── ความปลอดภัยของไฟล์ฐานข้อมูล ─────────────────────────────────────
 
 
-def test_schema_version_mismatch_fails_loudly(tmp_path):
-    """เปิดไฟล์เก่าด้วย schema ใหม่ต้องล้มทันที ไม่ใช่ทำงานต่อแล้วข้อมูลหายบางส่วน"""
-    path = tmp_path / "arena.db"
-    db = Database(path)
-    db.close()
+def test_database_from_the_future_refuses_to_open(tmp_path):
+    """ไฟล์ที่ใหม่กว่าโค้ดต้องล้มทันที — แปลว่ามีคนรันโค้ดเก่ากับข้อมูลใหม่
 
+    ทำงานต่อจะเขียนทับข้อมูลที่โค้ดนี้ไม่รู้จัก ซึ่งแย่กว่าการไม่ยอมเริ่ม
+    """
     import sqlite3
 
+    path = tmp_path / "arena.db"
+    Database(path).close()
     conn = sqlite3.connect(str(path))
     conn.execute("UPDATE meta SET value='999' WHERE key='schema_version'")
     conn.commit()
     conn.close()
 
-    with pytest.raises(SchemaMismatch, match="migration"):
+    with pytest.raises(SchemaMismatch, match="ใหม่กว่า"):
         Database(path)
+
+
+def test_v1_database_migrates_and_keeps_existing_tokens(tmp_path):
+    """ไฟล์ v1 ต้อง migrate เองได้ และ**โทเคนเดิมต้องไม่เปลี่ยน**
+
+    ทีมที่ตั้ง ARENA_TOKEN ไว้แล้วจะพัง ถ้าการอัพเกรดสุ่มโทเคนใหม่ให้เงียบๆ
+    โดยไม่มีใครบอก — อาการคือ `arena submit` ได้ 401 แบบไม่มีคำอธิบาย
+    """
+    import sqlite3
+
+    path = tmp_path / "arena.db"
+    conn = sqlite3.connect(str(path))
+    conn.executescript("""
+        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        INSERT INTO meta VALUES('schema_version', '1');
+        CREATE TABLE teams (
+            id TEXT PRIMARY KEY, course_id TEXT NOT NULL, name TEXT NOT NULL,
+            alias TEXT, member_ids TEXT NOT NULL
+        );
+        INSERT INTO teams VALUES('team-9', 'cp463', 'ทีมเก่า', NULL, '["u1"]');
+    """)
+    conn.commit()
+    conn.close()
+
+    db = Database(path)
+    try:
+        team = db.load_teams()["team-9"]
+        assert team.token == "team-9", "โทเคนเดิมต้องอยู่เหมือนเดิม"
+        assert len(team.invite_code) == 6, "ทีมเก่าต้องได้รหัสเชิญด้วย"
+        assert team.is_active
+        assert db.load_users() == {}
+    finally:
+        db.close()
+
+    Database(path).close()  # เปิดซ้ำต้องไม่ migrate ซ้ำ
 
 
 def test_ephemeral_mode_writes_nothing(tmp_path, monkeypatch):
