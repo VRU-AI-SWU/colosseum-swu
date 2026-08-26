@@ -254,7 +254,7 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
       <span><span class="dot" id="dot"></span> <span id="status">กำลังเชื่อมต่อ…</span></span>
       <span id="updated"></span>
       <a href="https://vru-ai.com/">VRU&nbsp;AI&nbsp;Lab</a>
-      <button class="ghost" id="logout" style="margin-left:auto">เปลี่ยนทีม</button>
+      <button class="ghost" id="logout" style="margin-left:auto">ออกจากระบบ</button>
     </footer>
   </main>
 
@@ -477,7 +477,13 @@ $("enter").addEventListener("click", () => {
   start();
 });
 $("token").addEventListener("keydown", (e) => { if (e.key === "Enter") $("enter").click(); });
-$("logout").addEventListener("click", () => logout(""));
+$("logout").addEventListener("click", () => {
+  // ล้างเฉพาะเบราว์เซอร์เครื่องนี้ — ไม่ได้ออกจากบัญชี Google และไม่ได้ยุบทีม
+  // บอกให้ชัดเพราะคำว่า "ออกจากระบบ" ชวนให้เข้าใจว่าทำมากกว่านั้น
+  if (confirm("ออกจากระบบบนเบราว์เซอร์นี้?\n\nทีมและคะแนนไม่หายไปไหน — ล็อกอินใหม่ก็กลับมาเหมือนเดิม")) {
+    logout("");
+  }
+});
 
 if (PHOTO_CREDIT) $("credit").textContent = PHOTO_CREDIT;
 

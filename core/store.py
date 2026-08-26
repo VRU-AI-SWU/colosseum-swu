@@ -120,10 +120,15 @@ class Store:
 
         เดิมเป็น `self.teams.get(token)` เพราะ id กับ token เป็นตัวเดียวกัน — id ที่
         เดาได้จึงกลายเป็นรหัสผ่านที่เดาได้ · ตอนนี้แยกกันแล้ว
+
+        **ทีมที่ยุบแล้วใช้โทเคนไม่ได้** — ไม่งั้นการยุบทีมจะซ่อนมันจากกระดานเฉยๆ
+        แต่ยังส่งงานในนามทีมนั้นได้อยู่ ซึ่งทำให้การยุบไม่ได้ปิดอะไรเลย
         """
         if not token:
             return None
-        return next((t for t in self.teams.values() if t.token == token), None)
+        return next(
+            (t for t in self.teams.values() if t.token == token and t.is_active), None
+        )
 
     def user_by_google_sub(self, sub: str) -> User | None:
         return next((u for u in self.users.values() if u.google_sub == sub), None)

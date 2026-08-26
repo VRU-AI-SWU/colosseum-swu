@@ -234,7 +234,25 @@ def test_me_and_join_over_http(arena):
     assert res.status_code == 200, res.text
     assert res.json()["token"] == host.token
 
-    # โทเคนเดิมต้องใช้ไม่ได้แล้ว — ทีมถูกยุบไปแล้ว
     after = client.get("/api/me", headers={"Authorization": f"Bearer {host.token}"}).json()
     assert len(after["team"]["members"]) == 2
     assert after["team"]["is_solo"] is False
+
+
+def test_token_of_a_dissolved_team_stops_working(arena):
+    """ยุบทีมแล้วโทเคนต้องใช้ไม่ได้ทันที
+
+    ถ้ายังใช้ได้ การยุบก็แค่ซ่อนทีมจากกระดาน แต่ยังส่งงานในนามนั้นได้อยู่ —
+    เท่ากับไม่ได้ปิดอะไรเลย · นี่คือกลไกที่ใช้ปลดระวางทีม demo ที่โทเคนเดาได้
+    """
+    _o, host = sign_in(arena, "sub-1", "a@g.swu.ac.th", "เจ้าของ")
+    joiner, solo = sign_in(arena, "sub-2", "b@g.swu.ac.th", "ผู้เข้าร่วม")
+    client = TestClient(create_app(arena))
+
+    ok = client.get("/api/me", headers={"Authorization": f"Bearer {solo.token}"})
+    assert ok.status_code == 200
+
+    arena.join_team(user=joiner, invite_code=host.invite_code, course_id=COURSE)
+
+    dead = client.get("/api/me", headers={"Authorization": f"Bearer {solo.token}"})
+    assert dead.status_code == 401, "โทเคนของทีมที่ยุบแล้วต้องใช้ไม่ได้"
