@@ -25,6 +25,7 @@ from core.domain import (
     Team,
     User,
     new_id,
+    new_token,
     utcnow,
 )
 from core.db import Database
@@ -141,6 +142,20 @@ class Arena:
         self.store.save_team(target)
         self.store.record("team.joined", "team", target.id, actor_id=user.id)
         return target
+
+    def rotate_token(self, *, team: Team, actor_id: str | None = None) -> Team:
+        """ออกโทเคนใหม่ให้ทีม — โทเคนเดิมใช้ไม่ได้ทันที
+
+        มีไว้สำหรับกรณีที่โทเคนหลุด ซึ่งเรื่องที่พบบ่อยที่สุดคือนิสิตเผลอ commit
+        ค่ามันขึ้น GitHub · ก่อนมีปุ่มนี้ ทางแก้เดียวคือผู้สอนเข้าไปแก้ฐานข้อมูลเอง
+
+        ⚠️ **กระทบทั้งทีม** — เพื่อนร่วมทีมที่ตั้ง `ARENA_TOKEN` ไว้แล้วจะใช้ไม่ได้
+        จนกว่าจะมาเอาค่าใหม่ · ผลนี้ย้อนกลับไม่ได้ จึงต้องเตือนก่อนกด ไม่ใช่หลังกด
+        """
+        team.token = new_token()
+        self.store.save_team(team)
+        self.store.record("team.token_rotated", "team", team.id, actor_id=actor_id)
+        return team
 
     # ── ส่งงาน ──────────────────────────────────────────────────────
 

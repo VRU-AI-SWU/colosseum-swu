@@ -163,6 +163,21 @@ def create_app(
             }
         }
 
+    @app.post("/api/teams/rotate-token")
+    def rotate_token(team: TeamDep):
+        """ออกโทเคนใหม่ — ใช้เมื่อโทเคนเดิมหลุด
+
+        ยืนยันด้วยโทเคน*เดิม* ซึ่งฟังดูย้อนแย้งแต่ถูกต้อง: คนที่ยังถือโทเคนอยู่คือ
+        เจ้าของโดยนิยาม และถ้ามีคนอื่นถือด้วยก็ยิ่งต้องรีบเปลี่ยน · คนที่กดก่อนได้ก่อน
+        ซึ่งฝ่ายที่ถูกตัดออกไปคือฝ่ายที่ต้องไปคุยกับผู้สอน
+        """
+        before = team.token[:4]
+        arena.rotate_token(
+            team=team,
+            actor_id=team.member_ids[0] if team.member_ids else None,
+        )
+        return {"token": team.token, "previous_prefix": before}
+
     @app.post("/api/teams/join")
     def join_team(team: TeamDep, invite_code: str = Form(...)):
         """เข้าทีมเพื่อนด้วยรหัสเชิญ

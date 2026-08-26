@@ -132,6 +132,67 @@ def test_dissolved_team_drops_off_the_leaderboard(arena):
     assert any(e.action == "team.dissolved" for e in arena.store.audit)
 
 
+# ── เปลี่ยนโทเคน ────────────────────────────────────────────────────
+
+
+def test_rotating_the_token_kills_the_old_one(arena):
+    """โทเคนเดิมต้องใช้ไม่ได้ทันที ไม่งั้นการเปลี่ยนไม่ได้แก้ปัญหาที่มันหลุดไปแล้ว"""
+    _u, team = sign_in(arena, "sub-1", "a@g.swu.ac.th", "นิสิต")
+    old = team.token
+    client = TestClient(create_app(arena))
+
+    res = client.post(
+        "/api/teams/rotate-token", headers={"Authorization": f"Bearer {old}"}
+    )
+    assert res.status_code == 200, res.text
+    new = res.json()["token"]
+
+    assert new != old
+    assert len(new) >= 24, "โทเคนใหม่ต้องยาวและสุ่มเหมือนเดิม"
+    assert client.get(
+        "/api/me", headers={"Authorization": f"Bearer {old}"}
+    ).status_code == 401
+    assert client.get(
+        "/api/me", headers={"Authorization": f"Bearer {new}"}
+    ).status_code == 200
+
+
+def test_rotation_keeps_the_team_and_its_history(arena):
+    """เปลี่ยนแค่โทเคน — สมาชิก รหัสเชิญ และคะแนนต้องไม่ขยับ"""
+    user, team = sign_in(arena, "sub-1", "a@g.swu.ac.th", "นิสิต")
+    team_id, members, invite = team.id, list(team.member_ids), team.invite_code
+
+    arena.rotate_token(team=team, actor_id=user.id)
+
+    assert team.id == team_id
+    assert team.member_ids == members
+    assert team.invite_code == invite, "รหัสเชิญเป็นคนละเรื่อง ต้องไม่เปลี่ยนตาม"
+    assert team.is_active
+    assert any(e.action == "team.token_rotated" for e in arena.store.audit)
+
+
+def test_rotation_is_recorded_for_audit(arena):
+    """README §7 — ต้องย้อนดูได้ว่าใครเปลี่ยนเมื่อไร"""
+    user, team = sign_in(arena, "sub-1", "a@g.swu.ac.th", "นิสิต")
+    arena.rotate_token(team=team, actor_id=user.id)
+    event = next(e for e in arena.store.audit if e.action == "team.token_rotated")
+    assert event.target_id == team.id
+    assert event.actor_id == user.id
+
+
+def test_dissolved_team_cannot_rotate(arena):
+    """ทีมที่ยุบแล้วต้องเปลี่ยนโทเคนไม่ได้ — ไม่งั้นจะปลุกมันกลับมาใช้งานได้"""
+    _o, host = sign_in(arena, "sub-1", "a@g.swu.ac.th", "เจ้าของ")
+    joiner, solo = sign_in(arena, "sub-2", "b@g.swu.ac.th", "ผู้เข้าร่วม")
+    arena.join_team(user=joiner, invite_code=host.invite_code, course_id=COURSE)
+
+    client = TestClient(create_app(arena))
+    res = client.post(
+        "/api/teams/rotate-token", headers={"Authorization": f"Bearer {solo.token}"}
+    )
+    assert res.status_code == 401
+
+
 # ── ตัวตนจาก Google ─────────────────────────────────────────────────
 
 

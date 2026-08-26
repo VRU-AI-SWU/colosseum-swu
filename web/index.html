@@ -167,6 +167,7 @@ footer a { color: var(--muted); }
   font: inherit; font-size: 12px; text-decoration: underline; padding: 0;
 }
 .linkish:hover { color: var(--blood); }
+.linkish.danger { color: var(--blood); }
 
 /* ── กล่องใส่โทเคน ── */
 .gate { margin-top: 34px; padding: 22px; border: 1px solid var(--rule); border-radius: var(--radius); }
@@ -338,10 +339,12 @@ async function api(path, options = {}) {
 async function copy(text, el) {
   try {
     await navigator.clipboard.writeText(text);
+    if (!el || !el.isConnected) return;   // เรียกจากที่อื่นเพื่อใส่ clipboard เฉยๆ
     const before = el.textContent;
     el.textContent = "คัดลอกแล้ว";
     setTimeout(() => { el.textContent = before; }, 1200);
   } catch {
+    if (!el || !el.isConnected) return;
     // clipboard ถูกบล็อก (http หรือ permission) — เลือกข้อความให้แทน จะได้ copy เองได้
     const range = document.createRange();
     range.selectNodeContents(el);
@@ -364,6 +367,7 @@ function renderTeam(team) {
     `<span class="spacer"></span>` +
     `<button class="linkish" id="join-open">เข้าทีมเพื่อน</button>` +
     `<button class="linkish" id="help-open">สองรหัสนี้ใช้ยังไง</button>` +
+    `<button class="linkish danger" id="rotate">โทเคนหลุด?</button>` +
     `<div class="help" id="help" hidden>
        <b>🎟️ รหัสเชิญ</b> — ให้เพื่อนกด “เข้าทีมเพื่อน” แล้วใส่รหัสนี้เพื่อย้ายเข้าทีมคุณ
        (ทีมละไม่เกิน 6 คน) · บอกเพื่อนได้ อ่านให้ฟังในห้องได้<br>
@@ -380,11 +384,41 @@ function renderTeam(team) {
   $("c-invite").onclick = (e) => copy(team.invite_code, e.target);
   $("c-token").onclick = (e) => copy(team.token, e.target);
   $("join-open").onclick = () => promptJoin();
+  $("rotate").onclick = () => rotateToken();
   $("help-open").onclick = () => {
     const box = $("help");
     box.hidden = !box.hidden;
     $("help-open").textContent = box.hidden ? "สองรหัสนี้ใช้ยังไง" : "ซ่อนคำอธิบาย";
   };
+}
+
+async function rotateToken() {
+  // ผลย้อนกลับไม่ได้และกระทบคนอื่นด้วย — บอกให้ครบก่อนกด ไม่ใช่หลังกด
+  const members = myTeam?.members?.length ?? 1;
+  const warning =
+    "ออกโทเคนใหม่ให้ทีม?\n\n" +
+    "โทเคนเดิมจะใช้ไม่ได้ทันที และ arena submit จะขึ้น 401 จนกว่าจะตั้งค่าใหม่" +
+    (members > 1
+      ? `\n\n⚠️ ทีมนี้มี ${members} คน — เพื่อนร่วมทีมทุกคนจะส่งงานไม่ได้จนกว่าจะมาเอาโทเคนใหม่ไป`
+      : "") +
+    "\n\nทำเมื่อคิดว่าโทเคนหลุดไปอยู่ในมือคนอื่นแล้วเท่านั้น";
+  if (!confirm(warning)) return;
+
+  try {
+    const res = await api("/api/teams/rotate-token", { method: "POST" });
+    token = res.token;
+    localStorage.setItem(KEY, token);
+    await copy(token, { textContent: "" });   // ใส่ clipboard ให้เลย จะได้เอาไปตั้งต่อได้ทันที
+    alert(
+      "ออกโทเคนใหม่แล้ว และคัดลอกไว้ใน clipboard ให้เรียบร้อย\n\n" +
+      "ตั้งค่าใหม่บนเครื่องของคุณ:\n" +
+      "export ARENA_TOKEN=<วางที่นี่>" +
+      (members > 1 ? "\n\nอย่าลืมส่งให้เพื่อนร่วมทีมด้วย" : "")
+    );
+    start();
+  } catch (e) {
+    alert(e.message || "เปลี่ยนโทเคนไม่สำเร็จ");
+  }
 }
 
 async function promptJoin() {
