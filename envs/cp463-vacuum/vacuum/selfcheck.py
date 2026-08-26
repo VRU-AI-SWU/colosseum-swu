@@ -49,21 +49,30 @@ def _check(name: str, fn) -> bool:
 # ── การตรวจแต่ละข้อ ─────────────────────────────────────────────────
 
 
+#: เวอร์ชันที่ทดสอบแล้วว่าให้ผลตรงกับ grader — ใช้บอกใบ้ตอนคะแนนไม่ตรง ไม่ใช่กฎบังคับ
+TESTED_NUMPY = ("2.1", "2.5")
+
+
 def check_versions() -> str:
+    """รายงานเวอร์ชัน — **ไม่ตัดสินจากเลขเวอร์ชัน**
+
+    เดิมข้อนี้บังคับ `numpy 2.1.*` แล้ว raise ถ้าไม่ตรง ซึ่งผิดสองทาง
+
+    1. **เข้มเกินจริง** — วัดแล้วว่า numpy 2.5.2 ให้ผังห้องแฮชเดียวกันและคะแนนตรงกัน
+       ถึงทศนิยมที่ 12 การปฏิเสธมันคือการบล็อกนิสิตที่ใช้ Python 3.14
+       (ซึ่ง numpy 2.1 ไม่มี wheel ให้) โดยไม่มีเหตุผลที่วัดได้รองรับ
+    2. **หลวมเกินจริงพร้อมกัน** — เลขเวอร์ชันไม่ได้รับประกันอะไรเลย numpy อาจเปลี่ยน
+       stream ภายใน 2.1.x ก็ได้ การผ่านข้อนี้จึงไม่เคยแปลว่าปลอดภัย
+
+    ตัวที่ตัดสินจริงคือ **`check_golden`** ซึ่งเทียบคะแนน baseline กับค่าที่บันทึกไว้ —
+    มันจับการเปลี่ยน stream ได้ทุกกรณีไม่ว่ามาจากเวอร์ชันไหน
+    """
     import gymnasium
 
-    problems = []
-    if not np.__version__.startswith("2.1."):
-        problems.append(f"numpy {np.__version__} (ต้องเป็น 2.1.*)")
-    if not gymnasium.__version__.startswith("1.3."):
-        problems.append(f"gymnasium {gymnasium.__version__} (ต้องเป็น 1.3.*)")
-    if problems:
-        raise CheckFailed(
-            "เวอร์ชันไม่ตรง: " + " · ".join(problems) + "\n"
-            "      numpy เป็น load-bearing — Generator stream ไม่การันตีข้ามเวอร์ชัน\n"
-            "      ผังห้องของ seed เดิมจะเปลี่ยนไป ให้ `pip install -U cp463-vacuum` ใหม่"
-        )
-    return f"numpy {np.__version__} · gymnasium {gymnasium.__version__}"
+    note = ""
+    if not np.__version__.startswith(TESTED_NUMPY):
+        note = f" {YELLOW}(ยังไม่ได้ทดสอบกับรุ่นนี้ — ดูข้อสุดท้าย){RESET}"
+    return f"numpy {np.__version__} · gymnasium {gymnasium.__version__}{note}"
 
 
 def check_determinism() -> str:
@@ -141,6 +150,12 @@ def check_golden_scores() -> str:
         raise CheckFailed(
             "\n      ".join(mismatches)
             + "\n      → environment ในเครื่องคุณให้ผลไม่ตรงกับตัวที่ใช้ตัดสิน"
+            + "\n"
+            + f"\n      สาเหตุที่พบบ่อยที่สุดคือ numpy (ตอนนี้ {np.__version__})"
+            + " เปลี่ยน stream ของตัวสุ่ม"
+            + "\n      ลงรุ่นที่ทดสอบแล้วว่าตรงกับ grader:"
+            + '\n          pip install "numpy==2.5.*"      # หรือ 2.1.* ถ้า Python ต่ำกว่า 3.14'
+            + "\n      แล้วรัน `python -m vacuum.selfcheck` ใหม่"
         )
     n = sum(len(e["scores"]) for e in golden["phases"].values())
     return f"{n} ค่า × {len(seeds)} seed ตรงทุกตัว (bronze/silver ทั้ง 3 phase)"
