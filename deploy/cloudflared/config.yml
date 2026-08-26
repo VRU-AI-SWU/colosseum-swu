@@ -8,9 +8,12 @@
 tunnel: <TUNNEL-ID>
 credentials-file: /Users/rucci/.cloudflared/<TUNNEL-ID>.json
 
-# QUIC (UDP 7844) เป็นทางหลัก — วัดแล้วว่าใช้ได้บนเครือข่ายมหาวิทยาลัย และเป็นเหตุผล
-# ที่ TLS interception ที่พอร์ต 443 ไม่กระทบ tunnel เลย (README §10.1)
-protocol: quic
+# auto = ลอง QUIC (UDP 7844) ก่อน ถ้าใช้ไม่ได้ตกไปใช้ http2 (TCP 7844) เอง
+#
+# ⚠️ **ห้าม pin เป็น `quic`** — เคยตั้งไว้แบบนั้นจากผลวัดวันเดียวที่ QUIC ทำงานดี
+# ผลคือเมื่อเครือข่ายมหาวิทยาลัยเริ่มดรอป UDP มันวนพยายามต่อ QUIC ซ้ำๆ
+# (3,500 ครั้งใน 24 ชม.) แทนที่จะตกไปใช้ TCP ที่ยังเปิดอยู่ตลอด
+protocol: auto
 
 # ทน network สะดุดโดยไม่ทิ้งงานที่กำลังรัน
 retries: 5
