@@ -30,15 +30,35 @@ from core.domain import (
     Team,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 
+from core.auth import AuthError, GoogleAuth
 from core.leaderboard import BaselineMark, build, insert_baselines, next_target
-from core.service import Arena, SubmissionRejected, TooManyFinalPicks
+from core.service import (
+    Arena,
+    InviteInvalid,
+    SubmissionRejected,
+    TeamFull,
+    TooManyFinalPicks,
+)
+
+
+def _default_course_id(arena: Arena) -> str:
+    """วิชาเดียวต่อหนึ่ง deployment ในตอนนี้ — ทีมผูกกับวิชา ไม่ใช่กับ competition
+
+    ถ้าวันหนึ่งมีหลายวิชาบนเครื่องเดียว ตรงนี้ต้องรับ course จาก URL แทนการเดา
+    """
+    competitions = list(arena.store.competitions.values())
+    if not competitions:
+        raise HTTPException(503, "ยังไม่มี competition ที่ลงทะเบียนไว้บนเซิร์ฟเวอร์นี้")
+    return competitions[0].course_id
 
 
 def create_app(
     arena: Arena,
     baselines: Optional[dict[str, list[BaselineMark]]] = None,
     allow_origins: Optional[list] = None,
+    google: Optional[GoogleAuth] = None,
 ) -> FastAPI:
     """`allow_origins` = โดเมนของหน้าเว็บที่เรียก API นี้ได้ (README §10.1)
 
@@ -71,6 +91,103 @@ def create_app(
         return team
 
     TeamDep = Annotated[Team, Depends(current_team)]
+
+    # ── ล็อกอินด้วย Google ──────────────────────────────────────────
+    #
+    # ไม่มี cookie ไม่มี session — จบที่การส่งโทเคนของทีมกลับไปให้หน้าเว็บ
+    # เพราะ `arena submit` ต้องใช้โทเคนนั้นอยู่แล้ว การมีสองกลไกยืนยันตัวตน
+    # แปลว่ามีสองที่ให้พลาด
+
+    def _require_google() -> GoogleAuth:
+        if google is None:
+            raise HTTPException(
+                503,
+                "ยังไม่ได้ตั้งค่าการล็อกอินด้วย Google บนเซิร์ฟเวอร์นี้ "
+                "(ต้องมี ARENA_GOOGLE_CLIENT_ID / ARENA_GOOGLE_CLIENT_SECRET)",
+            )
+        return google
+
+    @app.get("/auth/google/login")
+    def google_login():
+        cfg = _require_google()
+        return RedirectResponse(cfg.authorize_url(cfg.make_state()), status_code=302)
+
+    @app.get("/auth/google/callback")
+    def google_callback(
+        code: Optional[str] = None,
+        state: Optional[str] = None,
+        error: Optional[str] = None,
+    ):
+        """ปลายทางที่ Google ส่งกลับมา — จบด้วยการ redirect ไปหน้าเว็บเสมอ
+
+        **ไม่คืน JSON แม้ตอนล้มเหลว** เพราะปลายทางนี้คือเบราว์เซอร์ของนิสิต
+        การโชว์ JSON ดิบใส่หน้าคนที่แค่กดปุ่มล็อกอินคือการโยนภาระให้เขาแปลเอง
+        """
+        cfg = _require_google()
+        if error:
+            return RedirectResponse(cfg.redirect_error(f"Google ปฏิเสธคำขอ ({error})"), 302)
+        if not code or not state:
+            return RedirectResponse(cfg.redirect_error("คำขอล็อกอินไม่ครบ"), 302)
+        try:
+            cfg.check_state(state)
+            identity = cfg.exchange(code)
+        except AuthError as exc:
+            return RedirectResponse(cfg.redirect_error(str(exc)), 302)
+
+        course_id = _default_course_id(arena)
+        _user, team = arena.sign_in(
+            google_sub=identity.sub,
+            email=identity.email,
+            name=identity.name,
+            course_id=course_id,
+        )
+        return RedirectResponse(cfg.redirect_back(team.token), 302)
+
+    # ── ตัวตนของผู้เรียกและทีม ──────────────────────────────────────
+
+    @app.get("/api/me")
+    def me(team: TeamDep):
+        members = [
+            {"name": u.name, "email": u.email}
+            for uid in team.member_ids
+            if (u := arena.store.users.get(uid)) is not None
+        ]
+        return {
+            "team": {
+                "id": team.id,
+                "name": team.name,
+                "token": team.token,
+                "invite_code": team.invite_code,
+                "members": members,
+                "is_solo": len(team.member_ids) <= 1,
+            }
+        }
+
+    @app.post("/api/teams/join")
+    def join_team(team: TeamDep, invite_code: str = Form(...)):
+        """เข้าทีมเพื่อนด้วยรหัสเชิญ
+
+        ยืนยันตัวตนด้วยโทเคนของทีม*ปัจจุบัน* — ทีมเดี่ยวมีสมาชิกคนเดียวอยู่แล้ว
+        จึงรู้ว่าใครเป็นคนกด ส่วนทีมที่มีหลายคนจะเข้าทีมอื่นไม่ได้ (ต้องแยกออกก่อน)
+        ซึ่งเป็นข้อจำกัดที่ตั้งใจ — การย้ายทั้งทีมไปรวมกับอีกทีมควรผ่านผู้สอน
+        """
+        if len(team.member_ids) != 1:
+            raise HTTPException(
+                409,
+                "ทีมที่มีสมาชิกมากกว่าหนึ่งคนย้ายเองไม่ได้ — ติดต่อผู้สอนถ้าต้องการรวมทีม",
+            )
+        user = arena.store.users.get(team.member_ids[0])
+        if user is None:
+            raise HTTPException(409, "ทีมนี้ไม่ได้ผูกกับบัญชีที่ล็อกอินด้วย Google")
+        try:
+            joined = arena.join_team(
+                user=user, invite_code=invite_code, course_id=team.course_id
+            )
+        except InviteInvalid as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except TeamFull as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"team_id": joined.id, "name": joined.name, "token": joined.token}
 
     # ── ส่งงาน ──────────────────────────────────────────────────────
 

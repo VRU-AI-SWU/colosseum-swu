@@ -62,6 +62,15 @@ def _key(run: Run) -> tuple:
     return (run.score, *run.tiebreak, -run.created_at.timestamp())
 
 
+class _Unknown:
+    """ยืนแทนทีมที่หา record ไม่เจอ — ให้ถือว่ายัง active ไว้ก่อน"""
+
+    is_active = True
+
+
+_UNKNOWN = _Unknown()
+
+
 def build(
     runs: Iterable[Run],
     teams: dict[str, Team],
@@ -73,7 +82,16 @@ def build(
     """สร้างตาราง — `reveal_names=True` สำหรับผู้สอน/TA เท่านั้น (README §6.1)"""
     previous = previous or {}
     best = best_run_per_team(runs, kind)
-    ordered = sorted(best.values(), key=_key, reverse=True)
+
+    # ทีมที่ถูกยุบไม่ขึ้นกระดาน — เกิดตอนนิสิตที่เคยทำคนเดียวย้ายไปเข้าทีมเพื่อน
+    # งานที่เขาเคยส่งยังอยู่ครบใน audit trail แต่มันคือผลงานของคนเดียว
+    # ไม่ใช่ของทีมใหม่ · ทีมที่หา record ไม่เจอเลยยังแสดงไว้ เพราะการหายไปเงียบๆ
+    # ปิดบังข้อมูลเสียหายที่ควรเห็น
+    ordered = sorted(
+        (r for r in best.values() if (teams.get(r.team_id) or _UNKNOWN).is_active),
+        key=_key,
+        reverse=True,
+    )
 
     rows = []
     for i, run in enumerate(ordered, start=1):

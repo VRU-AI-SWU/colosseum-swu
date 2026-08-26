@@ -1,0 +1,240 @@
+"""ล็อกอินด้วย Google Workspace และการจัดทีม — README §11
+
+นิสิตจัดทีมกันเอง และคนที่หากลุ่มไม่ได้ลงเอยด้วยการทำคนเดียว **สถานะ solo จึงต้อง
+เป็นเรื่องปกติที่ใช้งานได้ทันที ไม่ใช่ข้อผิดพลาดที่ต้องแก้ก่อนถึงจะเริ่มได้**
+"""
+
+from __future__ import annotations
+
+import time
+
+import pytest
+from fastapi.testclient import TestClient
+
+from core.api import create_app
+from core.auth import AuthError, GoogleAuth, GoogleIdentity
+from core.domain import RunKind, Run, RunStatus
+from core.leaderboard import build
+from core.service import MAX_TEAM_SIZE, InviteInvalid, TeamFull
+from core.wiring import demo_arena
+
+COURSE = "cp463-1-2026"
+
+
+@pytest.fixture
+def arena(tmp_path, monkeypatch):
+    monkeypatch.delenv("ARENA_SECRETS", raising=False)
+    a, _teams = demo_arena(tmp_path / "artifacts", teams=0)
+    return a
+
+
+def sign_in(arena, sub, email, name):
+    return arena.sign_in(google_sub=sub, email=email, name=name, course_id=COURSE)
+
+
+# ── ล็อกอิน ─────────────────────────────────────────────────────────
+
+
+def test_first_login_gets_a_working_team_immediately(arena):
+    """ไม่มีหน้าจอ "กรุณาเลือกทีม" ให้ติด — ล็อกอินเสร็จส่งงานได้เลย"""
+    user, team = sign_in(arena, "sub-1", "a@g.swu.ac.th", "นิสิต ก")
+    assert team.member_ids == [user.id]
+    assert team.is_active
+    assert team.token and team.token != team.id, "โทเคนต้องแยกจาก id และเดาไม่ได้"
+    assert len(team.invite_code) == 6
+
+
+def test_second_login_returns_the_same_team(arena):
+    _u1, t1 = sign_in(arena, "sub-1", "a@g.swu.ac.th", "นิสิต ก")
+    _u2, t2 = sign_in(arena, "sub-1", "a@g.swu.ac.th", "นิสิต ก")
+    assert t1.id == t2.id
+    assert len(arena.store.users) == 1
+
+
+def test_changed_email_still_matches_the_same_person(arena):
+    """จับคู่ด้วย google_sub ไม่ใช่อีเมล — นิสิตเปลี่ยนนามสกุลแล้วอีเมลเปลี่ยนได้"""
+    user, team = sign_in(arena, "sub-1", "old@g.swu.ac.th", "ชื่อเดิม")
+    user2, team2 = sign_in(arena, "sub-1", "new@g.swu.ac.th", "ชื่อใหม่")
+    assert user2.id == user.id and team2.id == team.id
+    assert user2.email == "new@g.swu.ac.th"
+    assert len(arena.store.users) == 1, "ต้องไม่กลายเป็นคนใหม่"
+
+
+# ── เข้าทีม ─────────────────────────────────────────────────────────
+
+
+def test_joining_a_team_dissolves_the_empty_solo_team(arena):
+    owner, host = sign_in(arena, "sub-1", "a@g.swu.ac.th", "เจ้าของทีม")
+    joiner, solo = sign_in(arena, "sub-2", "b@g.swu.ac.th", "คนเข้าร่วม")
+
+    joined = arena.join_team(user=joiner, invite_code=host.invite_code, course_id=COURSE)
+
+    assert joined.id == host.id
+    assert set(joined.member_ids) == {owner.id, joiner.id}
+    assert not solo.is_active, "ทีมเดี่ยวที่ว่างลงต้องถูกยุบ"
+    assert solo.id in arena.store.teams, "แต่ยังต้องอยู่ใน store เพื่อ audit"
+
+
+def test_invite_code_is_case_insensitive(arena):
+    _o, host = sign_in(arena, "sub-1", "a@g.swu.ac.th", "เจ้าของ")
+    joiner, _ = sign_in(arena, "sub-2", "b@g.swu.ac.th", "ผู้เข้าร่วม")
+    joined = arena.join_team(
+        user=joiner, invite_code=host.invite_code.lower(), course_id=COURSE
+    )
+    assert joined.id == host.id
+
+
+def test_bad_invite_code_says_what_to_do(arena):
+    joiner, _ = sign_in(arena, "sub-2", "b@g.swu.ac.th", "ผู้เข้าร่วม")
+    with pytest.raises(InviteInvalid, match="ขอรหัสใหม่"):
+        arena.join_team(user=joiner, invite_code="ZZZZZZ", course_id=COURSE)
+
+
+def test_joining_the_team_you_are_already_in_is_not_an_error(arena):
+    owner, host = sign_in(arena, "sub-1", "a@g.swu.ac.th", "เจ้าของ")
+    same = arena.join_team(user=owner, invite_code=host.invite_code, course_id=COURSE)
+    assert same.id == host.id
+    assert same.member_ids == [owner.id], "ต้องไม่ถูกเพิ่มซ้ำ"
+
+
+def test_team_size_is_capped(arena):
+    _o, host = sign_in(arena, "sub-0", "h@g.swu.ac.th", "เจ้าของ")
+    for i in range(1, MAX_TEAM_SIZE):
+        u, _ = sign_in(arena, f"sub-{i}", f"m{i}@g.swu.ac.th", f"สมาชิก {i}")
+        arena.join_team(user=u, invite_code=host.invite_code, course_id=COURSE)
+
+    extra, _ = sign_in(arena, "sub-x", "x@g.swu.ac.th", "คนเกิน")
+    with pytest.raises(TeamFull):
+        arena.join_team(user=extra, invite_code=host.invite_code, course_id=COURSE)
+
+
+def test_dissolved_team_drops_off_the_leaderboard(arena):
+    """คะแนน solo ต้องหายจากกระดานเมื่อเจ้าตัวไปเข้าทีมอื่น
+
+    เพราะมันคือผลงานของคนเดียว ไม่ใช่ของทีมใหม่ · แต่ยังต้องตรวจย้อนหลังได้
+    """
+    _o, host = sign_in(arena, "sub-1", "a@g.swu.ac.th", "เจ้าของ")
+    joiner, solo = sign_in(arena, "sub-2", "b@g.swu.ac.th", "คนเข้าร่วม")
+
+    runs = [
+        Run(id="r1", submission_id="s1", competition_id="c", team_id=solo.id,
+            kind=RunKind.PUBLIC, status=RunStatus.DONE, score=1.5),
+        Run(id="r2", submission_id="s2", competition_id="c", team_id=host.id,
+            kind=RunKind.PUBLIC, status=RunStatus.DONE, score=0.5),
+    ]
+    before = build(runs, arena.store.teams)
+    assert [r.team_id for r in before] == [solo.id, host.id]
+
+    arena.join_team(user=joiner, invite_code=host.invite_code, course_id=COURSE)
+
+    after = build(runs, arena.store.teams)
+    assert [r.team_id for r in after] == [host.id], "ทีมที่ยุบแล้วต้องไม่อยู่บนกระดาน"
+    assert any(e.action == "team.dissolved" for e in arena.store.audit)
+
+
+# ── ตัวตนจาก Google ─────────────────────────────────────────────────
+
+
+def cfg(**kw) -> GoogleAuth:
+    return GoogleAuth(
+        client_id="cid", client_secret="secret",
+        redirect_uri="https://api.example/auth/google/callback",
+        web_origin="https://web.example", **kw,
+    )
+
+
+def test_outside_domain_is_rejected_with_a_useful_message():
+    with pytest.raises(AuthError, match="g.swu.ac.th"):
+        cfg()._require_allowed(
+            GoogleIdentity(sub="s", email="someone@gmail.com", name="ใคร", hd=None)
+        )
+
+
+def test_hd_claim_wins_over_the_email_suffix():
+    """บัญชีในองค์กรที่ตั้ง alias เป็นโดเมนอื่นต้องยังผ่าน — `hd` คือของจริง"""
+    cfg()._require_allowed(
+        GoogleIdentity(sub="s", email="a@alias.example", name="นิสิต", hd="g.swu.ac.th")
+    )
+
+
+def test_state_round_trips_and_expires():
+    c = cfg()
+    state = c.make_state()
+    c.check_state(state)  # ไม่ throw
+
+    with pytest.raises(AuthError, match="หมดอายุ"):
+        c.check_state(state, now=time.time() + 3600)
+
+
+def test_tampered_state_is_rejected():
+    c = cfg()
+    raw, _, sig = c.make_state().partition(".")
+    with pytest.raises(AuthError):
+        c.check_state(f"{raw}x.{sig}")
+    with pytest.raises(AuthError):
+        c.check_state(raw)
+
+
+def test_state_signed_by_another_instance_is_rejected():
+    """คีย์สุ่มใหม่ทุกครั้งที่บริการเริ่ม — state ที่ค้างข้าม restart ต้องใช้ไม่ได้"""
+    with pytest.raises(AuthError):
+        cfg().check_state(cfg().make_state())
+
+
+def test_token_is_returned_through_the_url_fragment():
+    """ต้องเป็น `#` ไม่ใช่ `?` — fragment ไม่ถูกส่งไปเซิร์ฟเวอร์จึงไม่ไปโผล่ใน access log"""
+    url = cfg().redirect_back("secret-token")
+    assert url.startswith("https://web.example/#token=")
+    assert "?" not in url
+
+
+# ── ผ่าน HTTP จริง ──────────────────────────────────────────────────
+
+
+def test_login_endpoint_is_clear_when_google_is_not_configured(arena):
+    client = TestClient(create_app(arena), follow_redirects=False)
+    res = client.get("/auth/google/login")
+    assert res.status_code == 503
+    assert "ARENA_GOOGLE_CLIENT_ID" in res.json()["detail"]
+
+
+def test_login_redirects_to_google_with_the_domain_restriction(arena):
+    client = TestClient(create_app(arena, google=cfg()), follow_redirects=False)
+    res = client.get("/auth/google/login")
+    assert res.status_code == 302
+    location = res.headers["location"]
+    assert location.startswith("https://accounts.google.com/")
+    assert "hd=g.swu.ac.th" in location
+    assert "client_id=cid" in location
+
+
+def test_callback_failure_sends_the_student_back_to_the_page(arena):
+    """ปลายทางคือเบราว์เซอร์ของนิสิต — ห้ามโชว์ JSON ดิบใส่หน้าคนที่แค่กดปุ่มล็อกอิน"""
+    client = TestClient(create_app(arena, google=cfg()), follow_redirects=False)
+    res = client.get("/auth/google/callback", params={"error": "access_denied"})
+    assert res.status_code == 302
+    assert res.headers["location"].startswith("https://web.example/#error=")
+
+
+def test_me_and_join_over_http(arena):
+    _o, host = sign_in(arena, "sub-1", "a@g.swu.ac.th", "เจ้าของ")
+    joiner, solo = sign_in(arena, "sub-2", "b@g.swu.ac.th", "ผู้เข้าร่วม")
+    client = TestClient(create_app(arena))
+
+    me = client.get("/api/me", headers={"Authorization": f"Bearer {solo.token}"}).json()
+    assert me["team"]["is_solo"] is True
+    assert me["team"]["members"] == [{"name": "ผู้เข้าร่วม", "email": "b@g.swu.ac.th"}]
+    assert me["team"]["invite_code"] == solo.invite_code
+
+    res = client.post(
+        "/api/teams/join",
+        headers={"Authorization": f"Bearer {solo.token}"},
+        data={"invite_code": host.invite_code},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["token"] == host.token
+
+    # โทเคนเดิมต้องใช้ไม่ได้แล้ว — ทีมถูกยุบไปแล้ว
+    after = client.get("/api/me", headers={"Authorization": f"Bearer {host.token}"}).json()
+    assert len(after["team"]["members"]) == 2
+    assert after["team"]["is_solo"] is False

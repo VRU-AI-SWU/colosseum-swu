@@ -406,7 +406,7 @@ def cmd_serve(args) -> int:
     import uvicorn
 
     from core.api import create_app
-    from core.wiring import CP463_VACUUM_LADDER, demo_arena
+    from core.wiring import CP463_VACUUM_LADDER, demo_arena, google_auth_from_env
     from runners.agent_env.launcher import DockerLauncher, SubprocessLauncher
     from runners.worker import Worker
 
@@ -435,6 +435,13 @@ def cmd_serve(args) -> int:
 
     print(f"โทเคนของทีม: {', '.join(t.id for t in teams)}")
     print(f"sandbox    : {sandbox_note}")
+    google = google_auth_from_env()
+    if google:
+        print(f"ล็อกอิน    : Google Workspace @{google.allowed_domain}")
+        print(f"             redirect  {google.redirect_uri}")
+        print(f"             ส่งกลับไป {google.web_origin}")
+    else:
+        print("ล็อกอิน    : ⚠️ ยังไม่ได้ตั้งค่า Google — ใช้โทเคนที่แจกมือเท่านั้น")
     if db_path is None:
         print("⚠️ --ephemeral — ข้อมูลหายเมื่อปิด process")
     else:
@@ -460,6 +467,7 @@ def cmd_serve(args) -> int:
             arena,
             baselines={"cp463-vacuum-1-2026": CP463_VACUUM_LADDER},
             allow_origins=args.allow_origin or None,
+            google=google,
         ),
         host=args.host,
         port=args.port,

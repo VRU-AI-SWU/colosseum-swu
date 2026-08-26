@@ -23,6 +23,7 @@ from core.domain import (
     RunStatus,
     Submission,
     Team,
+    User,
     new_id,
     utcnow,
 )
@@ -41,6 +42,19 @@ class SubmissionRejected(Exception):
 
 class TooManyFinalPicks(Exception):
     pass
+
+
+class InviteInvalid(Exception):
+    """รหัสเชิญผิดหรือหมดอายุ — ข้อความต้องบอกให้ไปขอรหัสใหม่จากเพื่อน"""
+
+
+class TeamFull(Exception):
+    pass
+
+
+#: ขนาดทีมสูงสุด — **นโยบายของวิชา ไม่ใช่ข้อจำกัดทางเทคนิค**
+#: ตั้งไว้ที่นี่ที่เดียวเพื่อให้เปลี่ยนง่ายเมื่อผู้สอนตัดสินใจ
+MAX_TEAM_SIZE = 4
 
 
 class ArchiveValidator(Protocol):
@@ -63,6 +77,70 @@ class Arena:
     artifacts: ArtifactStore
     #: task_type → ตัวตรวจไฟล์ · ประกอบตอน wiring ไม่ใช่ import ตรงๆ ใน core
     validators: dict[str, ArchiveValidator] = field(default_factory=dict)
+
+    # ── ตัวตนและทีม ─────────────────────────────────────────────────
+
+    def sign_in(self, *, google_sub: str, email: str, name: str, course_id: str) -> tuple:
+        """ล็อกอินสำเร็จแล้วต้องมีทีมเสมอ — คืน `(user, team)`
+
+        **สร้างทีมเดี่ยวให้อัตโนมัติตั้งแต่ครั้งแรก** ไม่มีหน้าจอ "กรุณาเลือกทีม" ให้ติด
+        เพราะนิสิตที่หากลุ่มไม่ได้มักลงเอยด้วยการทำคนเดียวอยู่แล้ว — สถานะนั้นต้องเป็น
+        เรื่องปกติที่ใช้งานได้ทันที ไม่ใช่ข้อผิดพลาดที่ต้องแก้ก่อนถึงจะเริ่มได้
+        ส่วนคนที่จับกลุ่มได้ค่อยกดเข้าทีมเพื่อนทีหลัง
+        """
+        user = self.store.user_by_google_sub(google_sub)
+        if user is None:
+            user = User(id=new_id(), email=email, name=name, google_sub=google_sub)
+            self.store.save_user(user)
+            self.store.record("user.created", "user", user.id, email=email)
+        elif (user.email, user.name) != (email, name):
+            # อีเมลกับชื่อเปลี่ยนได้ (เปลี่ยนนามสกุล ฯลฯ) — จับคู่ด้วย sub จึงตามได้
+            user.email, user.name = email, name
+            self.store.save_user(user)
+
+        team = self.store.team_of(user.id, course_id)
+        if team is None:
+            team = Team(
+                id=new_id(), course_id=course_id, name=name, member_ids=[user.id]
+            )
+            self.store.save_team(team)
+            self.store.record("team.created", "team", team.id, actor_id=user.id, solo=True)
+        return user, team
+
+    def join_team(self, *, user: User, invite_code: str, course_id: str) -> Team:
+        """ย้ายเข้าทีมของเพื่อนด้วยรหัสเชิญ
+
+        ทีมเดิมที่ว่างลงจะถูก**ยุบ** ไม่ใช่ลบ — งานที่เคยส่งไปยังอยู่ใน audit trail
+        ตรวจย้อนหลังได้ แต่หายจาก leaderboard เพราะมันคือผลงานของคนเดียว
+        ไม่ใช่ของทีมใหม่ ([README §7](../README.md))
+        """
+        target = self.store.team_by_invite_code(invite_code)
+        if target is None or target.course_id != course_id:
+            raise InviteInvalid(
+                "ไม่พบทีมจากรหัสนี้ — ตรวจตัวอักษรอีกครั้ง หรือขอรหัสใหม่จากเพื่อนในทีม"
+            )
+
+        current = self.store.team_of(user.id, course_id)
+        if current is not None and current.id == target.id:
+            return target  # อยู่ทีมนี้อยู่แล้ว — ไม่ใช่ข้อผิดพลาด
+
+        if len(target.member_ids) >= MAX_TEAM_SIZE:
+            raise TeamFull(f"ทีมนี้เต็มแล้ว (สูงสุด {MAX_TEAM_SIZE} คน)")
+
+        if current is not None:
+            current.member_ids = [m for m in current.member_ids if m != user.id]
+            if not current.member_ids:
+                current.dissolved_at = utcnow()
+                self.store.record(
+                    "team.dissolved", "team", current.id, actor_id=user.id,
+                    reason="สมาชิกคนสุดท้ายย้ายไปทีมอื่น", moved_to=target.id,
+                )
+            self.store.save_team(current)
+
+        target.member_ids = [*target.member_ids, user.id]
+        self.store.save_team(target)
+        self.store.record("team.joined", "team", target.id, actor_id=user.id)
+        return target
 
     # ── ส่งงาน ──────────────────────────────────────────────────────
 

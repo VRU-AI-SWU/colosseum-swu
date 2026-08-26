@@ -61,6 +61,40 @@ def baseline_ladder(slug: str, phase: str) -> list[BaselineMark]:
 CP463_VACUUM_LADDER = baseline_ladder("cp463-vacuum-1-2026", "main")
 
 
+def google_auth_from_env() -> "GoogleAuth | None":
+    """อ่านค่าตั้ง OAuth จากตัวแปรแวดล้อม — คืน `None` ถ้ายังไม่ได้ตั้ง
+
+    **client secret อยู่ใน environment ไม่ใช่ในไฟล์ใน repo** · คืน None เงียบๆ
+    แทนที่จะล้ม เพราะเครื่อง dev กับเทสต์ไม่จำเป็นต้องมี — endpoint ที่ต้องใช้มัน
+    จะตอบ 503 พร้อมบอกว่าต้องตั้งตัวแปรไหน ซึ่งชัดกว่าการที่บริการไม่ยอมเริ่มเลย
+
+        ARENA_GOOGLE_CLIENT_ID      จาก Google Cloud console
+        ARENA_GOOGLE_CLIENT_SECRET  🔒
+        ARENA_GOOGLE_REDIRECT_URI   ต้องตรงกับที่ลงทะเบียนไว้ใน console เป๊ะ
+        ARENA_WEB_ORIGIN            ที่ที่จะส่งนิสิตกลับไปพร้อมโทเคน
+    """
+    import os
+
+    from core.auth import GoogleAuth
+
+    client_id = os.environ.get("ARENA_GOOGLE_CLIENT_ID", "").strip()
+    client_secret = os.environ.get("ARENA_GOOGLE_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        return None
+
+    web_origin = os.environ.get("ARENA_WEB_ORIGIN", "https://colosseum.vru-ai.com").rstrip("/")
+    redirect_uri = os.environ.get(
+        "ARENA_GOOGLE_REDIRECT_URI", "https://colosseum-api.vru-ai.com/auth/google/callback"
+    )
+    return GoogleAuth(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        web_origin=web_origin,
+        allowed_domain=os.environ.get("ARENA_ALLOWED_DOMAIN", "g.swu.ac.th"),
+    )
+
+
 def demo_arena(
     root: Path, *, teams: int = 3, db_path: Path | str | None = None
 ) -> tuple[Arena, list[Team]]:
