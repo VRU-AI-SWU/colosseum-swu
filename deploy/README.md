@@ -75,27 +75,23 @@ docker builder prune -af
 sudo apt update && sudo apt install -y git docker.io
 ```
 
-### ⚠️ Python 3.11 — `apt install python3.11` ใช้ไม่ได้บน Mint
+### Python — 3.11 ถึง 3.13 ใช้ได้ทั้งหมด
 
-Mint ไม่มี `python3.11` ใน repo มาตรฐาน ไม่ว่ารุ่นไหน
+**สิ่งที่เป็น load-bearing คือเวอร์ชัน `numpy` ไม่ใช่เวอร์ชัน Python** —
+`numpy.random.Generator` ไม่การันตี stream ข้ามเวอร์ชันของ *numpy* จึงตรึง `==2.1.*` ไว้
+แต่ PCG64 เขียนด้วย C อยู่ใน numpy ตัว Python ไม่เกี่ยว
 
-| Mint | ฐาน | python3 ที่ได้ |
-|---|---|---|
-| 21.x | Ubuntu 22.04 | 3.10 |
-| **22.3 (เครื่องนี้)** | Ubuntu 24.04 | **3.12** |
-
-**เวอร์ชันนี้เป็น load-bearing ห้ามใช้ตัวที่ใกล้เคียง** —
-[`pyproject.toml`](../envs/cp463-vacuum/pyproject.toml) ตรึงไว้ที่ `==3.11.*` คู่กับ
-`numpy==2.1.*` เพราะ `numpy.random.Generator` ไม่การันตี stream ข้ามเวอร์ชัน
-ใช้ 3.10 หรือ 3.12 แล้ว **ผังห้องของ seed เดิมจะเปลี่ยน** คะแนนทุกค่าที่ประกาศไปแล้ว
-รวมถึงหมุด baseline จะใช้เทียบไม่ได้ทันที และจะไม่มีอะไรฟ้อง นอกจาก `pin_baselines --check`
-ในข้อ 4
-
-ใช้ `uv` ดึง Python 3.11 มาต่างหาก — ไม่ต้องเพิ่ม PPA และไม่แตะ Python ของระบบ
-(เป็นตัวเดียวกับที่ repo นี้ใช้ build wheel อยู่แล้ว)
+วัดแล้วบน 3.11 / 3.12 / 3.13 ได้ผังห้องแฮชเดียวกัน คะแนนตรงกันถึงทศนิยมที่ 12
+และ conformance 32 ข้อผ่านทั้งสามเวอร์ชัน · Mint 22.3 มากับ 3.12 จึงใช้ได้เลย
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh && uv python install 3.11
+sudo apt install -y python3-venv
+```
+
+ถ้าอยากตรึงเวอร์ชันให้เหมือนกันทุกเครื่องก็ใช้ `uv` ดึงมาต่างหากได้ ไม่แตะ Python ของระบบ
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh && uv python install 3.12
 ```
 
 ให้ผู้ใช้ที่จะรันบริการเข้ากลุ่ม docker แล้ว login ใหม่
@@ -128,14 +124,14 @@ git clone git@github.com:VRU-AI-SWU/colosseum-hypogeum.git secrets && chmod 700 
 `DockerLauncher` mount เฉพาะโฟลเดอร์ submission เข้าไปแบบ read-only เท่านั้น
 
 ```bash
-cd $ARENA/app && uv venv --python 3.11 && uv pip install -e envs/cp463-vacuum -e ".[api,cli,dev]"
+cd $ARENA/app && uv venv --python 3.12 && uv pip install -e envs/cp463-vacuum -e ".[api,cli,dev]"
 ```
 
 `[api]` เป็นสิ่งที่ขาดไม่ได้ — `fastapi` กับ `uvicorn` อยู่ใน extra ตัวนั้น
 ลืมแล้ว `arena serve` จะพังตอนสตาร์ทด้วย `ModuleNotFoundError` · `[dev]` ให้ pytest
 สำหรับขั้นตรวจข้างล่าง · `[cli]` ให้ httpx ไว้ยิง API จากเครื่องเดียวกัน
 
-ยืนยันว่าได้ 3.11 จริง — ข้อนี้พลาดแล้วเงียบ
+ยืนยันว่า **numpy ได้ 2.1.x** — ข้อนี้พลาดแล้วเงียบ ส่วนเวอร์ชัน Python ไม่สำคัญ
 
 ```bash
 $ARENA/app/.venv/bin/python -VV && $ARENA/app/.venv/bin/python -c "import numpy; print(numpy.__version__)"

@@ -800,7 +800,7 @@ git config core.hooksPath tools/hooks   # ⚠️ ทำครั้งเดี�
 tools/hooks/pre-commit --selftest        # ยืนยันว่า hook ทำงาน
 
 # แพลตฟอร์ม (core + runners)
-uv venv --python 3.11
+uv venv --python 3.12
 uv pip install -e ".[dev]" -e ./envs/cp463-vacuum
 pytest core/tests runners/tests -q                    # 93 ข้อ
 docker build -f runners/agent_env/images/Dockerfile.cpu -t arena/vacuum:cpu .
@@ -814,7 +814,7 @@ ARENA_URL=http://127.0.0.1:8000 ARENA_TOKEN=team-1 \
     python -m core.cli leaderboard cp463-vacuum-1-2026
 
 # environment ของโจทย์ (นิสิตติดตั้งแค่ก้อนนี้)
-cd envs/cp463-vacuum && uv venv --python 3.11 && uv pip install -e ".[dev]"
+cd envs/cp463-vacuum && uv venv --python 3.12 && uv pip install -e ".[dev]"
 pytest -q                        # conformance test §14 — 31 ข้อ
 python examples/calibrate.py     # การทดลอง §15
 ```

@@ -743,7 +743,7 @@ cp463-vacuum/
 **เวอร์ชันที่ตรึง** (ต้องเหมือนกันทั้ง starter kit และ runner image)
 
 ```
-python == 3.11.*
+python >= 3.11, < 3.14   # numpy คือตัวที่ตรึง ไม่ใช่ Python
 numpy == 2.1.*        # ← load-bearing: Generator stream ไม่การันตีข้ามเวอร์ชัน (§2 ข้อ 3)
 gymnasium == 1.3.*    # เวอร์ชันล่าสุด ณ เม.ย. 2026 · ต้องการ python ≥ 3.10
 zstandard == 0.23.*

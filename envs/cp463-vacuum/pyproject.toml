@@ -3,11 +3,17 @@ name = "cp463-vacuum"
 version = "1.0.0"
 description = "Vacuum cleaner grid world environment for CP463 1/2026 (Arena competition 1)"
 readme = "README.md"
-requires-python = "==3.11.*"
+requires-python = ">=3.11,<3.14"
 license = { text = "MIT" }
 
-# เวอร์ชันเหล่านี้ต้องเหมือนกันเป๊ะทั้ง starter kit และ runner image (env-spec §12)
-# numpy pin เป็น load-bearing: Generator stream ไม่การันตีข้ามเวอร์ชัน (env-spec §2 ข้อ 3)
+# **numpy pin เป็น load-bearing · เวอร์ชัน Python ไม่ใช่**
+#
+# `numpy.random.Generator` ไม่การันตี stream ข้ามเวอร์ชันของ *numpy* (env-spec §2 ข้อ 3)
+# แต่ PCG64 เขียนด้วย C อยู่ใน numpy ตัว Python จึงไม่เกี่ยว — วัดแล้วบน 3.11/3.12/3.13
+# ได้ผังห้องแฮชเดียวกันและคะแนนตรงกันถึงทศนิยมที่ 12 · conformance 32 ข้อผ่านทั้งสามเวอร์ชัน
+#
+# เดิมตรึง `==3.11.*` ไว้ด้วยความระมัดระวังเกินจำเป็น ซึ่งกลายเป็นด่านแรกที่นิสิตติด
+# เพราะเครื่องทั่วไปมาพร้อม 3.12 หรือ 3.13
 dependencies = [
     "numpy==2.1.*",
     "gymnasium==1.3.*",

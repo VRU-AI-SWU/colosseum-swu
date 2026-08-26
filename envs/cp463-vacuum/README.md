@@ -11,7 +11,7 @@ implement ตาม [environment-spec.md](../../docs/competitions/CP463/1-2026/v
 ## ติดตั้ง
 
 ```bash
-uv venv --python 3.11 && uv pip install -e ".[dev]"
+uv venv --python 3.12 && uv pip install -e ".[dev]"
 ```
 
 เวอร์ชันของ `numpy` และ `gymnasium` ถูก pin ไว้และเป็น **load-bearing** — `numpy.random.Generator`
