@@ -16,9 +16,10 @@ from __future__ import annotations
 
 import selectors
 import struct
+import sys
 import time
 from dataclasses import dataclass
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Callable
 
 import msgpack
 import numpy as np
@@ -78,6 +79,74 @@ def decode(body: bytes) -> dict[str, Any]:
     return msgpack.unpackb(body, object_hook=_unpack_hook, raw=False, strict_map_key=False)
 
 
+# ── รอให้มีข้อมูลบน pipe ───────────────────────────────────────────
+# ต้องแยกตามระบบปฏิบัติการ เพราะ **`select()` บน Windows รับได้เฉพาะ socket**
+# การส่ง pipe เข้าไปได้ `OSError [WinError 10038] ... not a socket` ทันที
+# (เจอตอนนิสิตรัน `arena eval` บน Windows — บน POSIX ไม่มีทางเจอเพราะ
+# epoll/kqueue รับ pipe ได้ปกติ) ฝั่ง Windows จึงถาม pipe ตรงๆ แล้ววนถาม
+#
+# ทั้งสองทางมองเห็นแค่บัฟเฟอร์ของ **ระบบปฏิบัติการ** ไม่เห็นบัฟเฟอร์ของ Python
+# `reader` จึงต้องเป็น stream ที่ไม่มีบัฟเฟอร์ (`bufsize=0` / `buffering=0`)
+# ไม่งั้นไบต์ที่ Python ดูดไว้แล้วจะถูกรายงานว่า "ยังไม่มาถึง" แล้วกลายเป็น
+# timeout ที่อธิบายไม่ได้ · ข้อกำหนดนี้มีมาแต่เดิม เพราะ selectors ก็มองไม่เห็นเหมือนกัน
+
+#: เริ่มถามถี่ๆ เพื่อไม่ให้ agent ที่ตอบเร็วต้องเสียเวลารอรอบถัดไป
+#: แล้วค่อยถ่างออกเพื่อไม่ให้เผา CPU ตอนรอนาน
+_POLL_FIRST = 0.0005
+_POLL_MAX = 0.005
+
+
+def _poll_until_readable(
+    peek: Callable[[], bool],
+    timeout: float,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> bool:
+    """วนถาม `peek()` จนกว่าจะมีข้อมูลหรือหมดเวลา
+
+    แยกเป็นฟังก์ชันล้วนๆ ที่รับ `peek`/`clock`/`sleep` เข้ามา เพื่อให้ **เทสต์ได้
+    บนทุกแพลตฟอร์ม** ตรรกะนี้เขียนขึ้นเพื่อ Windows แต่ถ้าเทสต์ได้เฉพาะบน Windows
+    มันก็จะเป็นโค้ดที่ไม่มีใครรันจนกว่าจะพังใส่นิสิต — ซึ่งเพิ่งเกิดไปแล้วรอบหนึ่ง
+    """
+    deadline = clock() + timeout
+    nap = _POLL_FIRST
+    while True:
+        if peek():
+            return True
+        left = deadline - clock()
+        if left <= 0:
+            return False
+        sleep(min(nap, left))
+        nap = min(nap * 2, _POLL_MAX)
+
+
+if sys.platform == "win32":  # pragma: no cover — เลือกเส้นทางตอน import
+
+    def _wait_readable(stream: BinaryIO, timeout: float) -> bool:
+        import _winapi
+        import msvcrt
+
+        handle = msvcrt.get_osfhandle(stream.fileno())
+
+        def peek() -> bool:
+            try:
+                return _winapi.PeekNamedPipe(handle)[0] > 0
+            except OSError:
+                # ปลายทางปิด pipe ไปแล้ว — ตอบว่าอ่านได้ เพื่อให้ `read()` เป็นคน
+                # รายงาน EOF ข้อความผิดพลาดจะได้เหมือนกันทุกแพลตฟอร์ม
+                return True
+
+        return _poll_until_readable(peek, timeout)
+
+else:
+
+    def _wait_readable(stream: BinaryIO, timeout: float) -> bool:
+        with selectors.DefaultSelector() as sel:
+            sel.register(stream, selectors.EVENT_READ)
+            return bool(sel.select(timeout))
+
+
 # ── channel ────────────────────────────────────────────────────────
 
 
@@ -123,9 +192,7 @@ class Channel:
         return b"".join(chunks)
 
     def _wait_readable(self, timeout: float) -> bool:
-        with selectors.DefaultSelector() as sel:
-            sel.register(self.reader, selectors.EVENT_READ)
-            return bool(sel.select(timeout))
+        return _wait_readable(self.reader, timeout)
 
     def close(self) -> None:
         for stream in (self.reader, self.writer):

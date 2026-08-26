@@ -198,7 +198,29 @@ flowchart LR
 credential ที่อยู่ได้นานเสมอ สิ่งที่การล็อกอินเปลี่ยนคือ*วิธีที่ token ถูกแจก*
 จาก "ผู้สอนส่งให้ทีละคน" เป็น "นิสิตล็อกอินแล้วเห็น token ของตัวเอง"
 
-### 4.4 ที่ยังเหลือ
+### 4.4 ~~Windows: `select()` รับได้เฉพาะ socket~~ ✅ ปิดแล้ว (v1.0.2)
+
+ข้อนี้เคยเขียนไว้ในตารางข้างล่างว่า *"ตรวจโค้ดแล้วไม่มี API เฉพาะ POSIX"* พร้อมหมายเหตุ
+ว่าพิสูจน์ได้แค่ "ไม่เห็นอะไรที่จะพัง" **หมายเหตุนั้นถูก และการตรวจนั้นพลาดจริง**
+
+`Channel._wait_readable` ใช้ `selectors.DefaultSelector()` ซึ่งบน Windows คือ
+`SelectSelector` → `select()` ที่**รับได้เฉพาะ socket** ส่ง pipe เข้าไปได้
+`OSError [WinError 10038]` ทันทีตั้งแต่ข้อความแรก · `arena eval` จึงพังทั้งคำสั่ง
+ขณะที่ `pip install` และ `vacuum.selfcheck` ผ่านหมด — เพราะสองอันนั้นไม่เปิด process ลูก
+
+ทำไมการตรวจโค้ดถึงพลาด — ไล่หา API ที่**ชื่อบอกว่าเป็น POSIX** (`fcntl`, `setsid`,
+`preexec_fn`, `SIGKILL`) แต่ `selectors` เป็น API ที่มีอยู่ทุกแพลตฟอร์มและ*ทำงานคนละแบบ*
+ซึ่งอันตรายกว่า เพราะมันไม่ประกาศตัว
+
+**สิ่งที่ทำให้บั๊กนี้อยู่รอดมาได้คือไม่มีเทสต์ไหนแตะ `Channel` เลยสักอัน** —
+ตอนนี้มี [`runners/tests/test_protocol.py`](../runners/tests/test_protocol.py) ที่
+ใช้ `os.pipe()` จริง (ไม่ใช่ `BytesIO` ซึ่งไม่มี `fileno()` จึงข้ามโค้ดที่พังไปทั้งหมด)
+
+ตรรกะการวนถามของฝั่ง Windows แยกเป็น `_poll_until_readable(peek, timeout, clock, sleep)`
+ที่รับตัวช่วยเข้ามาได้ **เพื่อให้เทสต์รันบน macOS/Linux ด้วย** — โค้ดที่รันได้แค่บน
+แพลตฟอร์มที่ไม่มีใครรัน CI ให้ ก็คือโค้ดที่จะพังใส่นิสิตอีกครั้ง
+
+### 4.5 ที่ยังเหลือ
 
 | | สถานะ |
 |---|---|
@@ -207,7 +229,7 @@ credential ที่อยู่ได้นานเสมอ สิ่งท�
 | runner daemon + WebSocket | ยังไม่มี — worker เป็น thread |
 | เพดานไฟล์บน named tunnel | ✅ วัดแล้ว **100 MiB** · `arena submit` ตรวจให้ที่ 95 MB |
 | replay viewer | ยังไม่มี — มีแต่ไฟล์ `.vrp` |
-| **Windows ยังไม่ได้ทดสอบจริง** | ตรวจโค้ดแล้วไม่มี API เฉพาะ POSIX (`preexec_fn`, `setsid`, `fcntl`, `resource`, `SIGKILL`) และ `os.dup2(2,1)` ใน `agent_host` ใช้ได้บน Windows — **แต่พิสูจน์ได้แค่ว่า "ไม่เห็นอะไรที่จะพัง" ไม่ใช่ "รันได้"** · README กับ release notes มีคำสั่ง PowerShell ครบแล้ว รอผลทดสอบจริง |
+| Windows | ทดสอบบนเครื่องจริงแล้ว (Python 3.14.4) · `pip install` ✅ · `vacuum.selfcheck` ✅ ครบทุกข้อ · `arena eval` เคยพัง → แก้ใน v1.0.2 ดู §4.4 · `--check-reset` และ `arena submit` **ยังรอผล** |
 
 ---
 
