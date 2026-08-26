@@ -9,9 +9,22 @@
 
 ## 1. ติดตั้ง (ครั้งเดียว)
 
+**macOS / Linux**
+
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 ```
+
+**Windows (PowerShell)**
+
+```powershell
+py -m venv .venv
+.venv\Scripts\Activate.ps1
+```
+
+> ถ้า PowerShell ฟ้อง *"running scripts is disabled"* ให้รันบรรทัดนี้ครั้งเดียวก่อน
+> `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` — เป็นค่าเริ่มต้นของ Windows
+> ที่บล็อกสคริปต์ ไม่ใช่ปัญหาของเรา
 
 แล้วคัดลอกคำสั่ง `pip install` จากหน้ารุ่นล่าสุด
 
@@ -20,8 +33,9 @@ python3 -m venv .venv && source .venv/bin/activate
 *(ไฟล์นี้ไม่ใส่ URL ของรุ่นไว้ตรงๆ เพราะมันถูกแพ็กมากับตัวแพ็กเกจ — เขียนเลขเวอร์ชันไว้
 ข้างในจะกลายเป็นชี้ไปรุ่นเก่าเสมอทุกครั้งที่ออกรุ่นใหม่)*
 
-ใช้ **Python 3.11, 3.12 หรือ 3.13** ได้ทั้งหมด — เครื่องส่วนใหญ่มีมาให้อยู่แล้ว
-เช็คด้วย `python3 -V` ถ้าได้ 3.10 หรือต่ำกว่าต้องอัพเกรดก่อน
+ใช้ **Python 3.11, 3.12 หรือ 3.13** ได้ทั้งหมด — เช็คด้วย `python3 -V` (Windows ใช้ `py -V`)
+ถ้าได้ 3.10 หรือต่ำกว่าต้องอัพเกรดก่อน · Windows โหลดจาก <https://www.python.org/downloads/>
+แล้ว**ติ๊ก "Add python.exe to PATH"** ตอนติดตั้ง ไม่งั้นคำสั่ง `py` กับ `pip` จะหาไม่เจอ
 
 > สิ่งที่สำคัญคือ **เวอร์ชัน `numpy`** ไม่ใช่เวอร์ชัน Python — คำสั่ง `pip install`
 > ข้างบนตรึงให้เองแล้ว และขั้นที่ 2 จะตรวจซ้ำให้ · อย่าอัพเกรด numpy เอง
@@ -78,12 +92,24 @@ from vacuum.baselines.common import WorldModel, decode_pos   # แผนที�
 
 จากนั้นคลิกที่ **โทเคน** ในแถบทีมเพื่อคัดลอก แล้วตั้งบนเครื่องตัวเอง
 
+**macOS / Linux**
+
 ```bash
 export ARENA_URL=https://colosseum-api.vru-ai.com
 export ARENA_TOKEN=<โทเคนที่คัดลอกมา>
 ```
 
 > ใส่สองบรรทัดนี้ใน `~/.zshrc` หรือ `~/.bashrc` จะได้ไม่ต้องพิมพ์ใหม่ทุกครั้งที่เปิด terminal
+
+**Windows (PowerShell)**
+
+```powershell
+$env:ARENA_URL = "https://colosseum-api.vru-ai.com"
+$env:ARENA_TOKEN = "<โทเคนที่คัดลอกมา>"
+```
+
+> สองบรรทัดนี้อยู่แค่ในหน้าต่างที่เปิดอยู่ ปิดแล้วหาย · ถ้าอยากให้อยู่ถาวรใช้
+> `setx ARENA_TOKEN "<โทเคน>"` แล้ว**เปิดหน้าต่างใหม่** (หน้าต่างเดิมจะยังไม่เห็นค่า)
 
 ### รหัสเชิญ กับ โทเคน — คนละอย่างกัน
 
@@ -182,6 +208,8 @@ arena leaderboard cp463-vacuum-1-2026
 | `reset()` ล้าง state ครบไหม | **`arena eval --check-reset`** |
 | agent เดินยังไง | `arena eval --replay-dir ./replays` แล้วอ่านด้วย `vacuum.replay.read_replay` |
 | ผลในเครื่องไม่ตรงกับบนเว็บ | `python -m vacuum.selfcheck` ก่อนเสมอ |
+| พิมพ์ `arena` แล้วไม่รู้จักคำสั่ง | ยังไม่ได้เปิด venv — `source .venv/bin/activate` (Windows: `.venv\Scripts\Activate.ps1`) |
+| Windows: ส่งงานแล้วขึ้น 401 | `$env:ARENA_TOKEN` หายเมื่อปิดหน้าต่าง · ใช้ `setx` แล้วเปิดหน้าต่างใหม่ |
 
 ⚠️ **ยังไม่มี replay viewer แบบกราฟิก** — `read_replay` คืน header + เหตุการณ์รายเฟรม
 ต้องเขียนตัววาดเอง (ซึ่งเป็นแบบฝึกหัดที่คุ้มถ้าอยากเห็นว่า agent ตัวเองติดตรงไหน)
