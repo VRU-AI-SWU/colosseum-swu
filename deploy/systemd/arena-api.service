@@ -21,6 +21,19 @@ WorkingDirectory=/home/ratchainant/VRU-AI/projects/colosseum/app
 # seed อยู่ที่นี่ที่เดียว — ไม่มีสำเนาบน cloud (README §10.4)
 Environment=ARENA_SECRETS=/home/ratchainant/VRU-AI/projects/colosseum/secrets
 
+# client secret ของ Google อยู่ในไฟล์นี้ **ไม่ใช่ใน unit** เพราะ unit ถูก commit
+# ลง repo สาธารณะ · ไฟล์ต้องเป็นของ root โหมด 600 — systemd อ่านตอนยังเป็น root
+# ก่อนจะ drop สิทธิ์ลงเป็น User= จึงไม่ต้องให้ผู้ใช้บริการอ่านได้เอง
+#
+#   ARENA_GOOGLE_CLIENT_ID
+#   ARENA_GOOGLE_CLIENT_SECRET
+#   ARENA_WEB_ORIGIN
+#
+# `-` ข้างหน้าแปลว่าไฟล์ไม่มีก็ยังสตาร์ทได้ — ระบบยังทำงานได้โดยไม่มีล็อกอิน
+# (endpoint ที่ต้องใช้จะตอบ 503 พร้อมบอกว่าต้องตั้งตัวแปรไหน) ซึ่งดีกว่าบริการ
+# ไม่ยอมขึ้นทั้งตัวเพราะยังไม่ได้ตั้งค่าส่วนที่เป็นทางเลือก
+EnvironmentFile=-/etc/arena.env
+
 # --host 127.0.0.1 ไม่ใช่ 0.0.0.0 โดยตั้งใจ: ทางเข้าเดียวคือผ่าน tunnel
 # ถ้า bind กว้างกว่านี้ ใครที่อยู่บนเครือข่ายมหาวิทยาลัยจะยิง API ได้ตรงๆ
 # โดยข้าม Cloudflare ทั้งหมด ทำให้ rate limit และ Access ที่จะใส่ทีหลังไร้ความหมาย

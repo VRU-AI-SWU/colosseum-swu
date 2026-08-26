@@ -201,6 +201,43 @@ cloudflared tunnel route dns porta-triumphalis colosseum-api.vru-ai.com
 🔒 `~/.cloudflared/cert.pem` เป็นสิทธิ์ระดับ**บัญชี** ในโซน `vru-ai.com` ใครได้ไป
 สร้าง tunnel และแก้ DNS ของโดเมนได้ · เก็บไว้เฉพาะเครื่องนี้ ห้ามคัดลอกไปที่อื่น
 
+## 5.5 ตั้งค่าล็อกอินด้วย Google
+
+สร้าง OAuth client ที่ [Google Cloud console](https://console.cloud.google.com/apis/credentials)
+→ **Create Credentials → OAuth client ID → Web application**
+
+| ช่อง | ค่า |
+|---|---|
+| Authorized redirect URIs | `https://colosseum-api.vru-ai.com/auth/google/callback` |
+| (สำหรับ dev) | `http://localhost:8000/auth/google/callback` |
+| Authorized JavaScript origins | เว้นว่าง — เราใช้ flow ฝั่งเซิร์ฟเวอร์ |
+
+แล้วไปที่ **Audience → User type = Internal** เพื่อให้เฉพาะบัญชีใน Workspace ของ
+มหาวิทยาลัยผ่าน flow ได้ตั้งแต่หน้าล็อกอินของ Google เอง · โค้ดยังเช็ค `hd` ซ้ำอีกชั้น
+เพราะการตั้งค่าใน console เปลี่ยนได้โดยที่โค้ดไม่รู้ตัว
+
+**client secret ไม่อยู่ใน repo** — เขียนลงไฟล์ที่ systemd อ่าน
+
+```bash
+sudo install -m 600 -o root -g root /dev/null /etc/arena.env && sudo nano /etc/arena.env
+```
+
+```
+ARENA_GOOGLE_CLIENT_ID=<client id>
+ARENA_GOOGLE_CLIENT_SECRET=<secret>
+ARENA_WEB_ORIGIN=https://colosseum.vru-ai.com
+```
+
+ตรวจว่าถูกต้อง (ไม่แสดงค่า secret ออกมา — แค่ความยาวกับตัวอักษรแรกๆ)
+
+```bash
+sudo python3 ~/VRU-AI/projects/colosseum/app/tools/check_env.py
+```
+
+⚠️ ช่องว่างหน้า/หลังค่า และเครื่องหมายคำพูดครอบค่า เป็นสองสาเหตุที่พบบ่อยที่สุดของ
+"ใส่ถูกแล้วแต่ใช้ไม่ได้" — systemd เก็บอัญประกาศไปเป็นส่วนหนึ่งของค่าด้วย แล้ว Google
+ปฏิเสธโดยไม่บอกสาเหตุ · สคริปต์ตรวจให้ทั้งสองอย่าง
+
 ## 6. ให้มันรันเองหลังไฟดับ
 
 เทอมหนึ่งยาว 16 สัปดาห์ — บริการที่ต้องมีคนมา `ssh` เข้าไปสตาร์ทใหม่ทุกครั้งที่ไฟดับ
