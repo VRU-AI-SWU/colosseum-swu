@@ -102,10 +102,34 @@ def resolve_config(spec: str, env_plugin: str) -> str:
         raise SystemExit(f"{exc}") from exc
 
 
+def _require_agent_dir(raw: str) -> Path:
+    """ยืนยันว่ามี `agent.py` อยู่จริงก่อนไปไกลกว่านี้
+
+    ค่าเริ่มต้นของ `--dir` คือโฟลเดอร์ปัจจุบัน ส่วน `arena init` สร้าง *โฟลเดอร์ใหม่*
+    คนที่รัน init แล้วรัน eval ต่อทันทีโดยไม่ `cd` จึงเจอ traceback ของ `agent_host`
+    ซึ่งอ่านแล้วเหมือน agent ตัวเองพัง ทั้งที่แค่ยืนผิดที่ · ดักตรงนี้ให้บอกตรงๆ
+    """
+    target = Path(raw).resolve()
+    if (target / "agent.py").is_file():
+        return target
+
+    hint = ""
+    if target.is_dir():
+        nested = sorted(p.parent.name for p in target.glob("*/agent.py"))
+        if nested:
+            hint = f"\n  โฟลเดอร์งานของคุณน่าจะเป็น {nested[0]}/ — `cd {nested[0]}` ก่อน"
+    raise SystemExit(
+        f"✗ ไม่พบ agent.py ใน {target}{hint}\n"
+        "  ถ้ายังไม่ได้สร้างโฟลเดอร์งาน: `arena init --dir my-agent` แล้ว `cd my-agent`\n"
+        "  ถ้าโฟลเดอร์งานอยู่ที่อื่น: ระบุด้วย --dir"
+    )
+
+
 def cmd_eval(args) -> int:
     """รันในเครื่องตัวเอง — ไม่ต่อเน็ต ไม่กินโควตา"""
     from runners.agent_env.runner import run_submission
 
+    _require_agent_dir(args.dir)
     seeds = parse_seeds(args.seeds)
     result = run_submission(
         env_plugin=args.env_plugin,
@@ -252,7 +276,7 @@ def cmd_init(args) -> int:
 
 
 def cmd_submit(args) -> int:
-    data = pack(Path(args.dir).resolve())
+    data = pack(_require_agent_dir(args.dir))
     size_mb = len(data) / 1024 / 1024
     print(f"แพ็กไฟล์ได้ {size_mb:.1f} MB")
 

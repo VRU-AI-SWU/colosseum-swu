@@ -376,9 +376,11 @@ bot ของผู้สอนที่วางไว้บน leaderboard เ
 - CLI สำหรับส่งงาน:
 
 ```bash
-arena init cp463-vacuum-1-2026
-arena eval --local --seeds 1-200      # training seeds — ไม่กินโควตา
-arena submit --note "เพิ่ม frontier exploration"
+arena init --dir my-agent                    # สร้างโฟลเดอร์งาน
+cd my-agent                                  # ← ทุกคำสั่งข้างล่างรันจากในนี้
+arena eval --config main --seeds 1-200       # training seeds — ไม่กินโควตา
+arena eval --config main --seeds 1-200 --check-reset   # ด่านบังคับก่อนส่ง
+arena submit cp463-vacuum-1-2026 --note "เพิ่ม frontier exploration"
 ```
 
 ---

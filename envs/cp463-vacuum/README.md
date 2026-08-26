@@ -47,9 +47,10 @@ print(score.score, score.n_completed)
 ## starter kit ที่แจกนิสิต
 
 ```bash
-pip install cp463-vacuum colosseum
-arena init --dir my-agent          # คัดลอก starter kit ออกมา
-python -m vacuum.selfcheck         # ยืนยันว่า environment ตรงกับ grader
+pip install cp463-vacuum colosseum   # ของจริงใช้ URL จากหน้า release
+python -m vacuum.selfcheck           # ยืนยันว่า environment ตรงกับ grader
+arena init --dir my-agent            # คัดลอก starter kit ออกมา
+cd my-agent                          # ← `arena eval` อ่านจากโฟลเดอร์ปัจจุบัน
 arena eval --config main --seeds 1-20
 ```
 

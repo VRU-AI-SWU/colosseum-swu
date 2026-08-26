@@ -666,14 +666,24 @@ WS     /api/worker/connect                       รับ test batch + ส่�
 
 ### CLI
 
+**มีจริงแล้ว** — รูปแบบนี้คือของที่รันได้วันนี้ ไม่ใช่ของที่ออกแบบไว้
+
 ```bash
-arena login                                   # เข้าสู่ระบบด้วย Google
-arena init cp463-vacuum-1-2026                # ดาวน์โหลด starter kit ของ competition
-arena eval --local --seeds public             # ทดสอบในเครื่องตัวเองก่อนส่ง
-arena submit --note "เพิ่ม frontier exploration"
+arena init --dir my-agent                     # คัดลอก starter kit ออกมาเป็นโฟลเดอร์ใหม่
+cd my-agent                                   # eval/submit อ่านจากโฟลเดอร์ปัจจุบัน (--dir ค่าเริ่มต้น ".")
+arena eval --config main --seeds 1-20         # ทดสอบในเครื่องตัวเอง ไม่กินโควตา
+arena eval --config main --seeds 1-20 --check-reset
+arena submit cp463-vacuum-1-2026 --note "เพิ่ม frontier exploration"
 arena status                                  # ดูสถานะ run ล่าสุด
 arena leaderboard                             # ดูอันดับใน terminal
-arena replay <run-id> --episode 3             # เปิด replay
+arena serve                                   # รัน API + worker สำหรับ dev
+```
+
+**ยังไม่มี** — ออกแบบไว้แล้วแต่ยังไม่ได้เขียน
+
+```bash
+arena login                                   # วันนี้ใช้ล็อกอินผ่านหน้าเว็บแล้วคัดลอกโทเคนแทน
+arena replay <run-id> --episode 3             # ยังมีแต่ไฟล์ .vrp — ดู docs/architecture.md §4.5
 arena worker --competition <slug>             # โหมด remote worker (prediction-based)
 ```
 

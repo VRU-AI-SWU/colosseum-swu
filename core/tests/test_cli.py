@@ -10,7 +10,7 @@ import zipfile
 
 import pytest
 
-from core.cli import pack, parse_seeds
+from core.cli import _require_agent_dir, pack, parse_seeds
 
 
 @pytest.mark.parametrize(
@@ -47,3 +47,32 @@ def test_pack_keeps_nested_student_modules(tmp_path):
 
     with zipfile.ZipFile(__import__("io").BytesIO(pack(tmp_path))) as zf:
         assert "mylib/planner.py" in zf.namelist()
+
+
+# ── ยืนผิดโฟลเดอร์ ─────────────────────────────────────────────────
+# `arena init` สร้าง *โฟลเดอร์ใหม่* แต่ `--dir` ของ eval/submit เริ่มต้นที่ "."
+# คนที่รัน init แล้วรัน eval ต่อโดยไม่ `cd` เคยเจอ traceback ของ agent_host
+# ซึ่งอ่านแล้วเหมือน agent ตัวเองพัง ทั้งที่แค่ยืนผิดที่
+
+
+def test_missing_agent_py_says_so_instead_of_raising_a_traceback(tmp_path):
+    with pytest.raises(SystemExit) as exc:
+        _require_agent_dir(str(tmp_path))
+    assert "ไม่พบ agent.py" in str(exc.value)
+    assert "arena init" in str(exc.value)
+
+
+def test_error_points_at_the_nested_folder_when_there_is_one(tmp_path):
+    """เคสที่พบบ่อยที่สุด — ยืนอยู่ข้างนอก `my-agent/` ที่เพิ่ง init มา"""
+    (tmp_path / "my-agent").mkdir()
+    (tmp_path / "my-agent" / "agent.py").write_text("class Agent: pass\n")
+    with pytest.raises(SystemExit) as exc:
+        _require_agent_dir(str(tmp_path))
+    assert "cd my-agent" in str(exc.value)
+
+
+def test_correct_folder_passes_and_returns_an_absolute_path(tmp_path):
+    (tmp_path / "agent.py").write_text("class Agent: pass\n")
+    got = _require_agent_dir(str(tmp_path))
+    assert got.is_absolute()
+    assert (got / "agent.py").is_file()
