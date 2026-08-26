@@ -207,6 +207,7 @@ credential ที่อยู่ได้นานเสมอ สิ่งท�
 | runner daemon + WebSocket | ยังไม่มี — worker เป็น thread |
 | เพดานไฟล์บน named tunnel | ✅ วัดแล้ว **100 MiB** · `arena submit` ตรวจให้ที่ 95 MB |
 | replay viewer | ยังไม่มี — มีแต่ไฟล์ `.vrp` |
+| **Windows ยังไม่ได้ทดสอบจริง** | ตรวจโค้ดแล้วไม่มี API เฉพาะ POSIX (`preexec_fn`, `setsid`, `fcntl`, `resource`, `SIGKILL`) และ `os.dup2(2,1)` ใน `agent_host` ใช้ได้บน Windows — **แต่พิสูจน์ได้แค่ว่า "ไม่เห็นอะไรที่จะพัง" ไม่ใช่ "รันได้"** · README กับ release notes มีคำสั่ง PowerShell ครบแล้ว รอผลทดสอบจริง |
 
 ---
 
