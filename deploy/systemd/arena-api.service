@@ -18,6 +18,11 @@ Type=simple
 User=ratchainant
 WorkingDirectory=/home/ratchainant/VRU-AI/projects/colosseum/app
 
+# Python buffer stdout เมื่อปลายทางไม่ใช่ terminal — บรรทัดสถานะตอนสตาร์ท
+# (sandbox ที่ใช้ · ล็อกอินตั้งค่าหรือยัง · โหลดข้อมูลเก่ามาได้เท่าไร) จึงไม่โผล่ใน
+# journal จนกว่า buffer จะเต็มหรือ process จบ ซึ่งคือตอนที่สายเกินจะช่วยอะไร
+Environment=PYTHONUNBUFFERED=1
+
 # seed อยู่ที่นี่ที่เดียว — ไม่มีสำเนาบน cloud (README §10.4)
 Environment=ARENA_SECRETS=/home/ratchainant/VRU-AI/projects/colosseum/secrets
 

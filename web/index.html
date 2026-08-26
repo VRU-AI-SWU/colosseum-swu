@@ -130,6 +130,30 @@ footer a { color: var(--muted); }
 .dot.live { background: #4a7c46; }
 .dot.down { background: var(--blood); }
 
+/* ── แถบทีม ── ข้อมูลที่ต้องใช้เป็นครั้งคราว ไม่ใช่เนื้อหาหลักของหน้า
+   จึงบางและเงียบกว่าตาราง แต่หยิบใช้ได้ทันทีเมื่อต้องการ */
+.team {
+  margin-top: 26px; padding: 14px 16px;
+  border: 1px solid var(--rule); border-radius: var(--radius);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
+  font-size: 13px;
+}
+.team b { font-weight: 600; }
+.team .who { color: var(--muted); }
+.chip {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--stone-2); border: 1px solid var(--rule);
+  padding: 3px 9px; border-radius: var(--radius); cursor: pointer;
+  font-size: 12px; letter-spacing: .06em;
+}
+.chip:hover { border-color: var(--blood); }
+.team .spacer { margin-left: auto; }
+.linkish {
+  background: none; border: 0; color: var(--muted); cursor: pointer;
+  font: inherit; font-size: 12px; text-decoration: underline; padding: 0;
+}
+.linkish:hover { color: var(--blood); }
+
 /* ── กล่องใส่โทเคน ── */
 .gate { margin-top: 34px; padding: 22px; border: 1px solid var(--rule); border-radius: var(--radius); }
 .gate h2 { font-family: Cinzel, Georgia, serif; font-size: 15px; letter-spacing: .1em; margin: 0 0 8px; }
@@ -146,6 +170,13 @@ button {
   border-radius: var(--radius); letter-spacing: .04em;
 }
 button.ghost { background: transparent; color: var(--muted); border-color: var(--rule); }
+button.google {
+  background: var(--stone-2); color: var(--ink); border-color: var(--rule);
+  display: inline-flex; align-items: center; gap: 9px; font-weight: 500;
+}
+button.google:hover { border-color: var(--blood); }
+button.google svg { width: 16px; height: 16px; }
+.or { color: var(--muted); font-size: 12px; margin: 14px 0 8px; }
 .err { color: var(--blood); font-size: 13px; margin-top: 12px; }
 [hidden] { display: none !important; }
 .scroll { overflow-x: auto; }
@@ -181,15 +212,28 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
 
   <section class="gate" id="gate" hidden>
     <h2>เข้าสู่สนาม</h2>
-    <p>ใส่โทเคนของทีมที่ได้รับจากผู้สอน — เก็บไว้ในเบราว์เซอร์นี้เท่านั้น ไม่ถูกส่งไปที่อื่น</p>
-    <div class="row">
-      <input id="token" placeholder="team-…" autocomplete="off" spellcheck="false">
-      <button id="enter">ดู leaderboard</button>
-    </div>
+    <p>ใช้บัญชี <b>@g.swu.ac.th</b> ของมหาวิทยาลัย · ล็อกอินครั้งแรกได้ทีมทันที
+       จะทำคนเดียวหรือชวนเพื่อนมาเข้าทีมทีหลังก็ได้</p>
+    <button class="google" id="google">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="#4285F4" d="M23 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.2a5.3 5.3 0 01-2.3 3.5v2.9h3.7c2.2-2 3.4-5 3.4-8.6z"/>
+        <path fill="#34A853" d="M12 24c3.1 0 5.7-1 7.6-2.8l-3.7-2.9c-1 .7-2.4 1.1-3.9 1.1-3 0-5.6-2-6.5-4.8H1.6v3C3.5 21.4 7.5 24 12 24z"/>
+        <path fill="#FBBC05" d="M5.5 14.6a7.2 7.2 0 010-4.6v-3H1.6a12 12 0 000 10.6l3.9-3z"/>
+        <path fill="#EA4335" d="M12 4.8c1.7 0 3.2.6 4.4 1.7l3.3-3.3C17.7 1.2 15.1 0 12 0 7.5 0 3.5 2.6 1.6 6.4l3.9 3C6.4 6.7 9 4.8 12 4.8z"/>
+      </svg>
+      เข้าสู่ระบบด้วย Google
+    </button>
     <div class="err" id="gate-err" hidden></div>
+
+    <div class="or">หรือถ้าผู้สอนให้โทเคนมาโดยตรง</div>
+    <div class="row">
+      <input id="token" placeholder="วางโทเคนที่นี่" autocomplete="off" spellcheck="false">
+      <button class="ghost" id="enter">ใช้โทเคนนี้</button>
+    </div>
   </section>
 
   <main id="board" hidden>
+    <div class="team" id="team" hidden></div>
     <div class="target" id="target" hidden></div>
     <div class="scroll">
       <table>
@@ -235,16 +279,99 @@ const fmt = (n) => (n === null || n === undefined) ? "—" : n.toFixed(4);
 
 let token = localStorage.getItem(KEY) || "";
 let timer = null;
+let myTeam = null;
+
+// โทเคนกลับมาจาก /auth/google/callback ทาง fragment ของ URL
+//
+// ใช้ `#` ไม่ใช่ `?` เพราะ fragment ไม่ถูกส่งไปเซิร์ฟเวอร์ จึงไม่ไปโผล่ใน access log
+// ของ Cloudflare หรือของใครก็ตามระหว่างทาง · ล้างทิ้งทันทีที่อ่านเสร็จเพื่อไม่ให้
+// ค้างอยู่ในช่อง URL ให้คนข้างๆ เห็น หรือติดไปกับลิงก์ที่นิสิตแชร์กัน
+function takeTokenFromUrl() {
+  const hash = new URLSearchParams(location.hash.slice(1));
+  const fresh = hash.get("token");
+  const error = hash.get("error");
+  if (fresh || error) {
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+  if (error) {
+    $("gate-err").hidden = false;
+    $("gate-err").textContent = error;
+  }
+  if (fresh) {
+    token = fresh;
+    localStorage.setItem(KEY, fresh);
+  }
+}
 
 function show(view) {
   $("gate").hidden = view !== "gate";
   $("board").hidden = view !== "board";
 }
 
-async function api(path) {
-  const res = await fetch(API + path, { headers: { Authorization: "Bearer " + token } });
-  if (!res.ok) throw Object.assign(new Error(await res.text()), { status: res.status });
+async function api(path, options = {}) {
+  const res = await fetch(API + path, {
+    ...options,
+    headers: { Authorization: "Bearer " + token, ...(options.headers || {}) },
+  });
+  if (!res.ok) {
+    let detail = await res.text();
+    try { detail = JSON.parse(detail).detail ?? detail; } catch {}
+    throw Object.assign(new Error(detail), { status: res.status });
+  }
   return res.json();
+}
+
+async function copy(text, el) {
+  try {
+    await navigator.clipboard.writeText(text);
+    const before = el.textContent;
+    el.textContent = "คัดลอกแล้ว";
+    setTimeout(() => { el.textContent = before; }, 1200);
+  } catch {
+    // clipboard ถูกบล็อก (http หรือ permission) — เลือกข้อความให้แทน จะได้ copy เองได้
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+  }
+}
+
+function renderTeam(team) {
+  myTeam = team;
+  const el = $("team");
+  el.hidden = false;
+  const who = team.members.length
+    ? team.members.map((m) => escapeHtml(m.name)).join(" · ")
+    : "ยังไม่ผูกกับบัญชี Google";
+  el.innerHTML =
+    `<span><b>${escapeHtml(team.name)}</b> <span class="who">${who}</span></span>` +
+    `<span class="who">รหัสเชิญ</span> <span class="chip" id="c-invite">${team.invite_code}</span>` +
+    `<span class="who">โทเคน</span> <span class="chip" id="c-token">คลิกเพื่อคัดลอก</span>` +
+    `<span class="spacer"></span>` +
+    `<button class="linkish" id="join-open">เข้าทีมเพื่อน</button>`;
+
+  $("c-invite").onclick = (e) => copy(team.invite_code, e.target);
+  $("c-token").onclick = (e) => copy(team.token, e.target);
+  $("join-open").onclick = () => promptJoin();
+}
+
+async function promptJoin() {
+  const code = prompt(
+    "ใส่รหัสเชิญ 6 ตัวอักษรที่ได้จากเพื่อนในทีม\n\n" +
+    "⚠️ ถ้าคุณเคยส่งงานในฐานะทีมเดี่ยวมาก่อน คะแนนเดิมจะหายจาก leaderboard\n" +
+    "เพราะมันเป็นผลงานของคนเดียว ไม่ใช่ของทีมใหม่"
+  );
+  if (!code) return;
+  try {
+    const body = new FormData();
+    body.append("invite_code", code.trim());
+    const joined = await api("/api/teams/join", { method: "POST", body });
+    token = joined.token;
+    localStorage.setItem(KEY, token);
+    start();
+  } catch (e) {
+    alert(e.message || "เข้าทีมไม่สำเร็จ");
+  }
 }
 
 function renderTarget(t, you) {
@@ -291,6 +418,11 @@ function escapeHtml(s) {
 async function refresh() {
   try {
     const board = await api(`/api/competitions/${SLUG}/leaderboard`);
+    try {
+      renderTeam((await api("/api/me")).team);
+    } catch {
+      $("team").hidden = true;  // เซิร์ฟเวอร์รุ่นเก่าที่ยังไม่มี /api/me — ไม่ใช่เรื่องคอขาดบาดตาย
+    }
     const teams = board.rows.filter((r) => r.type === "team");
     renderRows(board.rows);
     renderTarget(board.next_target, teams.find((r) => r.is_you));
@@ -325,12 +457,17 @@ function start() {
 function logout(msg) {
   clearInterval(timer);
   token = "";
+  myTeam = null;
   localStorage.removeItem(KEY);
+  $("team").hidden = true;
   show("gate");
   $("gate-err").hidden = !msg;
   $("gate-err").textContent = msg || "";
 }
 
+$("google").addEventListener("click", () => {
+  location.href = API + "/auth/google/login";
+});
 $("enter").addEventListener("click", () => {
   const v = $("token").value.trim();
   if (!v) return;
@@ -344,6 +481,7 @@ $("logout").addEventListener("click", () => logout(""));
 
 if (PHOTO_CREDIT) $("credit").textContent = PHOTO_CREDIT;
 
+takeTokenFromUrl();
 if (token) start(); else show("gate");
 </script>
 </body>
