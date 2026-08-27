@@ -1,6 +1,6 @@
 [project]
 name = "colosseum"
-version = "0.1.1"
+version = "0.1.2"
 description = "Arena — แพลตฟอร์มแข่งขันสำหรับวิชา AI (core + runners)"
 readme = "README.md"
 requires-python = ">=3.11"

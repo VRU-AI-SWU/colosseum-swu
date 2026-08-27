@@ -7,7 +7,7 @@ name = "cp463-vacuum"
 #                     ขยับเมื่อไร = คะแนนเก่าทั้งหมดเทียบไม่ได้ ต้อง rejudge
 #
 # 1.0.1 นี้แก้แค่ช่วงเวอร์ชันที่รองรับกับเอกสาร — env_version จึงยังเป็น 1.0.0
-version = "1.0.1"
+version = "1.0.2"
 description = "Vacuum cleaner grid world environment for CP463 1/2026 (Arena competition 1)"
 readme = "README.md"
 requires-python = ">=3.11"
