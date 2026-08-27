@@ -191,3 +191,62 @@ def test_training_seed_gets_no_warning(capsys, tmp_path):
 
     assert main([str(path), "--no-open"]) == 0
     assert "ห้ามส่ง" not in capsys.readouterr().err
+
+
+# ── กติกาของสี ─────────────────────────────────────────────────────
+
+
+def _luminance(hex_color: str) -> float:
+    r, g, b = (int(hex_color[i : i + 2], 16) / 255 for i in (1, 3, 5))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _palette(css: str, block: str) -> dict[str, str]:
+    """ดึงตัวแปรสีของธีมหนึ่งออกมาจาก CSS"""
+    body = re.search(block, css, re.S).group(1)
+    return dict(re.findall(r"--([a-z]+):(#[0-9a-f]{6})", body))
+
+
+@pytest.mark.parametrize(
+    "theme,block",
+    [
+        ("สว่าง", r"\n:root\{(.*?)\n\}"),
+        ("มืด", r"prefers-color-scheme:dark\)\{:root\{(.*?)\n\}\}"),
+    ],
+)
+def test_walls_are_the_darkest_thing_in_the_room(theme, block):
+    """กำแพงต้องมืดที่สุดเสมอ ทั้งสองธีม
+
+    เคยทำกลับกันในธีมมืด (กำแพงสว่างกว่าพื้น) ด้วยเหตุผลว่าช่องมืดบนพื้นหลังดำ
+    อ่านเป็น "หลุม" · เหตุผลฟังขึ้นแต่ผลจริงคือคนอ่านช่องสีดำ — ซึ่งคือ*พื้น* —
+    ว่าเป็นกำแพง แล้วงงว่าทำไมหุ่นเดินทับได้ · คำถามแรกที่ได้จากคนใช้จริงคือข้อนี้
+    """
+    from vacuum.viewer import _TEMPLATE
+
+    colors = _palette(_TEMPLATE, block)
+    for key in ("wall", "floor", "bg", "dirt"):
+        assert key in colors, f"ธีม{theme}: ไม่มีตัวแปร --{key}"
+
+    wall, floor = _luminance(colors["wall"]), _luminance(colors["floor"])
+    assert wall < floor, (
+        f"ธีม{theme}: กำแพง ({colors['wall']}) ต้องมืดกว่าพื้น ({colors['floor']})"
+    )
+    # พื้นต้องต่างจากพื้นหลังหน้าเว็บพอที่จะเห็นขอบห้อง
+    assert abs(floor - _luminance(colors["bg"])) > 0.02, (
+        f"ธีม{theme}: พื้นห้องกับพื้นหลังหน้าเว็บใกล้กันเกินไป — มองไม่เห็นขอบห้อง"
+    )
+
+
+def test_legend_says_walls_cannot_be_walked_on():
+    """คำอธิบายสีต้องบอกว่ากำแพง*ทำอะไร* ไม่ใช่แค่บอกชื่อสี
+
+    เจาะจงที่ตัวคำอธิบายสีจริงๆ ไม่ใช่แค่หาคำในทั้งหน้า — คำว่า "เดินทับไม่ได้"
+    ยังโผล่ในข้อความตอนชี้ดูรายช่องด้วย การหาแบบกว้างจึงผ่านทั้งที่คำอธิบายสีหายไปแล้ว
+    """
+    from vacuum.viewer import _TEMPLATE
+
+    legend = re.search(r'var\(--wall\)"></i>(.*?)</span>', _TEMPLATE)
+    assert legend, "ไม่พบคำอธิบายสีของกำแพง"
+    assert "เดินทับไม่ได้" in legend.group(1), (
+        f"คำอธิบายสีของกำแพงบอกแค่ {legend.group(1)!r} — ต้องบอกด้วยว่าเดินทับไม่ได้"
+    )

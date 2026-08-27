@@ -126,18 +126,21 @@ _TEMPLATE = r"""<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Vacuum replay</title>
 <style>
+/* **กำแพงต้องเป็นสิ่งที่มืดที่สุดในภาพเสมอ ทั้งสองธีม**
+   เคยลองให้ธีมมืดใช้กำแพงสว่างกว่าพื้น โดยให้เหตุผลว่าช่องมืดบนพื้นหลังดำจะอ่าน
+   เป็น "หลุม" — ผลจริงคือคนอ่านช่องสีดำ (ซึ่งคือพื้น) ว่าเป็นกำแพง แล้วงงว่า
+   ทำไมหุ่นเดินทับได้ · ทางแก้ที่ถูกคือทำให้ *พื้น* สว่างกว่าพื้นหลังหน้าเว็บ
+   ห้องจะได้อ่านเป็นพื้นผิว แล้วปล่อยให้กำแพงมืดที่สุดตามที่ทุกคนคาด */
 :root{
   --bg:#faf9f7; --panel:#fff; --ink:#1c1a17; --dim:#6b6560; --line:#e4e0da;
-  --floor:#f5f2ed; --wall:#6d6259; --dirt:#c9973f; --clean:#cfe0ca;
-  --trail:#cfe0ee; --sticky:#b8749a; --bot:#1f6b48; --hot:#d4643c;
+  --floor:#efeae1; --wall:#332e29; --dirt:#c9973f; --clean:#b7d3ae;
+  --trail:#b9d3ea; --sticky:#b8749a; --bot:#1f6b48; --hot:#d4643c;
   --accent:#8a5a2b;
 }
-/* ธีมมืด: กำแพงต้อง *สว่างกว่า* พื้น ไม่ใช่มืดกว่า — บนพื้นหลังดำ ช่องที่มืดกว่า
-   อ่านเป็น "หลุม" ไม่ใช่ "ของตัน" และแยกจากพื้นไม่ออกด้วย */
 @media (prefers-color-scheme:dark){:root{
   --bg:#14120f; --panel:#1d1a16; --ink:#eceae6; --dim:#9a938b; --line:#332e28;
-  --floor:#1b1815; --wall:#544a40; --dirt:#c99a4a; --clean:#33472f;
-  --trail:#28405a; --sticky:#a3628a; --bot:#5fd39a; --hot:#e8794c;
+  --floor:#37312a; --wall:#080706; --dirt:#c99a4a; --clean:#3f5c39;
+  --trail:#31506e; --sticky:#a3628a; --bot:#5fd39a; --hot:#e8794c;
   --accent:#d0a05c;
 }}
 *{box-sizing:border-box}
@@ -151,7 +154,10 @@ h1{font-size:18px;margin:0 0 2px;letter-spacing:.01em}
 @media(max-width:780px){.stage{grid-template-columns:1fr}}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
 canvas{display:block;width:100%;height:auto;image-rendering:pixelated;border-radius:6px}
-#strip{height:34px;margin-top:10px}
+#strip{height:34px;margin-top:2px}
+.peek{font-size:12.5px;color:var(--dim);margin:9px 0 0;min-height:19px;
+  font-variant-numeric:tabular-nums}
+.peek b{color:var(--ink);font-weight:600}
 .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
 button{font:inherit;font-size:13px;padding:6px 11px;border:1px solid var(--line);
   border-radius:7px;background:var(--bg);color:var(--ink);cursor:pointer}
@@ -183,6 +189,7 @@ kbd{font:inherit;font-size:11px;border:1px solid var(--line);border-bottom-width
   <div class="stage">
     <div class="card">
       <canvas id="grid"></canvas>
+      <p class="peek" id="peek"></p>
       <canvas id="strip"></canvas>
       <div class="controls">
         <button id="play">▶ เล่น</button>
@@ -200,7 +207,7 @@ kbd{font:inherit;font-size:11px;border:1px solid var(--line);border-bottom-width
         <button id="nextstuck" title="ไปยังจุดที่ชนติดกันหลายครั้ง">จุดที่ติด ▸</button>
       </div>
       <div class="legend">
-        <span><i style="background:var(--wall)"></i>กำแพง</span>
+        <span><i style="background:var(--wall)"></i>กำแพง (เดินทับไม่ได้)</span>
         <span><i style="background:var(--dirt)"></i>ฝุ่น</span>
         <span><i style="background:var(--clean)"></i>ดูดแล้ว</span>
         <span><i style="background:var(--trail)"></i>เคยผ่าน</span>
@@ -466,6 +473,33 @@ $("nextstuck").onclick = () => {
   seek(best >= 0 ? best : 0);
 };
 
+// ── ชี้ดูทีละช่อง ──────────────────────────────────────────────────
+// มีเพราะคำถามแรกที่คนถามหลังเปิด viewer คือ "ช่องสีนี้คืออะไร"
+// คำอธิบายสีตอบได้ไม่หมด — ช่องหนึ่งช่องเป็นได้หลายอย่างพร้อมกัน
+// (เหนียว + เคยมีฝุ่น + เคยผ่าน) และจำนวน step ที่อยู่ตรงนั้นก็ไม่มีสีแทน
+const PEEK_HINT = "เอาเมาส์ชี้ที่ช่องไหนก็ได้ เพื่อดูว่ามันคืออะไร";
+
+function describe(x, y){
+  const i = y*W + x;
+  if (OBSTACLE[i]) return "<b>กำแพง</b> — เดินทับไม่ได้ ชนแล้วเสียคะแนน";
+  const bits = [];
+  if (frame.dirt[i])   bits.push("<b>ยังมีฝุ่น</b>");
+  else if (DIRT0[i])   bits.push("<b>เคยมีฝุ่น ดูดไปแล้ว</b>");
+  else                 bits.push("<b>พื้นว่าง</b> ไม่เคยมีฝุ่น");
+  if (STICKY[i]) bits.push("ช่องเหนียว — ดูดครั้งแรกไม่ขึ้น");
+  bits.push(frame.dwell[i] ? `หุ่นอยู่ตรงนี้มาแล้ว ${frame.dwell[i]} step`
+                           : "หุ่นยังไม่เคยมา");
+  return bits.join(" · ");
+}
+
+grid.addEventListener("mousemove", e => {
+  const r = grid.getBoundingClientRect();
+  const x = Math.floor((e.clientX - r.left)/CELL), y = Math.floor((e.clientY - r.top)/CELL);
+  $("peek").innerHTML = (x < 0 || y < 0 || x >= W || y >= H)
+    ? PEEK_HINT : `(${x}, ${y}) — ${describe(x, y)}`;
+});
+grid.addEventListener("mouseleave", () => { $("peek").innerHTML = PEEK_HINT; });
+
 addEventListener("keydown", e => {
   const step = e.shiftKey ? 10 : 1;
   if (e.key === " "){ e.preventDefault(); setPlaying(!timer); }
@@ -477,6 +511,7 @@ addEventListener("resize", resize);
 matchMedia("(prefers-color-scheme:dark)").addEventListener("change", () => { draw(); drawStrip(); });
 
 // ── เริ่ม ──────────────────────────────────────────────────────────
+$("peek").innerHTML = PEEK_HINT;
 $("label").textContent = DATA.label;
 $("dims").textContent  = `${W}×${H}`;
 $("d0").textContent    = DATA.D0;
