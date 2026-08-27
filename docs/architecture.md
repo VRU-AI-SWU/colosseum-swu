@@ -225,11 +225,32 @@ credential ที่อยู่ได้นานเสมอ สิ่งท�
 | | สถานะ |
 |---|---|
 | หน้าเว็บ leaderboard | ✅ ขึ้นแล้วที่ `colosseum.vru-ai.com` ([`web/`](../web/)) |
-| Google OAuth | ยังใช้ team token — ดู §4.3 |
+| Google OAuth | ✅ ใช้งานแล้ว — `@g.swu.ac.th` เท่านั้น ([`core/auth.py`](../core/auth.py)) · token ยังเป็น credential ของ `arena submit` ตามเดิม ดู §4.3 |
 | runner daemon + WebSocket | ยังไม่มี — worker เป็น thread |
 | เพดานไฟล์บน named tunnel | ✅ วัดแล้ว **100 MiB** · `arena submit` ตรวจให้ที่ 95 MB |
 | replay viewer | ยังไม่มี — มีแต่ไฟล์ `.vrp` |
 | Windows | ✅ **ทดสอบครบทั้งเส้นทางแล้ว** (27 ส.ค. 2026 · Python 3.14.4) — install · `selfcheck` · `eval` · `--check-reset` · `submit --dry-run` · `submit` · `status` · `arena eval` เคยพัง แก้ใน v1.0.2 ([§4.4](#44-windows-select-รับได้เฉพาะ-socket--ปิดแล้ว-v102)) · **คะแนนตรงกับ macOS ทุกบิต** `0.27318887262207453` (float64 ครบ 17 หลัก) |
+
+### 4.6 🔻 ต้องทำก่อนเปิดให้นิสิตใช้จริง
+
+รายการนี้แยกจาก §4.5 เพราะมันไม่ใช่ "ฟีเจอร์ที่ยังไม่มี" แต่เป็น **ของที่ต้องเก็บกวาด
+ก่อนคนนอกเข้ามา** ซึ่งเป็นคนละจังหวะกัน
+
+**ยุบทีมทดสอบ** — ตัดสินใจแล้ว (27 ส.ค. 2026) ว่า*ปล่อยไว้ก่อน* แล้วยุบทีเดียวตอนระบบ
+พร้อมเปิดจริง เพราะยังต้องใช้ทดสอบอยู่
+
+| ทีม | run | หมายเหตุ |
+|---|---|---|
+| `vru ai` | 3 | บัญชี `vru-ai@g.swu.ac.th` — ยุบได้เลย |
+| `Ratchainant Thammasudjarit` | 2 | **บัญชีจริงของผู้สอน** · ยุบแล้วล็อกอินใหม่จะได้ทีมเดี่ยวใหม่พร้อมโทเคนใหม่ |
+
+```bash
+python tools/retire_team.py --db /path/arena.db --team <team-id> ...
+sudo systemctl restart arena-api   # บริการเก็บ working set ในหน่วยความจำ
+```
+
+การยุบทำให้โทเคนใช้ไม่ได้ทันทีและคะแนนหายจาก leaderboard **แต่ข้อมูลยังอยู่ครบ** —
+เหตุผลอยู่ในหัวไฟล์ [`tools/retire_team.py`](../tools/retire_team.py)
 
 ---
 
