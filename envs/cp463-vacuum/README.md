@@ -41,6 +41,7 @@ print(score.score, score.n_completed)
 | `env.py` | §5, §6, §8 | transition, termination, Gymnasium API |
 | `scoring.py` | §7 | Coverage AUC + completion bonus — **grader ใช้ไฟล์นี้ตัวเดียวกัน** |
 | `replay.py` | §9 | รูปแบบ `.vrp` (header + delta 4 ไบต์/timestep) |
+| `viewer.py` | §9 | `.vrp` → หน้าเว็บไฟล์เดียว (`python -m vacuum.viewer replays/1.vrp`) · decode ฝั่ง Python แล้วฝัง event ลง HTML **ไม่มีตัวแตก zstd ฝั่ง JS** |
 | `baselines/` | §10 | Bronze / Silver / Gold / Diamond — Gold กับ Diamond ต่างกันแค่ "กรอง noise หรือไม่" |
 | `rollout.py` | — | ตัวรันในเครื่อง (**ห้ามใช้เป็นตัวรันของ grader** — ดูหัวไฟล์) |
 

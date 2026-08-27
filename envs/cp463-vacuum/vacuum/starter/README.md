@@ -225,15 +225,35 @@ arena leaderboard cp463-vacuum-1-2026
 | seed ไหนทำได้แย่ที่สุด | `arena eval --per-episode` — คะแนน · t_end · จำนวนชน · ดูดซ้ำ รายตอน |
 | เห็น `print()` ของตัวเอง | `arena eval --verbose` |
 | `reset()` ล้าง state ครบไหม | **`arena eval --check-reset`** |
-| agent เดินยังไง | `arena eval --replay-dir ./replays` แล้วอ่านด้วย `vacuum.replay.read_replay` |
+| agent เดินยังไง | `arena eval --replay-dir ./replays` แล้ว `python -m vacuum.viewer replays/1.vrp` |
 | ผลในเครื่องไม่ตรงกับบนเว็บ | `python -m vacuum.selfcheck` ก่อนเสมอ |
 | พิมพ์ `arena` แล้วไม่รู้จักคำสั่ง | ยังไม่ได้เปิด venv — `source .venv/bin/activate` (Windows: `.venv\Scripts\Activate.ps1`) |
 | Windows: ส่งงานแล้วขึ้น 401 | `$env:ARENA_TOKEN` หายเมื่อปิดหน้าต่าง · ใช้ `setx` แล้วเปิดหน้าต่างใหม่ |
 | Windows: prompt กลายเป็น `>>` | คำสั่งยังไม่จบในสายตา PowerShell — กด **Ctrl + C** แล้วพิมพ์ใหม่ด้วย `'` เดี่ยว |
 | `arena eval` ขึ้น `ไม่พบ agent.py` | ยืนผิดโฟลเดอร์ — `cd my-agent` ก่อน (หรือใช้ `--dir my-agent`) |
 
-⚠️ **ยังไม่มี replay viewer แบบกราฟิก** — `read_replay` คืน header + เหตุการณ์รายเฟรม
-ต้องเขียนตัววาดเอง (ซึ่งเป็นแบบฝึกหัดที่คุ้มถ้าอยากเห็นว่า agent ตัวเองติดตรงไหน)
+### ดูว่า agent เดินยังไง
+
+```bash
+arena eval --config main --seeds 1-3 --replay-dir ./replays
+python -m vacuum.viewer replays/1.vrp
+```
+
+คำสั่งที่สองสร้าง `replays/1.html` แล้วเปิดในเบราว์เซอร์ให้เลย — เดินทีละ step
+ถอยหลังได้ ลากไทม์ไลน์ได้ และมีปุ่มสองอันที่ตอบคำถาม "ทำไมคะแนนต่ำ" ได้เร็วที่สุด
+
+| ปุ่ม | ใช้ตอนไหน |
+|---|---|
+| **แผนที่ความหนาแน่น** | สีเข้ม = อยู่ตรงนั้นนาน · agent ที่วนอยู่มุมเดียวจะเห็นทันที |
+| **จุดที่ติด ▸** | กระโดดไปช่วงที่ชน/ดูดซ้ำ/ดูดไม่ขึ้นถี่ที่สุด |
+
+แถบใต้ห้องคือไทม์ไลน์ทั้ง episode — ขีดเขียวคือดูดสำเร็จ ขีดแดงคือปัญหา
+ถ้าเห็นแดงยาวติดกันแปลว่าช่วงนั้น agent ทำอะไรไม่ได้เลย
+
+ไฟล์ HTML ที่ได้ทำงานได้เองทั้งหมด ไม่ต้องต่อเน็ต แนบในรายงานหรือส่งให้เพื่อนดูได้
+
+> อยากเขียนตัววาดเอง? `vacuum.replay.read_replay` คืน header + เหตุการณ์รายเฟรม
+> และ `vacuum.replay.frames` เล่นซ้ำให้เป็น state ทีละ step
 
 ---
 
