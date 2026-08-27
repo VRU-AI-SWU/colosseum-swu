@@ -210,6 +210,31 @@ button.google svg { width: 16px; height: 16px; }
   footer { gap: 10px 16px; }
 }
 tr.you .name::after { white-space: nowrap; display: inline-block; }
+
+/* ── ปฏิทินของ competition ──────────────────────────────────────────
+   phase เปลี่ยน *กติกาการให้คะแนน* ระหว่างทาง ไม่ใช่แค่เปลี่ยนวันส่ง —
+   ห้อง 10x10 ไม่มี noise ในช่วง Warm-up กลายเป็น 30x30 มี noise ในช่วง Final
+   คนที่ไม่เห็นตารางนี้จะคิดว่าคะแนนที่ตกฮวบวันที่ 1 ต.ค. เป็นความผิดของตัวเอง */
+.cal { margin: 0 0 22px; }
+.cal-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 8px; }
+.cal-head h2 { font-size: 13px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--muted); margin: 0; font-weight: 600; }
+.cal-now { font-size: 12px; color: var(--muted); }
+.cal-now b { color: var(--ink); }
+.cal-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.ph { border: 1px solid var(--rule); border-radius: var(--radius);
+  padding: 9px 10px; background: var(--stone-2); }
+.ph.on { border-color: var(--gold); background: var(--you);
+  box-shadow: inset 0 2px 0 var(--gold); }
+.ph.past { opacity: .55; }
+.ph .ph-name { font-size: 12px; font-weight: 600; letter-spacing: .04em; }
+.ph .ph-when { font-size: 11px; color: var(--muted); margin-top: 2px;
+  font-variant-numeric: tabular-nums; }
+.ph .ph-what { font-size: 11px; color: var(--muted); margin-top: 5px;
+  line-height: 1.45; }
+.ph.on .ph-name::after { content: " · ตอนนี้"; color: var(--gold); font-weight: 600; }
+@media (max-width: 620px) { .cal-strip { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -224,6 +249,14 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
 </div>
 
 <div class="wrap">
+
+  <section class="cal" id="cal" hidden>
+    <div class="cal-head">
+      <h2>ปฏิทินการแข่ง</h2>
+      <span class="cal-now" id="cal-now"></span>
+    </div>
+    <div class="cal-strip" id="cal-strip"></div>
+  </section>
 
   <section class="gate" id="gate" hidden>
     <h2>เข้าสู่สนาม</h2>
@@ -553,6 +586,76 @@ $("logout").addEventListener("click", () => {
 
 if (PHOTO_CREDIT) $("credit").textContent = PHOTO_CREDIT;
 
+// ── ปฏิทินของ competition ──────────────────────────────────────────
+// **ไม่ต้องล็อกอิน** และแสดงทั้งก่อนและหลังล็อกอิน เพราะกำหนดเวลาเป็นเรื่องที่
+// ต้องรู้*ก่อน*เริ่มทำ ไม่ใช่หลังจากส่งงานไม่ผ่านแล้ว
+//
+// สำคัญกว่าวันส่งคือ phase เปลี่ยน **กติกาการให้คะแนน** ระหว่างทาง — คนที่จูน
+// agent บน Warm-up แล้วตื่นมาเจอคะแนนตกฮวบวันที่ 1 ต.ค. จะคิดว่าตัวเองทำพัง
+// ทั้งที่โจทย์เปลี่ยน · คอลัมน์ "ต่างจากช่วงก่อน" มีไว้ตอบข้อนั้นล่วงหน้า
+
+const PHASE_BLURB = {
+  warmup: "ห้อง 10×10 · เห็นทั้งห้อง · ไม่มี noise ไม่มีช่องเหนียว · 250 step",
+  main:   "ห้อง 20×20 · เห็นแค่รอบตัว 5×5 · มี noise และช่องเหนียว · 1,500 step",
+  final:  "ห้อง 30×30 · เห็นแค่รอบตัว 3×3 · ฝุ่นกระจุกตัว · 3,000 step",
+};
+const PHASE_LABEL = { warmup: "Warm-up", main: "Main", final: "Final" };
+
+const thaiDate = (iso) =>
+  new Date(iso).toLocaleDateString("th-TH", {
+    day: "numeric", month: "short", year: "2-digit", timeZone: "Asia/Bangkok",
+  });
+
+async function loadCalendar() {
+  let cal;
+  try {
+    const res = await fetch(API + "/api/competitions/" + SLUG);
+    if (!res.ok) return;              // ไม่มีปฏิทินก็แค่ไม่แสดง ไม่ใช่เรื่องคอขาดบาดตาย
+    cal = await res.json();
+  } catch { return; }                 // ออฟไลน์ — leaderboard สำคัญกว่า อย่าให้พังทั้งหน้า
+
+  // ใช้เวลาของ *เซิร์ฟเวอร์* ไม่ใช่นาฬิกาเครื่องนิสิต ซึ่งตั้งผิดกันบ่อยกว่าที่คิด
+  const now = new Date(cal.now).getTime();
+
+  $("cal-strip").innerHTML = cal.phases.map((p) => {
+    const start = new Date(p.starts_at).getTime();
+    const end = new Date(p.ends_at).getTime();
+    const state = now >= end ? "past" : (now >= start ? "on" : "");
+    // ends_at เป็นขอบบนแบบไม่รวม — ลบหนึ่งวินาทีเพื่อให้แสดงเป็นวันสุดท้ายจริง
+    const last = new Date(end - 1000).toISOString();
+    return `<div class="ph ${state}">
+      <div class="ph-name">${PHASE_LABEL[p.name] || p.name}</div>
+      <div class="ph-when">${thaiDate(p.starts_at)} – ${thaiDate(last)}</div>
+      <div class="ph-what">${PHASE_BLURB[p.name] || ""}</div>
+    </div>`;
+  }).join("");
+
+  const closes = new Date(cal.closes_at).getTime();
+  const daysLeft = Math.max(0, Math.ceil((closes - now) / 86400000));
+  const current = cal.phases.find((p) =>
+    now >= new Date(p.starts_at).getTime() && now < new Date(p.ends_at).getTime());
+
+  let note;
+  if (!cal.is_open) {
+    note = now < new Date(cal.opens_at).getTime()
+      ? `<b>ยังไม่เปิดรับงาน</b> — เริ่ม ${thaiDate(cal.opens_at)}`
+      : "<b>ปิดรับงานแล้ว</b>";
+  } else if (current) {
+    const endsIn = Math.ceil((new Date(current.ends_at).getTime() - now) / 86400000);
+    note = `ช่วง <b>${PHASE_LABEL[current.name] || current.name}</b> เหลือ <b>${endsIn} วัน</b>` +
+           ` · ส่งได้วันละ <b>${cal.quota_per_day}</b> ครั้ง`;
+  } else {
+    note = `เปิดรับงานแล้ว · <b>${PHASE_LABEL[cal.phases[0].name]}</b> เริ่ม ` +
+           `<b>${thaiDate(cal.phases[0].starts_at)}</b> · ส่งได้วันละ <b>${cal.quota_per_day}</b> ครั้ง`;
+  }
+  // closes_at เป็นขอบบนแบบ *ไม่รวม* — ลบหนึ่งวินาทีก่อนแสดง ไม่งั้นจะบอกวันผิดไปหนึ่งวัน
+  // ซึ่งเป็นความผิดพลาดที่นิสิตจะไปรู้ตอนส่งงานวันสุดท้ายแล้วโดนปฏิเสธ
+  const lastDay = new Date(closes - 1000).toISOString();
+  $("cal-now").innerHTML = `${note} · วันสุดท้าย <b>${thaiDate(lastDay)}</b> (อีก ${daysLeft} วัน)`;
+  $("cal").hidden = false;
+}
+
+loadCalendar();
 takeTokenFromUrl();
 if (token) start(); else show("gate");
 </script>

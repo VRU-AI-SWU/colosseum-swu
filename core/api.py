@@ -2,6 +2,7 @@
 
     POST   /api/competitions/{slug}/submissions   อัพโหลด submission
     GET    /api/competitions/{slug}/leaderboard   ?kind=public|private
+    GET    /api/competitions/{slug}               ปฏิทิน + phase — **ไม่ต้องล็อกอิน**
     GET    /api/submissions/{id}                  สถานะ + คะแนน
     GET    /api/runs/{id}/episodes                ผลรายตอน + ลิงก์ replay
     POST   /api/submissions/{id}/final-pick       เลือกไปตัดสิน
@@ -18,6 +19,7 @@
 # ไม่เจอ → ตีเป็น query parameter แทน dependency แล้วทุก endpoint จะตอบ 422
 # อาการที่เห็นคือ "Field required: team" ซึ่งไม่ได้ชี้ไปที่สาเหตุเลย
 
+from datetime import datetime, timezone
 from typing import Annotated, Optional
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
@@ -358,6 +360,50 @@ def create_app(
             "next_target": (
                 lambda m: {"level": m.level, "name": m.label, "score": m.score} if m else None
             )(next_target(rows, team.id, marks)),
+        }
+
+    @app.get("/api/competitions/{slug}")
+    def competition_info(slug: str):
+        """ปฏิทินของ competition — **ไม่ต้องล็อกอิน**
+
+        กำหนดเวลาเป็นข้อมูลสาธารณะ และนิสิตควรเห็นก่อนล็อกอินด้วย · ที่สำคัญกว่านั้น
+        คือ phase **เปลี่ยนกติกาการให้คะแนนระหว่างทาง** — ห้อง 10×10 ไม่มี noise
+        ในช่วง Warm-up กลายเป็น 30×30 มี noise และฝุ่นกระจุกตัวในช่วง Final
+        คนที่จูน agent บน Warm-up แล้วตื่นมาเจอคะแนนตกฮวบวันที่ 1 ต.ค. จะคิดว่า
+        ตัวเองทำพัง ทั้งที่โจทย์เปลี่ยน · ก่อนมี endpoint นี้ วิธีรู้เดียวคือส่งงาน
+        แล้วโดน `CompetitionClosed` ซึ่งเป็นการรู้ตอนที่สายแล้ว
+
+        **ไม่ส่ง `config_path` กับ `config_override` ออกไป** — อันแรกเป็น path
+        บนเครื่องเซิร์ฟเวอร์ซึ่งไม่ใช่เรื่องของใคร ส่วนอันหลังนิสิตมี YAML อยู่ใน
+        wheel อยู่แล้ว ไม่ต้องส่งซ้ำ · ไม่มี seed เกี่ยวข้องเลย
+
+        ส่ง `now` ของเซิร์ฟเวอร์กลับไปด้วย เพื่อให้หน้าเว็บนับถอยหลังโดยไม่ต้อง
+        เชื่อนาฬิกาของเครื่องนิสิต ซึ่งตั้งผิดกันบ่อยกว่าที่คิด
+        """
+        competition = arena.store.competition_by_slug(slug)
+        if competition is None:
+            raise HTTPException(404, f"ไม่รู้จัก competition {slug!r}")
+
+        now = datetime.now(timezone.utc)
+        current = competition.phase_at(now)
+        return {
+            "slug": competition.slug,
+            "title": competition.title,
+            "now": now.isoformat(),
+            "opens_at": competition.opens_at.isoformat(),
+            "closes_at": competition.closes_at.isoformat(),
+            "is_open": competition.is_open(now),
+            "quota_per_day": competition.quota_per_day,
+            "max_final_submissions": competition.max_final_submissions,
+            "current_phase": current.name if current else None,
+            "phases": [
+                {
+                    "name": p.name,
+                    "starts_at": p.starts_at.isoformat(),
+                    "ends_at": p.ends_at.isoformat(),
+                }
+                for p in competition.phases
+            ],
         }
 
     # ── สถานะระบบ ───────────────────────────────────────────────────

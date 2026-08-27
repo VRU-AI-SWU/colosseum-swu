@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import io
+import json
 import textwrap
 import zipfile
 from pathlib import Path
@@ -146,6 +147,7 @@ def test_api_never_reveals_seed_values(system):
         client.get(f"/api/runs/{run_id}/episodes", headers=auth(teams[0])).json(),
         client.get(f"/api/submissions/{body['submission_id']}", headers=auth(teams[0])).json(),
         client.get(f"/api/competitions/{SLUG}/leaderboard", headers=auth(teams[0])).json(),
+        client.get(f"/api/competitions/{SLUG}").json(),  # ปฏิทิน — ไม่ต้องล็อกอิน
     ]
 
     def walk(node, path="$"):
@@ -374,3 +376,54 @@ def test_everything_is_audited(system):
     actions = {e.action for e in arena.store.audit}
     assert {"submission.created", "run.completed"} <= actions
     assert any(e.payload.get("sha256") for e in arena.store.events_for(body["submission_id"]))
+
+
+# ── ปฏิทินที่นิสิตมองเห็น ───────────────────────────────────────────
+# phase **เปลี่ยนกติกาการให้คะแนนระหว่างทาง** — ห้อง 10×10 ไม่มี noise ในช่วง
+# Warm-up กลายเป็น 30×30 มี noise ในช่วง Final · ก่อนมี endpoint นี้ วิธีเดียวที่
+# นิสิตจะรู้กำหนดเวลาคือส่งงานแล้วโดน CompetitionClosed ซึ่งเป็นการรู้ตอนที่สายแล้ว
+
+
+def test_calendar_needs_no_login(system):
+    """กำหนดเวลาเป็นข้อมูลสาธารณะ — นิสิตต้องเห็นก่อนล็อกอินด้วย"""
+    _arena, _teams, client, _worker = system
+    res = client.get(f"/api/competitions/{SLUG}")  # ไม่มี Authorization header
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["slug"] == SLUG
+    for key in ("opens_at", "closes_at", "is_open", "now", "phases", "quota_per_day"):
+        assert key in body, f"ปฏิทินไม่มี {key!r}"
+
+
+def test_calendar_reports_the_phase_that_applies_right_now(system):
+    """`current_phase` ต้องตรงกับสิ่งที่ worker จะใช้จริง
+
+    ถ้าสองอันนี้ไม่ตรงกัน หน้าเว็บจะบอกนิสิตว่าอยู่ช่วงหนึ่ง แต่คะแนนมาจากอีกช่วง
+    ซึ่งแย่กว่าการไม่บอกอะไรเลย
+    """
+    from datetime import datetime, timezone
+
+    arena, _teams, client, _worker = system
+    competition = arena.store.competition_by_slug(SLUG)
+
+    body = client.get(f"/api/competitions/{SLUG}").json()
+    now = datetime.fromisoformat(body["now"])
+    expected = competition.phase_at(now)
+    assert body["current_phase"] == (expected.name if expected else None)
+
+
+def test_calendar_hides_server_paths(system):
+    """`config_path` เป็น path บนเครื่องเซิร์ฟเวอร์ ไม่ใช่เรื่องของใคร"""
+    arena, _teams, client, _worker = system
+    body = client.get(f"/api/competitions/{SLUG}").json()
+
+    blob = json.dumps(body, ensure_ascii=False)
+    assert "config_path" not in blob
+    assert arena.store.competition_by_slug(SLUG).config_path not in blob
+    for phase in body["phases"]:
+        assert set(phase) == {"name", "starts_at", "ends_at"}, phase
+
+
+def test_calendar_404s_for_an_unknown_competition(system):
+    _arena, _teams, client, _worker = system
+    assert client.get("/api/competitions/ไม่มีอยู่จริง").status_code == 404
