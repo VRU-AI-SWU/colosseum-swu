@@ -229,7 +229,7 @@ credential ที่อยู่ได้นานเสมอ สิ่งท�
 | runner daemon + WebSocket | ยังไม่มี — worker เป็น thread |
 | เพดานไฟล์บน named tunnel | ✅ วัดแล้ว **100 MiB** · `arena submit` ตรวจให้ที่ 95 MB |
 | replay viewer | ยังไม่มี — มีแต่ไฟล์ `.vrp` |
-| Windows | ทดสอบบนเครื่องจริงแล้ว (Python 3.14.4) · `pip install` ✅ · `vacuum.selfcheck` ✅ ครบทุกข้อ · `arena eval` เคยพัง → แก้ใน v1.0.2 ดู §4.4 · `--check-reset` และ `arena submit` **ยังรอผล** |
+| Windows | ✅ **ทดสอบครบทั้งเส้นทางแล้ว** (27 ส.ค. 2026 · Python 3.14.4) — install · `selfcheck` · `eval` · `--check-reset` · `submit --dry-run` · `submit` · `status` · `arena eval` เคยพัง แก้ใน v1.0.2 ([§4.4](#44-windows-select-รับได้เฉพาะ-socket--ปิดแล้ว-v102)) · **คะแนนตรงกับ macOS ทุกบิต** `0.27318887262207453` (float64 ครบ 17 หลัก) |
 
 ---
 
