@@ -291,11 +291,13 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
 
   <section class="gate" id="enroll" hidden>
     <h2>เข้าวิชา</h2>
-    <p>ใส่ <b>รหัสเข้าวิชา</b> ที่ผู้สอนแจกในคาบ · ล็อกอินแล้วแต่ยังไม่ได้อยู่วิชาไหน
-       จึงยังไม่เห็นอะไร</p>
+    <p>ใส่ <b>รหัสเข้าวิชา 6 ตัวอักษร</b> ที่ผู้สอนแจกในคาบ — ไม่ใช่ชื่อวิชา ·
+       ล็อกอินแล้วแต่ยังไม่ได้อยู่วิชาไหน จึงยังไม่เห็นอะไร</p>
     <div class="row">
-      <input id="join-code" placeholder="เช่น 7PRHNN" autocomplete="off"
-             spellcheck="false" maxlength="6">
+      <input id="join-code" placeholder="AANMG2" autocomplete="off"
+             spellcheck="false" maxlength="6" size="8"
+             style="text-transform:uppercase; letter-spacing:.12em;
+                    font-family:ui-monospace,SFMono-Regular,Menlo,monospace">
       <button class="ghost" id="join-go">เข้าวิชา</button>
     </div>
     <div class="err" id="enroll-err" hidden></div>
@@ -512,6 +514,15 @@ async function joinCourse() {
   const code = $("join-code").value.trim();
   const err = $("enroll-err");
   if (!code) { err.hidden = false; err.textContent = "ใส่รหัสก่อน"; return; }
+  // `maxlength` ตัดส่วนเกินทิ้ง**เงียบๆ** — คนที่พิมพ์ชื่อวิชาลงไปจะเห็นแค่ตัวอักษร
+  // หกตัวแรกแล้วงงว่าทำไมพิมพ์ต่อไม่ได้ · จับกรณีนั้นก่อนยิงไปเซิร์ฟเวอร์
+  if (code.length < 6) {
+    err.hidden = false;
+    err.textContent =
+      `รหัสเข้าวิชามี 6 ตัวอักษร (ใส่มา ${code.length}) — ` +
+      "ช่องนี้ไม่ใช่ชื่อวิชา ขอรหัสจากผู้สอน";
+    return;
+  }
   try {
     const res = await api("/api/courses/join",
                           { method: "POST", body: new URLSearchParams({ code }) });

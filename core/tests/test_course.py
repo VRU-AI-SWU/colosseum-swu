@@ -328,3 +328,52 @@ def test_students_do_not_see_the_join_code(arena, client):
     student_view = client.get("/api/me", headers=auth(student)).json()
     assert staff_view["enrollments"][0]["course"]["join_code"]
     assert student_view["enrollments"][0]["course"]["join_code"] is None
+
+
+# ── สร้างวิชาใหม่ ───────────────────────────────────────────────────
+# `id` ของวิชาไปโผล่ใน `Team.course_id` ของทุกทีมและใน audit trail
+# เปลี่ยนทีหลังแปลว่าต้องไล่แก้ทุกแถว จึงบังคับรูปแบบตั้งแต่ตอนสร้าง
+
+
+@pytest.mark.parametrize("bad", ["CP462 Intro", "cp462_1_2026", "วิชา", "", "   "])
+def test_bad_course_ids_are_rejected(bad):
+    import argparse
+
+    from tools.setup_course import valid_id
+
+    with pytest.raises(argparse.ArgumentTypeError):
+        valid_id(bad)
+
+
+# `CP462` ผ่านเพราะตัวอักษรถูกต้องทุกตัว — แค่ไม่มีภาค/ปี ซึ่งไม่ใช่เรื่องที่
+# เครื่องมือควรบังคับ · การจำกัดรูปแบบชื่อเกินความจำเป็นจะขวางวิชาที่ตั้งชื่อคนละแบบ
+@pytest.mark.parametrize("good", ["cp462-1-2026", "CP462-1-2026", "CP462", "  ml-2-2027  "])
+def test_good_course_ids_are_normalised(good):
+    from tools.setup_course import valid_id
+
+    assert valid_id(good) == good.strip().lower()
+
+
+def test_a_course_with_no_competitions_is_usable(arena):
+    """วิชาที่เพิ่งสร้างยังไม่มีโจทย์ — นิสิตต้องเข้าได้และไม่พัง
+
+    `setup_course.py` สร้างวิชาเปล่าโดยตั้งใจ เพราะโจทย์มาทีหลังเสมอ
+    """
+    from core.domain import Course
+
+    empty = arena.store.save_course(Course(id="ds-1-2026", name="Data Science"))
+    user = arena.sign_in(google_sub="s", email="a@g.swu.ac.th", name="นิสิต")
+    team = arena.enroll(user=user, join_code=empty.join_code)
+
+    assert team.course_id == empty.id
+    assert [k for k in arena.store.competitions.values() if k.course_id == empty.id] == []
+
+
+def test_enrolling_twice_in_the_same_course_is_not_an_error(arena):
+    """กดซ้ำหรือใส่รหัสเดิมอีกครั้งต้องไม่สร้างทีมซ้อน"""
+    user = arena.sign_in(google_sub="s", email="a@g.swu.ac.th", name="นิสิต")
+    code = arena.store.course(COURSE).join_code
+    first = arena.enroll(user=user, join_code=code)
+    again = arena.enroll(user=user, join_code=code)
+    assert first.id == again.id
+    assert len([t for t in arena.store.teams.values() if t.is_active]) == 1
