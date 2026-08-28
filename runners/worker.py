@@ -22,12 +22,23 @@ from core.domain import Competition, Run, RunKind, RunStatus
 from core.queue import JobQueue, LeaseExpired
 from core.store import ArtifactStore, Store
 from runners.agent_env.runner import RunResult, run_submission
-from runners.agent_env.sandbox import SANDBOX
+from runners.agent_env.sandbox import SANDBOX as AGENT_ENV_SANDBOX
 from runners.agent_env.validate import smoke_test
+from runners.prediction.sandbox import SANDBOX as PREDICTION_SANDBOX
 from runners.sandbox.launcher import Launcher
 from runners.seeds import SecretsUnavailable, expected_config_hash, load_seeds
 
 HEARTBEAT_EVERY = 20.0
+
+#: กล่องของแต่ละชนิดโจทย์ — worker เครื่องเดียวรับงานได้ทุกชนิดที่อยู่ในนี้
+#:
+#: **แยกตาม task_type ไม่ใช่ตัวเดียวใช้ทุกงาน** เพราะแต่ละชนิดใช้ image คนละใบ
+#: ที่มีไลบรารีคนละชุด · การส่งงาน CP462 เข้า image ของ CP463 จะล้มด้วย
+#: ImportError ที่ไม่ได้ชี้ไปที่ต้นเหตุเลย
+SANDBOXES = {
+    "agent_env": AGENT_ENV_SANDBOX,
+    "prediction": PREDICTION_SANDBOX,
+}
 
 #: run ที่ต้องผ่าน smoke test ก่อน — **ไม่รวม private กับ rejudge** โดยตั้งใจ
 #:
@@ -41,6 +52,10 @@ class ConfigDrift(RuntimeError):
     """config เปลี่ยนไปหลังจากที่ seed ถูก generate — ห้ามรันต่อ"""
 
 
+class UnknownTaskType(RuntimeError):
+    """competition ประกาศ task_type ที่ worker ไม่มี runner ให้"""
+
+
 @dataclass
 class Worker:
     """หนึ่งตัวต่อหนึ่งเลน — เครื่องหนึ่งรันหลายตัวพร้อมกันได้"""
@@ -50,7 +65,9 @@ class Worker:
     queue: JobQueue
     artifacts: ArtifactStore
     workdir: Path
-    launcher: Launcher = field(default_factory=SANDBOX.local)
+    #: task_type → launcher · ว่างไว้ = ใช้ `SubprocessLauncher` ของแต่ละชนิด
+    #: ซึ่ง ⚠️ **ไม่มี container ห่อ** — dev กับเทสต์เท่านั้น
+    launchers: dict[str, Launcher] = field(default_factory=dict)
     lanes: tuple[str, ...] = ("cpu",)
     allow_seed_fallback: bool = False
 
@@ -99,9 +116,95 @@ class Worker:
             except (LeaseExpired, KeyError):
                 return
 
+    def _launcher_for(self, competition: Competition) -> Launcher:
+        sandbox = SANDBOXES.get(competition.task_type)
+        if sandbox is None:
+            raise UnknownTaskType(
+                f"ไม่รู้จัก task_type {competition.task_type!r} — "
+                f"ที่ลงทะเบียนไว้คือ {sorted(SANDBOXES)}"
+            )
+        return self.launchers.get(competition.task_type) or sandbox.local()
+
     def _execute(self, run: Run) -> None:
         submission = self.store.submissions[run.submission_id]
         competition = self.store.competitions[run.competition_id]
+
+        if competition.task_type == "prediction":
+            self._execute_prediction(run, competition, submission)
+        else:
+            self._execute_agent_env(run, competition, submission)
+
+    # ── โจทย์ทำนาย (CP462) ──────────────────────────────────────────
+
+    def _execute_prediction(self, run: Run, competition: Competition, submission) -> None:
+        """ไม่มี seed และไม่มี episode — ของลับคือ **เฉลยของชุดที่ใช้ตัดสิน**
+
+        ซึ่งไม่ได้เดินทางผ่าน worker เลย · env plugin เป็นคนโหลดเมล็ดลับเองตอน
+        `load_spec` แล้วเฉลยอยู่ในกระบวนการของ runner จนจบ ไม่เคยเข้ากล่อง
+        """
+        from runners.prediction.runner import run_submission as run_prediction
+        from runners.prediction.validate import smoke_test as prediction_smoke
+
+        launcher = self._launcher_for(competition)
+        kind = "private" if run.kind is RunKind.PRIVATE else "public"
+        workdir = self.workdir / run.id
+        try:
+            submission_dir = self.artifacts.extract(submission.artifact_url, workdir)
+
+            if run.kind in SMOKE_TESTED_KINDS:
+                smoke = prediction_smoke(
+                    env_plugin=competition.env_plugin,
+                    config_path=competition.config_path,
+                    submission_dir=submission_dir,
+                    launcher=launcher,
+                )
+                if not smoke.ok:
+                    self._report_failure(run, str(smoke), log=smoke.detail)
+                    return
+
+            result = run_prediction(
+                env_plugin=competition.env_plugin,
+                config_path=competition.config_path,
+                submission_dir=submission_dir,
+                kind=kind,
+                config_overrides=self._overrides(competition, run),
+                launcher=launcher,
+            )
+            self._report_prediction(run, result)
+        finally:
+            self.artifacts.clear_workdir(workdir)
+
+    def _report_prediction(self, run: Run, result) -> None:
+        if not result.ok:
+            self._report_failure(run, f"{result.status}: {result.detail}", log=result.log)
+            return
+
+        score = result.score
+        self.queue.report(
+            run.id,
+            self.runner_id,
+            status=RunStatus.DONE,
+            score=score.primary,
+            # เสมอกันแล้วตัดสินด้วยขอบล่างของช่วงความเชื่อมั่น — ทีมที่คะแนนนิ่งกว่า
+            # ชนะทีมที่บังเอิญได้เท่ากันแต่ช่วงกว้าง
+            tiebreak=(score.ci_low,),
+            metrics={
+                **score.as_dict(),
+                "n_rows": result.n_rows,
+                "checks": result.checks,
+                "seconds": result.seconds,
+            },
+            config_hash=result.config_hash,
+            env_version=result.env_version,
+        )
+        self.store.record(
+            "run.completed", "run", run.id, actor_id=self.runner_id, score=score.primary,
+        )
+
+    # ── โจทย์ RL (CP463) ────────────────────────────────────────────
+
+    def _execute_agent_env(self, run: Run, competition: Competition, submission) -> None:
+        launcher = self._launcher_for(competition)
         phase = self._phase_name(competition, run)
 
         try:
@@ -127,7 +230,7 @@ class Worker:
                     env_plugin=competition.env_plugin,
                     config_path=competition.config_path,
                     submission_dir=submission_dir,
-                    launcher=self.launcher,
+                    launcher=launcher,
                 )
                 if not smoke.ok:
                     self._report_failure(run, str(smoke), log=smoke.detail)
@@ -140,7 +243,7 @@ class Worker:
                 seeds=seeds,
                 config_overrides=self._overrides(competition, run),
                 replay_dir=self.artifacts.replay_path(run.id),
-                launcher=self.launcher,
+                launcher=launcher,
             )
             self._check_config_hash(competition, phase, result)
             self._report(run, result)

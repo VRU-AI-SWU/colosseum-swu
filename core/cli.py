@@ -446,14 +446,20 @@ def cmd_serve(args) -> int:
         google_auth_from_env,
         staff_emails_from_env,
     )
-    from runners.agent_env.sandbox import SANDBOX
-    from runners.worker import Worker
+    from runners.worker import SANDBOXES, Worker
 
     root = Path(args.data).resolve()
 
-    launcher, sandbox_note = _pick_launcher(args, SANDBOX)
-    if launcher is None:
-        return 1
+    # เลือกกล่องแยกต่อชนิดโจทย์ — เครื่อง dev ที่ build image ไว้แค่ใบเดียวยังใช้ได้
+    # โดยชนิดที่มี image ใช้ docker ส่วนที่เหลือถอยไป subprocess พร้อมเตือน
+    launchers, notes = {}, []
+    for task_type, sandbox in SANDBOXES.items():
+        picked, note = _pick_launcher(args, sandbox)
+        if picked is None:
+            return 1
+        launchers[task_type] = picked
+        notes.append(f"{task_type}: {note}")
+    sandbox_note = "\n             ".join(notes)
     db_path = None if args.ephemeral else root / "arena.db"
     # แยก metadata ออกจาก blob ได้ — สองอย่างนี้โตคนละอัตราและอยากอยู่คนละสื่อ
     #   arena.db   เล็ก · เขียนบ่อย · อยากอยู่บน SSD
@@ -467,7 +473,7 @@ def cmd_serve(args) -> int:
         queue=arena.queue,
         artifacts=arena.artifacts,
         workdir=artifacts.parent / "work",  # แตก zip ข้างๆ ที่เก็บ ไม่ข้ามสื่อ
-        launcher=launcher,
+        launchers=launchers,
         allow_seed_fallback=not args.real_seeds,
     )
     threading.Thread(target=worker.serve_forever, daemon=True).start()

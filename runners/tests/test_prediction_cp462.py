@@ -13,6 +13,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
@@ -270,3 +271,78 @@ def test_the_answers_never_reach_the_sandbox(tmp_path):
     )
     assert result.ok, f"{result.status}: {result.detail}"
     assert np.isclose(result.score.primary, result.score.primary)
+
+
+# ── ครบวงจร: ส่งงาน → คิว → worker → คะแนน ──────────────────────────
+
+
+def test_a_prediction_competition_flows_through_the_worker(tmp_path, trained):
+    """เกณฑ์เดียวกับ README §14 M1 แต่สำหรับโจทย์ทำนาย
+
+    พิสูจน์ว่า `task_type="prediction"` เดินทางครบเส้น — ตัวตรวจไฟล์ใน `core`
+    หยิบตัวที่ถูก · `Worker` เลือก runner ที่ถูก · คะแนนถูกบันทึกในรูปที่
+    leaderboard ใช้ได้
+    """
+    import io
+    import zipfile
+
+    from core.domain import Competition, Course, Phase, RunStatus, new_id
+    from core.service import build_arena
+    from core.wiring import VALIDATORS
+    from runners.worker import Worker
+
+    arena = build_arena(tmp_path / "artifacts", validators=VALIDATORS)
+    arena.store.save_course(
+        Course(id="cp462-1-2026", name="CP462 Machine Learning", join_code="CP462TEST")
+    )
+    now = datetime.now(timezone.utc)
+    competition = Competition(
+        id=new_id(),
+        course_id="cp462-1-2026",
+        slug="cp462-churn-1-2026",
+        title="ทำนายการเลิกใช้บริการ",
+        task_type="prediction",
+        env_plugin=PLUGIN_SPEC,
+        config_path=str(CONFIG_DIR / "churn.yaml"),
+        opens_at=now - timedelta(days=1),
+        closes_at=now + timedelta(days=30),
+        quota_per_day=5,
+        # **ไม่มี `tabular`** — มันจงใจไม่อยู่ใน image ของโจทย์นี้
+        import_whitelist=frozenset({"numpy", "pandas", "sklearn", "scipy", "joblib"}),
+        phases=[Phase(id=new_id(), name="main",
+                      starts_at=now - timedelta(days=1), ends_at=now + timedelta(days=30))],
+    )
+    arena.store.save_competition(competition)
+
+    user = arena.sign_in(email="นิสิต@example.invalid", name="นิสิต", google_sub="sub-cp462")
+    team = arena.enroll(user=user, join_code="CP462TEST")
+
+    # เอาเฉพาะไฟล์ — เทสต์ก่อนหน้ารัน predictor ในโฟลเดอร์นี้จนเกิด `__pycache__`
+    # (ในกล่องจริงไม่เกิด เพราะ image ตั้ง PYTHONDONTWRITEBYTECODE และ mount แบบอ่านอย่างเดียว)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for path in sorted(trained["churn"].iterdir()):
+            if path.is_file():
+                zf.writestr(path.name, path.read_bytes())
+
+    _submission, run = arena.submit(
+        slug=competition.slug, team=team, user_id=user.id, archive=buf.getvalue(),
+    )
+
+    worker = Worker(
+        runner_id="runner-test",
+        store=arena.store,
+        queue=arena.queue,
+        artifacts=arena.artifacts,
+        workdir=tmp_path / "work",
+    )
+    assert worker.drain(limit=2) >= 1
+
+    done = arena.queue.runs[run.id]
+    assert done.status is RunStatus.DONE, f"{done.status}: {done.error_message}"
+    assert done.score is not None and done.score > 0.4
+    assert done.metrics["checks"] == {
+        "determinism": True, "row_permutation": True, "subset_consistency": True,
+    }
+    assert done.metrics["n_rows"] == 1200
+    assert done.config_hash and done.env_version
