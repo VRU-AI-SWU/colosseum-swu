@@ -25,13 +25,16 @@ from typing import Annotated, Optional
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 
 from core.domain import (
+    PARADIGMS,
     AliasInvalid,
+    Competition,
     CompetitionClosed,
     QuotaExceeded,
     RunKind,
     RunStatus,
     Team,
     TeamSizeInvalid,
+    User,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
@@ -41,6 +44,7 @@ from core.leaderboard import BaselineMark, build, insert_baselines, next_target
 from core.service import (
     Arena,
     InviteInvalid,
+    NotEnrolled,
     SubmissionRejected,
     TeamFull,
     TooManyFinalPicks,
@@ -87,14 +91,41 @@ def create_app(
             allow_headers=["Authorization", "Content-Type"],
         )
 
-    def current_team(authorization: Annotated[Optional[str], Header()] = None) -> Team:
-        token = (authorization or "").removeprefix("Bearer ").strip()
-        team = arena.store.team_by_token(token)
-        if team is None:
-            raise HTTPException(401, "ต้องมี Authorization: Bearer <team token>")
-        return team
+    def current_user(authorization: Annotated[Optional[str], Header()] = None) -> User:
+        """โทเคนบอกว่าเป็น **ใคร** ไม่ใช่ว่าอยู่ทีมไหน
 
-    TeamDep = Annotated[Team, Depends(current_team)]
+        เดิมโทเคนเป็นของทีม ซึ่งพังเมื่อมีหลายวิชา (คนหนึ่งอยู่หลายทีม จึงมีหลายโทเคน)
+        และทำให้ตอนล็อกอินครั้งแรกยังไม่มีอะไรส่งกลับไปให้หน้าเว็บใช้เข้าวิชา
+        """
+        token = (authorization or "").removeprefix("Bearer ").strip()
+        user = arena.store.user_by_token(token)
+        if user is None:
+            raise HTTPException(401, "ต้องมี Authorization: Bearer <โทเคนของคุณ>")
+        return user
+
+    UserDep = Annotated[User, Depends(current_user)]
+
+    def team_in(user: User, course_id: str) -> Team:
+        """ทีมที่ผู้เรียกใช้ทำงานในวิชานั้น — 409 ถ้ายังไม่ได้เข้าวิชา"""
+        try:
+            return arena.team_for(user=user, course_id=course_id)
+        except NotEnrolled as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    def owns(user: User, team_id: str) -> bool:
+        """ผู้เรียกอยู่ในทีมนั้นไหม — ใช้แทนการเทียบ `team.id` ตรงๆ
+
+        เดิมเทียบกับทีมที่โทเคนชี้ถึง ซึ่งใช้ได้เพราะโทเคนเป็นของทีม · ตอนนี้โทเคน
+        เป็นของคน จึงต้องถามว่า "คนนี้อยู่ในทีมที่เป็นเจ้าของงานชิ้นนั้นหรือเปล่า"
+        """
+        team = arena.store.teams.get(team_id)
+        return team is not None and user.id in team.member_ids
+
+    def team_for_competition(user: User, slug: str) -> tuple[Competition, Team]:
+        competition = arena.store.competition_by_slug(slug)
+        if competition is None:
+            raise HTTPException(404, f"ไม่รู้จัก competition {slug!r}")
+        return competition, team_in(user, competition.course_id)
 
     # ── ล็อกอินด้วย Google ──────────────────────────────────────────
     #
@@ -138,139 +169,173 @@ def create_app(
         except AuthError as exc:
             return RedirectResponse(cfg.redirect_error(str(exc)), 302)
 
-        course_id = _default_course_id(arena)
-        _user, team = arena.sign_in(
-            google_sub=identity.sub,
-            email=identity.email,
-            name=identity.name,
-            course_id=course_id,
+        user = arena.sign_in(
+            google_sub=identity.sub, email=identity.email, name=identity.name
         )
-        return RedirectResponse(cfg.redirect_back(team.token), 302)
+        # ส่งโทเคน **ของคน** กลับไป — ตอนนี้อาจยังไม่ได้อยู่วิชาไหนเลย
+        # หน้าเว็บจะใช้มันเรียก "เข้าวิชาด้วยรหัส" เป็นขั้นถัดไป
+        return RedirectResponse(cfg.redirect_back(user.token), 302)
 
     # ── ตัวตนของผู้เรียกและทีม ──────────────────────────────────────
 
     @app.get("/api/me")
-    def me(team: TeamDep):
-        members = [
-            {"name": u.name, "email": u.email}
-            for uid in team.member_ids
-            if (u := arena.store.users.get(uid)) is not None
-        ]
-        course = arena.store.course(team.course_id)
+    def me(user: UserDep):
+        """ตัวตนของผู้เรียก + **ทุกวิชาที่อยู่** ไม่ใช่วิชาเดียว
+
+        นิสิตที่เรียนทั้ง AI และ ML มีทีมคนละทีมในสองวิชา แต่ใช้โทเคนอันเดียว
+        หน้าเว็บจึงต้องได้รายการมาทั้งหมดเพื่อทำตัวสลับวิชา
+        """
+
+        def team_view(team: Team) -> dict:
+            course = arena.store.course(team.course_id)
+            return {
+                "course": {
+                    "id": course.id,
+                    "name": course.name,
+                    "max_team_size": course.max_team_size,
+                    "join_code": course.join_code if arena.is_staff(user.email) else None,
+                },
+                "team": {
+                    "id": team.id,
+                    "name": team.name,
+                    "invite_code": team.invite_code,
+                    "alias": team.alias,
+                    "shown_as": team.display_name(reveal=False),
+                    "members": [
+                        {"name": u.name, "email": u.email}
+                        for uid in team.member_ids
+                        if (u := arena.store.users.get(uid)) is not None
+                    ],
+                    "is_solo": len(team.member_ids) <= 1,
+                },
+                "competitions": [
+                    {
+                        "slug": c.slug,
+                        "title": c.title,
+                        "paradigm": c.paradigm,
+                        "is_open": c.is_open(datetime.now(timezone.utc)),
+                    }
+                    for c in sorted(
+                        (k for k in arena.store.competitions.values()
+                         if k.course_id == course.id),
+                        key=lambda k: k.opens_at,
+                    )
+                ],
+            }
+
         return {
-            "team": {
-                "id": team.id,
-                "name": team.name,
-                "token": team.token,
-                "invite_code": team.invite_code,
-                "alias": team.alias,
-                "shown_as": team.display_name(reveal=False),
-                "members": members,
-                "is_solo": len(team.member_ids) <= 1,
-            },
-            "course": {
-                "id": course.id,
-                "name": course.name,
-                "max_team_size": course.max_team_size,
-            },
+            "user": {"name": user.name, "email": user.email, "token": user.token},
             # หน้าเว็บใช้ตัวนี้ตัดสินว่าจะโชว์แผงของผู้สอนไหม — **ไม่ใช่ด่านความปลอดภัย**
             # ด่านจริงอยู่ที่ endpoint ซึ่งตรวจซ้ำเสมอ การซ่อนปุ่มเป็นแค่ความสะอาดของ UI
-            "is_staff": arena.team_acts_as_staff(team),
+            "is_staff": arena.is_staff(user.email),
+            "enrollments": [
+                team_view(arena.store.team_of(user.id, cid))
+                for cid in arena.store.courses_of(user.id)
+            ],
+            "paradigms": [
+                {"id": p.id, "name": p.name, "blurb": p.blurb} for p in PARADIGMS.values()
+            ],
         }
 
+    @app.post("/api/courses/join")
+    def join_course(user: UserDep, code: str = Form(...)):
+        """เข้าวิชาด้วยรหัสที่ผู้สอนแจกในคาบ"""
+        try:
+            team = arena.enroll(user=user, join_code=code)
+        except InviteInvalid as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {"course_id": team.course_id, "team_id": team.id}
+
+    @app.post("/api/users/rotate-token")
+    def rotate_user_token(user: UserDep):
+        """ออกโทเคนใหม่ให้ **คนเดียว** ไม่กระทบเพื่อนร่วมทีม
+
+        เดิมโทเคนเป็นของทีม การเปลี่ยนจึงทำให้ทุกคนในทีมต้องตั้งค่าใหม่พร้อมกัน
+        ทั้งที่หลุดคนเดียว
+        """
+        before = user.token[:4]
+        arena.rotate_user_token(user=user)
+        return {"token": user.token, "previous_prefix": before}
+
     @app.post("/api/teams/alias")
-    def set_alias(team: TeamDep, alias: str = Form("")):
+    def set_alias(user: UserDep, course_id: str = Form(...), alias: str = Form("")):
         """ตั้งชื่อที่จะขึ้นกระดานของทีมตัวเอง — ส่งค่าว่างมาเพื่อกลับไปใช้ชื่อจริง
 
+        ต้องบอกว่าวิชาไหน เพราะคนหนึ่งมีทีมได้หลายทีม (ทีมละวิชา)
         ทีมตั้งของตัวเองเท่านั้น ไม่ต้องมีสิทธิ์พิเศษ — README §6.1 ให้เป็นสิทธิ์ของทีม
         """
+        team = team_in(user, course_id)
         try:
-            team = arena.set_alias(
-                team=team, raw=alias,
-                actor_id=team.member_ids[0] if team.member_ids else None,
-            )
+            team = arena.set_alias(team=team, raw=alias, actor_id=user.id)
         except AliasInvalid as exc:
             raise HTTPException(422, str(exc)) from exc
         return {"alias": team.alias, "shown_as": team.display_name(reveal=False)}
 
     @app.post("/api/courses/{course_id}/max-team-size")
-    def set_max_team_size(course_id: str, team: TeamDep, size: int = Form(...)):
+    def set_max_team_size(course_id: str, user: UserDep, size: int = Form(...)):
         """ผู้สอนเปลี่ยนขนาดทีมสูงสุดของวิชา
 
-        ตรวจสิทธิ์ที่นี่เสมอ ไม่พึ่งว่าหน้าเว็บซ่อนปุ่มให้แล้ว — endpoint เป็นสิ่งที่
-        ยิงตรงได้ด้วย curl และโทเคนของทีมก็อยู่ในมือนิสิตทุกคนอยู่แล้ว
+        ตรวจสิทธิ์ที่นี่เสมอ ไม่พึ่งว่าหน้าเว็บซ่อนปุ่มให้แล้ว — endpoint ยิงตรงได้ด้วย curl
+
+        **ถามจากตัวคนตรงๆ ได้แล้ว** — เดิมต้องมีกฎ "ทั้งทีมต้องเป็นผู้สอน" เพราะโทเคน
+        ใช้ร่วมกันทั้งทีม ถ้าผู้สอนไปอยู่ทีมเดียวกับนิสิต นิสิตจะถือโทเคนที่มีสิทธิ์นั้น
+        พอโทเคนเป็นของคน ปัญหานั้นหายไปเอง
         """
-        if not arena.team_acts_as_staff(team):
+        if not arena.is_staff(user.email):
             raise HTTPException(403, "เฉพาะผู้สอนเท่านั้นที่เปลี่ยนขนาดทีมได้")
-        if course_id != team.course_id:
-            raise HTTPException(403, "เปลี่ยนค่าของวิชาที่ตัวเองไม่ได้สอนไม่ได้")
+        if course_id not in arena.store.courses:
+            raise HTTPException(404, f"ไม่รู้จักวิชา {course_id!r}")
         try:
             course = arena.set_max_team_size(
-                course_id=course_id,
-                size=size,
-                actor_id=team.member_ids[0] if team.member_ids else None,
+                course_id=course_id, size=size, actor_id=user.id
             )
         except TeamSizeInvalid as exc:
             raise HTTPException(422, str(exc)) from exc
         return {"course": {"id": course.id, "name": course.name,
                            "max_team_size": course.max_team_size}}
 
-    @app.post("/api/teams/rotate-token")
-    def rotate_token(team: TeamDep):
-        """ออกโทเคนใหม่ — ใช้เมื่อโทเคนเดิมหลุด
-
-        ยืนยันด้วยโทเคน*เดิม* ซึ่งฟังดูย้อนแย้งแต่ถูกต้อง: คนที่ยังถือโทเคนอยู่คือ
-        เจ้าของโดยนิยาม และถ้ามีคนอื่นถือด้วยก็ยิ่งต้องรีบเปลี่ยน · คนที่กดก่อนได้ก่อน
-        ซึ่งฝ่ายที่ถูกตัดออกไปคือฝ่ายที่ต้องไปคุยกับผู้สอน
-        """
-        before = team.token[:4]
-        arena.rotate_token(
-            team=team,
-            actor_id=team.member_ids[0] if team.member_ids else None,
-        )
-        return {"token": team.token, "previous_prefix": before}
-
     @app.post("/api/teams/join")
-    def join_team(team: TeamDep, invite_code: str = Form(...)):
-        """เข้าทีมเพื่อนด้วยรหัสเชิญ
+    def join_team(user: UserDep, course_id: str = Form(...), invite_code: str = Form(...)):
+        """เข้าทีมเพื่อนด้วยรหัสเชิญ — ภายในวิชาเดียวกันเท่านั้น
 
-        ยืนยันตัวตนด้วยโทเคนของทีม*ปัจจุบัน* — ทีมเดี่ยวมีสมาชิกคนเดียวอยู่แล้ว
-        จึงรู้ว่าใครเป็นคนกด ส่วนทีมที่มีหลายคนจะเข้าทีมอื่นไม่ได้ (ต้องแยกออกก่อน)
-        ซึ่งเป็นข้อจำกัดที่ตั้งใจ — การย้ายทั้งทีมไปรวมกับอีกทีมควรผ่านผู้สอน
+        ทีมที่มีหลายคนจะเข้าทีมอื่นไม่ได้ (ต้องแยกออกก่อน) ซึ่งเป็นข้อจำกัดที่ตั้งใจ —
+        การย้ายทั้งทีมไปรวมกับอีกทีมควรผ่านผู้สอน
         """
+        team = team_in(user, course_id)
         if len(team.member_ids) != 1:
             raise HTTPException(
                 409,
                 "ทีมที่มีสมาชิกมากกว่าหนึ่งคนย้ายเองไม่ได้ — ติดต่อผู้สอนถ้าต้องการรวมทีม",
             )
-        user = arena.store.users.get(team.member_ids[0])
-        if user is None:
-            raise HTTPException(409, "ทีมนี้ไม่ได้ผูกกับบัญชีที่ล็อกอินด้วย Google")
         try:
             joined = arena.join_team(
-                user=user, invite_code=invite_code, course_id=team.course_id
+                user=user, invite_code=invite_code, course_id=course_id
             )
         except InviteInvalid as exc:
             raise HTTPException(404, str(exc)) from exc
         except TeamFull as exc:
             raise HTTPException(409, str(exc)) from exc
-        return {"team_id": joined.id, "name": joined.name, "token": joined.token}
+        # ไม่มีโทเคนให้คืนอีกแล้ว — โทเคนเป็นของคน ไม่เปลี่ยนเมื่อย้ายทีม
+        return {"team_id": joined.id, "name": joined.name}
 
     # ── ส่งงาน ──────────────────────────────────────────────────────
 
     @app.post("/api/competitions/{slug}/submissions", status_code=201)
     async def create_submission(
         slug: str,
-        team: TeamDep,
+        user: UserDep,
         file: Annotated[UploadFile, File()],
         note: Annotated[str, Form()] = "",
         dry_run: Annotated[bool, Form()] = False,
     ):
+        # **หัวใจของการใช้โทเคนอันเดียวได้ทุกวิชา** — competition บอกว่าวิชาไหน
+        # แล้วเราหาทีมของคนนี้ในวิชานั้น · นิสิตจึงไม่ต้องสลับโทเคนตามวิชา
+        _competition, team = team_for_competition(user, slug)
         try:
             submission, run = arena.submit(
                 slug=slug,
                 team=team,
-                user_id=team.member_ids[0] if team.member_ids else team.id,
+                user_id=user.id,
                 archive=await file.read(),
                 note=note,
                 dry_run=dry_run,
@@ -302,12 +367,12 @@ def create_app(
         }
 
     @app.get("/api/submissions/{submission_id}")
-    def get_submission(submission_id: str, team: TeamDep):
+    def get_submission(submission_id: str, user: UserDep):
         try:
             status = arena.submission_status(submission_id)
         except KeyError as exc:
             raise HTTPException(404, "ไม่พบ submission") from exc
-        if status["submission"].team_id != team.id:
+        if not owns(user, status["submission"].team_id):
             raise HTTPException(403, "ดู submission ของทีมอื่นไม่ได้")
 
         submission = status["submission"]
@@ -334,11 +399,11 @@ def create_app(
         }
 
     @app.get("/api/runs/{run_id}/episodes")
-    def get_episodes(run_id: str, team: TeamDep):
+    def get_episodes(run_id: str, user: UserDep):
         run = arena.queue.runs.get(run_id)
         if run is None:
             raise HTTPException(404, "ไม่พบ run")
-        if run.team_id != team.id:
+        if not owns(user, run.team_id):
             raise HTTPException(403, "ดู run ของทีมอื่นไม่ได้")
         return {
             "run_id": run.id,
@@ -349,13 +414,16 @@ def create_app(
         }
 
     @app.post("/api/submissions/{submission_id}/final-pick")
-    def final_pick(submission_id: str, team: TeamDep, picked: bool = True):
+    def final_pick(submission_id: str, user: UserDep, picked: bool = True):
         try:
+            existing = arena.store.submissions.get(submission_id)
+            if existing is None:
+                raise KeyError(submission_id)
             submission = arena.set_final_pick(
                 submission_id=submission_id,
-                team=team,
+                team=team_in(user, arena.store.competitions[existing.competition_id].course_id),
                 picked=picked,
-                user_id=team.member_ids[0] if team.member_ids else team.id,
+                user_id=user.id,
             )
         except KeyError as exc:
             raise HTTPException(404, "ไม่พบ submission") from exc
@@ -368,10 +436,14 @@ def create_app(
     # ── leaderboard ─────────────────────────────────────────────────
 
     @app.get("/api/competitions/{slug}/leaderboard")
-    def leaderboard(slug: str, team: TeamDep, kind: str = "public"):
+    def leaderboard(slug: str, user: UserDep, kind: str = "public"):
         competition = arena.store.competition_by_slug(slug)
         if competition is None:
             raise HTTPException(404, f"ไม่รู้จัก competition {slug!r}")
+        # คนที่ยังไม่ได้เข้าวิชานี้ยังดูกระดานได้ แค่ไม่มีแถวไหนเป็น "ของคุณ"
+        # การปิดกระดานของวิชาอื่นไม่ได้กันอะไร ในเมื่อคะแนนเป็นข้อมูลสาธารณะอยู่แล้ว
+        mine = arena.store.team_of(user.id, competition.course_id)
+        my_team_id = mine.id if mine else ""
         try:
             run_kind = RunKind(kind)
         except ValueError as exc:
@@ -384,7 +456,7 @@ def create_app(
         # ผู้สอนเห็นชื่อจริงเสมอ (README §6.1) — alias เป็นการลดแรงกดดันระหว่างนิสิต
         # ด้วยกัน ไม่ใช่การซ่อนตัวจากการตรวจ · ก่อนหน้านี้ไม่มีใครเห็นชื่อจริงเลย
         rows = build(runs, arena.store.teams, kind=run_kind,
-                     reveal_names=arena.team_acts_as_staff(team))
+                     reveal_names=arena.is_staff(user.email))
 
         return {
             "competition": slug,
@@ -404,7 +476,7 @@ def create_app(
                         "name": obj.display_name,
                         "score": obj.score,
                         "movement": obj.movement,
-                        "is_you": obj.team_id == team.id,
+                        "is_you": obj.team_id == my_team_id,
                         "metrics": obj.metrics,
                     }
                 )
@@ -412,7 +484,7 @@ def create_app(
             ],
             "next_target": (
                 lambda m: {"level": m.level, "name": m.label, "score": m.score} if m else None
-            )(next_target(rows, team.id, marks)),
+            )(next_target(rows, my_team_id, marks)),
         }
 
     @app.get("/api/competitions/{slug}")

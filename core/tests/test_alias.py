@@ -34,7 +34,15 @@ def arena(tmp_path, monkeypatch):
 
 
 def _member(arena, email: str, name: str):
-    return arena.sign_in(google_sub=f"sub-{email}", email=email, name=name, course_id=COURSE)
+    """ล็อกอิน + เข้าวิชา — คืน `(user, team)` เหมือนที่ `sign_in` เคยคืน
+
+    ตอนนี้เป็นสองขั้น: ล็อกอินรู้ว่าเป็นใคร แล้วค่อยใส่รหัสเข้าวิชา
+    เทสต์ยังอยากได้ทั้งคู่ในบรรทัดเดียว จึงห่อไว้ที่นี่
+    """
+    sub = f"sub-{email}"
+    user = arena.sign_in(google_sub=sub, email=email, name=name)
+    team = arena.enroll(user=user, join_code=arena.store.course(COURSE).join_code)
+    return user, team
 
 
 # ── การทำความสะอาดชื่อ ──────────────────────────────────────────────
@@ -133,10 +141,10 @@ def test_every_change_is_audited(arena):
 # ── ใครเห็นชื่ออะไรบนกระดาน ─────────────────────────────────────────
 
 
-def _board(arena, team, kind=RunKind.PUBLIC):
+def _board(arena, email, kind=RunKind.PUBLIC):
     return build(
         list(arena.queue.runs.values()), arena.store.teams,
-        kind=kind, reveal_names=arena.team_acts_as_staff(team),
+        kind=kind, reveal_names=arena.is_staff(email),
     )
 
 
@@ -145,7 +153,7 @@ def test_students_see_the_alias_and_staff_see_the_real_name(arena):
     from core.domain import Run, RunStatus, new_id
 
     arena.staff_emails = frozenset({STAFF})
-    _s, staff_team = _member(arena, STAFF, "อาจารย์")
+    _member(arena, STAFF, "อาจารย์")
     _u, team = _member(arena, "a@g.swu.ac.th", "สมชาย ใจดี")
     arena.set_alias(team=team, raw="ทีมลับ", actor_id=None)
 
@@ -155,8 +163,8 @@ def test_students_see_the_alias_and_staff_see_the_real_name(arena):
         kind=RunKind.PUBLIC, status=RunStatus.DONE, score=1.0,
     )
 
-    student_view = _board(arena, team)
-    staff_view = _board(arena, staff_team)
+    student_view = _board(arena, "a@g.swu.ac.th")
+    staff_view = _board(arena, STAFF)
     assert [r.display_name for r in student_view] == ["ทีมลับ"]
     assert [r.display_name for r in staff_view] == ["สมชาย ใจดี"]
 
@@ -173,34 +181,45 @@ def client(arena):
     return TestClient(create_app(arena))
 
 
-def auth(team):
-    return {"Authorization": f"Bearer {team.token}"}
+def auth(user):
+    """โทเคนเป็นของ **คน** แล้ว ไม่ใช่ของทีม"""
+    return {"Authorization": f"Bearer {user.token}"}
 
 
 def test_any_team_can_set_its_own_alias(arena, client):
     """ไม่ต้องเป็นผู้สอน — §6.1 ให้เป็นสิทธิ์ของทีม"""
-    _u, team = _member(arena, "a@g.swu.ac.th", "สมชาย ใจดี")
-    res = client.post("/api/teams/alias", data={"alias": " ทีม  ลุยเลย "}, headers=auth(team))
+    user, _team = _member(arena, "a@g.swu.ac.th", "สมชาย ใจดี")
+    res = client.post(
+        "/api/teams/alias",
+        data={"course_id": COURSE, "alias": " ทีม  ลุยเลย "},
+        headers=auth(user),
+    )
     assert res.status_code == 200, res.text
     assert res.json() == {"alias": "ทีม ลุยเลย", "shown_as": "ทีม ลุยเลย"}
 
 
 def test_bad_alias_comes_back_with_the_reason(arena, client):
-    _u, team = _member(arena, "a@g.swu.ac.th", "สมชาย")
-    res = client.post("/api/teams/alias", data={"alias": "Gold"}, headers=auth(team))
+    user, _team = _member(arena, "a@g.swu.ac.th", "สมชาย")
+    res = client.post(
+        "/api/teams/alias", data={"course_id": COURSE, "alias": "Gold"}, headers=auth(user)
+    )
     assert res.status_code == 422
     assert "baseline" in res.json()["detail"]
 
 
 def test_me_reports_what_the_board_shows(arena, client):
-    _u, team = _member(arena, "a@g.swu.ac.th", "สมชาย ใจดี")
-    before = client.get("/api/me", headers=auth(team)).json()["team"]
+    user, _team = _member(arena, "a@g.swu.ac.th", "สมชาย ใจดี")
+    before = client.get("/api/me", headers=auth(user)).json()["enrollments"][0]["team"]
     assert before["alias"] is None and before["shown_as"] == "สมชาย ใจดี"
 
-    client.post("/api/teams/alias", data={"alias": "ทีมลับ"}, headers=auth(team))
-    after = client.get("/api/me", headers=auth(team)).json()["team"]
+    client.post(
+        "/api/teams/alias", data={"course_id": COURSE, "alias": "ทีมลับ"}, headers=auth(user)
+    )
+    after = client.get("/api/me", headers=auth(user)).json()["enrollments"][0]["team"]
     assert after["alias"] == "ทีมลับ" and after["shown_as"] == "ทีมลับ"
 
 
 def test_alias_needs_a_token(client):
-    assert client.post("/api/teams/alias", data={"alias": "x"}).status_code == 401
+    assert client.post(
+        "/api/teams/alias", data={"course_id": COURSE, "alias": "x"}
+    ).status_code == 401

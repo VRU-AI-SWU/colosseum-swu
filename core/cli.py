@@ -45,7 +45,7 @@ def _client():
 
     token = os.environ.get("ARENA_TOKEN")
     if not token:
-        raise SystemExit("ต้องตั้ง ARENA_TOKEN ก่อน (โทเคนของทีม)")
+        raise SystemExit("ต้องตั้ง ARENA_TOKEN ก่อน (โทเคนของคุณ — คัดลอกจากหน้าเว็บ)")
     return httpx.Client(
         base_url=DEFAULT_URL, headers={"Authorization": f"Bearer {token}"}, timeout=60.0
     )
@@ -468,7 +468,7 @@ def cmd_serve(args) -> int:
     )
     threading.Thread(target=worker.serve_forever, daemon=True).start()
 
-    print(f"โทเคนของทีม: {', '.join(t.id for t in teams)}")
+    print(f"โทเคนของนิสิตตัวอย่าง: {', '.join(t.id for t in teams)}")
     print(f"sandbox    : {sandbox_note}")
     arena.staff_emails = staff_emails_from_env()
     if arena.staff_emails:

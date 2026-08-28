@@ -56,6 +56,70 @@ class Role(str, Enum):
     INSTRUCTOR = "instructor"
 
 
+@dataclass(frozen=True)
+class Paradigm:
+    """แนวทางการเรียนรู้ที่โจทย์หนึ่งอยู่ในนั้น — ใช้จัดกลุ่มให้คนอ่านเข้าใจ
+
+    **ติดที่ competition ไม่ใช่ที่วิชา** เพราะวิชาหนึ่งคร่อมหลาย paradigm โดยธรรมชาติ —
+    วิชา AI มีทั้งโจทย์ RL และ agent ที่ใช้ LLM ส่วนวิชา ML มีทั้ง supervised
+    และ unsupervised · ถ้าเอา paradigm ครอบวิชา จะต้องเลือกให้วิชาหนึ่งอันเดียว
+    หรือแตกวิชาเป็นหลายอัน ซึ่งผิดทั้งคู่
+
+    **แยกจาก `task_type` โดยตั้งใจ** — paradigm บอกว่า*นิสิตกำลังเรียนอะไร*
+    ส่วน task_type บอกว่า*ระบบให้คะแนนยังไง* สองอย่างนี้ไม่ตรงกันหนึ่งต่อหนึ่ง:
+    supervised กับ unsupervised ใช้ runner ตัวเดียวกัน (prediction) แต่เป็นคนละ
+    paradigm ในสายตานิสิต
+
+    เก็บเป็นทะเบียนในโค้ดไม่ใช่ตาราง เพราะเป็นคำศัพท์ที่นิ่ง (เหมือน `RunKind`)
+    และหน้าเว็บอ้างถึงมันตรงๆ ตอนจัดกลุ่ม — การเพิ่มอันใหม่คือการแก้โค้ดสามบรรทัด
+    ไม่ใช่งานที่ต้องทำกลางเทอม
+    """
+
+    id: str
+    name: str
+    blurb: str
+
+
+PARADIGMS: dict[str, Paradigm] = {
+    p.id: p
+    for p in (
+        Paradigm(
+            "reinforcement-learning",
+            "Reinforcement Learning",
+            "agent ตัดสินใจเป็นลำดับในสภาพแวดล้อมที่ตอบกลับ — วัดที่ผลของทั้งเส้นทาง",
+        ),
+        Paradigm(
+            "supervised-learning",
+            "Supervised Learning",
+            "เรียนจากตัวอย่างที่มีเฉลย แล้วทำนายข้อมูลที่ไม่เคยเห็น",
+        ),
+        Paradigm(
+            "unsupervised-learning",
+            "Unsupervised Learning",
+            "หาโครงสร้างในข้อมูลที่ไม่มีเฉลย — จัดกลุ่ม ลดมิติ หาสิ่งผิดปกติ",
+        ),
+    )
+}
+
+
+class ParadigmUnknown(Exception):
+    """competition อ้าง paradigm ที่ไม่มีในทะเบียน — สะกดผิดหรือลืมเพิ่ม"""
+
+
+def require_paradigm(paradigm_id: str) -> Paradigm:
+    """แปลง id เป็น Paradigm — ล้มทันทีถ้าไม่รู้จัก
+
+    ยอมให้ค่าที่สะกดผิดผ่านไป แปลว่าหน้าเว็บจะมีกลุ่มลอยๆ ที่ไม่มีคำอธิบาย
+    และไม่มีใครสังเกตจนกว่านิสิตจะถาม
+    """
+    try:
+        return PARADIGMS[paradigm_id]
+    except KeyError:
+        raise ParadigmUnknown(
+            f"ไม่รู้จัก paradigm {paradigm_id!r} — ที่มีคือ {sorted(PARADIGMS)}"
+        ) from None
+
+
 class RunKind(str, Enum):
     """ทำไม run หนึ่งถึงถูกสร้าง — ตัวนี้กำหนดว่าใช้ seed ชุดไหนและขึ้น leaderboard ไหนไหม"""
 
@@ -92,6 +156,16 @@ class User:
     email: str
     name: str
     google_sub: str
+    #: credential ของ **คน** ไม่ใช่ของทีม
+    #:
+    #: เดิมโทเคนเป็นของทีม ซึ่งพังทันทีที่มีหลายวิชา — คนหนึ่งอยู่หลายทีม (ทีมละวิชา)
+    #: จึงมีหลายโทเคน และตอนล็อกอินครั้งแรกยังไม่ได้เข้าวิชาไหน จึงยังไม่มีทีม
+    #: จึงไม่มีโทเคนให้ส่งกลับไปให้หน้าเว็บใช้เรียก "เข้าวิชาด้วยรหัส"
+    #:
+    #: ของแถมที่ตามมา: โทเคนหลุดกระทบคนเดียวไม่ใช่ทั้งทีม · สิทธิ์ผู้สอนถามตรงๆ ได้
+    #: ว่าคนนี้เป็นผู้สอนไหม (เดิมต้องมีกฎ "ทั้งทีมต้องเป็นผู้สอน" เพราะใช้โทเคนร่วมกัน)
+    #: · `actor_id` ใน audit รู้จริงว่าใครกด ไม่ใช่เดาจากสมาชิกคนแรก
+    token: str = field(default_factory=new_token)
     created_at: datetime = field(default_factory=utcnow)
 
 
@@ -156,6 +230,17 @@ class Course:
     id: str
     name: str
     max_team_size: int = DEFAULT_MAX_TEAM_SIZE
+    #: รหัสที่ผู้สอนแจกในคาบ — นิสิตใส่เพื่อเข้าวิชา
+    #:
+    #: ใช้รูปแบบเดียวกับรหัสเชิญทีม เพราะทำหน้าที่เดียวกัน (อ่านให้ฟังในห้องได้)
+    #: และเป็นสิ่งที่กันคนนอกวิชาหลุดเข้ามาโดยไม่ต้องอัปโหลดรายชื่อ
+    join_code: str = field(default_factory=new_invite_code)
+    #: วิชาที่จบเทอมแล้ว — ไม่รับคนเข้าใหม่ แต่ข้อมูลยังอยู่ครบ
+    archived_at: datetime | None = None
+
+    @property
+    def is_open(self) -> bool:
+        return self.archived_at is None
 
     def validated_team_size(self, size: int) -> int:
         """ตรวจค่าที่ผู้สอนกรอก — คืนค่าที่ใช้ได้ หรือโยนพร้อมเหตุผล"""
@@ -218,6 +303,9 @@ class Competition:
     config_path: str
     opens_at: datetime
     closes_at: datetime
+    #: id ใน `PARADIGMS` — บอกว่านิสิต*กำลังเรียนอะไร* ต่างจาก `task_type`
+    #: ที่บอกว่าระบบ*ให้คะแนนยังไง* · ดูเหตุผลที่ `class Paradigm`
+    paradigm: str = "reinforcement-learning"
     quota_per_day: int = 5
     max_final_submissions: int = 2
     phases: list[Phase] = field(default_factory=list)

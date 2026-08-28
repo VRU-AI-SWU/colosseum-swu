@@ -37,7 +37,15 @@ def arena(tmp_path, monkeypatch):
 
 
 def _member(arena, email: str, name: str) -> tuple[User, Team]:
-    return arena.sign_in(google_sub=f"sub-{email}", email=email, name=name, course_id=COURSE)
+    """ล็อกอิน + เข้าวิชา — คืน `(user, team)` เหมือนที่ `sign_in` เคยคืน
+
+    ตอนนี้เป็นสองขั้น: ล็อกอินรู้ว่าเป็นใคร แล้วค่อยใส่รหัสเข้าวิชา
+    เทสต์ยังอยากได้ทั้งคู่ในบรรทัดเดียว จึงห่อไว้ที่นี่
+    """
+    sub = f"sub-{email}"
+    user = arena.sign_in(google_sub=sub, email=email, name=name)
+    team = arena.enroll(user=user, join_code=arena.store.course(COURSE).join_code)
+    return user, team
 
 
 # ── วิชาเป็นเจ้าของกติกา ────────────────────────────────────────────
@@ -118,42 +126,29 @@ def test_change_is_written_to_the_audit_trail(arena):
 def test_nobody_is_staff_by_default(arena):
     """ค่าเริ่มต้นต้องปลอดภัย — ไม่ตั้ง ARENA_STAFF_EMAILS = ไม่มีใครเป็นผู้สอน"""
     assert arena.staff_emails == frozenset()
-    _user, team = _member(arena, STAFF, "อาจารย์")
-    assert arena.team_acts_as_staff(team) is False
+    assert arena.is_staff(STAFF) is False
 
 
-def test_solo_staff_team_is_staff(arena):
+def test_staff_is_decided_by_the_person_not_the_team(arena):
+    """พอโทเคนเป็นของคน สิทธิ์ก็ถามจากคนตรงๆ ได้
+
+    เดิมต้องมีกฎ "ทั้งทีมต้องเป็นผู้สอน" เพราะโทเคนใช้ร่วมกันทั้งทีม — ผู้สอนที่ไป
+    อยู่ทีมเดียวกับนิสิตจะมอบสิทธิ์ให้นิสิตคนนั้นโดยไม่ตั้งใจ · ข้อจำกัดนั้นหายไปแล้ว
+    """
     arena.staff_emails = frozenset({STAFF})
-    _user, team = _member(arena, STAFF, "อาจารย์")
-    assert arena.team_acts_as_staff(team) is True
+    staff_user, staff_team = _member(arena, STAFF, "อาจารย์")
+    student, _ = _member(arena, STUDENT, "นิสิต")
+    arena.join_team(user=student, invite_code=staff_team.invite_code, course_id=COURSE)
+
+    assert len(staff_team.member_ids) == 2, "อยู่ทีมเดียวกันแล้ว"
+    assert arena.is_staff(staff_user.email) is True
+    assert arena.is_staff(student.email) is False
 
 
 def test_staff_email_matching_ignores_case_and_spaces(arena):
     arena.staff_emails = frozenset({STAFF})
     assert arena.is_staff("  AJ@G.SWU.AC.TH ") is True
     assert arena.is_staff("") is False
-
-
-def test_a_team_with_a_student_in_it_is_not_staff(arena):
-    """**หัวใจของการตรวจสิทธิ์** — ทั้งทีมใช้โทเคนเดียวกัน
-
-    ถ้ายอมให้ "มีผู้สอนอยู่ในทีมก็พอ" นิสิตคนนั้นจะถือโทเคนที่เปลี่ยนกติกาของ
-    ทั้งวิชาได้ โดยที่ผู้สอนไม่รู้ตัวว่าได้มอบสิทธิ์นั้นไป
-    """
-    arena.staff_emails = frozenset({STAFF})
-    _staff, staff_team = _member(arena, STAFF, "อาจารย์")
-    student, _ = _member(arena, STUDENT, "นิสิต")
-    arena.join_team(user=student, invite_code=staff_team.invite_code, course_id=COURSE)
-
-    assert len(staff_team.member_ids) == 2
-    assert arena.team_acts_as_staff(staff_team) is False
-
-
-def test_team_with_no_members_is_not_staff(arena):
-    """ทีมที่แจกโทเคนมือ (ไม่ผูกบัญชี) ต้องไม่ได้สิทธิ์ผู้สอนโดยบังเอิญ"""
-    team = arena.store.save_team(Team(id=new_id(), course_id=COURSE, name="ทีมไม่มีสมาชิก"))
-    arena.staff_emails = frozenset({STAFF})
-    assert arena.team_acts_as_staff(team) is False
 
 
 # ── ค่าที่ตั้งได้ ───────────────────────────────────────────────────
@@ -186,16 +181,17 @@ def client(arena):
     return TestClient(create_app(arena))
 
 
-def auth(team):
-    return {"Authorization": f"Bearer {team.token}"}
+def auth(user):
+    """โทเคนเป็นของ **คน** แล้ว ไม่ใช่ของทีม"""
+    return {"Authorization": f"Bearer {user.token}"}
 
 
 def test_student_token_is_refused_even_though_the_ui_hides_the_panel(arena, client):
     arena.staff_emails = frozenset({STAFF})
-    _student, student_team = _member(arena, STUDENT, "นิสิต")
+    student, _team = _member(arena, STUDENT, "นิสิต")
 
     res = client.post(
-        f"/api/courses/{COURSE}/max-team-size", data={"size": 20}, headers=auth(student_team)
+        f"/api/courses/{COURSE}/max-team-size", data={"size": 20}, headers=auth(student)
     )
     assert res.status_code == 403, res.text
     assert arena.store.course(COURSE).max_team_size == DEFAULT_MAX_TEAM_SIZE
@@ -203,38 +199,57 @@ def test_student_token_is_refused_even_though_the_ui_hides_the_panel(arena, clie
 
 def test_staff_token_can_change_it(arena, client):
     arena.staff_emails = frozenset({STAFF})
-    _staff, staff_team = _member(arena, STAFF, "อาจารย์")
+    staff, _staff_team = _member(arena, STAFF, "อาจารย์")
 
     res = client.post(
-        f"/api/courses/{COURSE}/max-team-size", data={"size": 3}, headers=auth(staff_team)
+        f"/api/courses/{COURSE}/max-team-size", data={"size": 3}, headers=auth(staff)
     )
     assert res.status_code == 200, res.text
     assert res.json()["course"]["max_team_size"] == 3
     assert arena.store.course(COURSE).max_team_size == 3
 
 
-def test_staff_cannot_touch_another_course(arena, client):
-    """สิทธิ์ผูกกับวิชาที่ตัวเองสอน ไม่ใช่สิทธิ์ทั่วทั้งเซิร์ฟเวอร์"""
+def test_unknown_course_is_404_not_a_silent_no_op(arena, client):
+    """พิมพ์ชื่อวิชาผิดต้องรู้ทันที ไม่ใช่ตอบ 200 แล้วไม่มีอะไรเปลี่ยน"""
     arena.staff_emails = frozenset({STAFF})
-    _staff, staff_team = _member(arena, STAFF, "อาจารย์")
+    staff, _staff_team = _member(arena, STAFF, "อาจารย์")
 
     res = client.post(
-        "/api/courses/วิชาอื่น/max-team-size", data={"size": 3}, headers=auth(staff_team)
+        "/api/courses/วิชาที่ไม่มีจริง/max-team-size", data={"size": 3}, headers=auth(staff)
     )
-    assert res.status_code == 403, res.text
+    assert res.status_code == 404, res.text
+
+
+def test_staff_authority_is_deployment_wide_not_per_course(arena, client):
+    """**ข้อจำกัดที่รู้ตัว** — `ARENA_STAFF_EMAILS` เป็นรายชื่อของทั้งเครื่อง
+
+    วันนี้ผู้สอนคนเดียวสอนทุกวิชาบนเครื่องนี้ จึงยังไม่เป็นปัญหา · ถ้าวันหนึ่งมี
+    ผู้สอนหลายคนแบ่งกันคนละวิชา ต้องมีรายชื่อผู้สอนรายวิชา ไม่ใช่รายเครื่อง
+    เทสต์นี้เขียนไว้ให้เห็นพฤติกรรมจริง ไม่ใช่เพื่อรับรองว่ามันถูกในระยะยาว
+    """
+    from core.domain import Course
+
+    arena.staff_emails = frozenset({STAFF})
+    staff, _staff_team = _member(arena, STAFF, "อาจารย์")
+    other = arena.store.save_course(Course(id="วิชาของคนอื่น", name="วิชาของคนอื่น"))
+
+    res = client.post(
+        f"/api/courses/{other.id}/max-team-size", data={"size": 3}, headers=auth(staff)
+    )
+    assert res.status_code == 200, res.text
 
 
 def test_bad_size_comes_back_with_the_reason_not_just_a_number(arena, client):
     """422 ต้องบอกว่าทีมไหนใหญ่เกินไป — หน้าเว็บเอาข้อความนี้ไปโชว์ตรงๆ"""
     arena.staff_emails = frozenset({STAFF})
-    _staff, staff_team = _member(arena, STAFF, "อาจารย์")
+    staff, _staff_team = _member(arena, STAFF, "อาจารย์")
     owner, owner_team = _member(arena, "a@g.swu.ac.th", "ทีมใหญ่")
     for i in range(3):
         mate, _ = _member(arena, f"m{i}@g.swu.ac.th", f"เพื่อน {i}")
         arena.join_team(user=mate, invite_code=owner_team.invite_code, course_id=COURSE)
 
     res = client.post(
-        f"/api/courses/{COURSE}/max-team-size", data={"size": 2}, headers=auth(staff_team)
+        f"/api/courses/{COURSE}/max-team-size", data={"size": 2}, headers=auth(staff)
     )
     assert res.status_code == 422, res.text
     assert "ทีมใหญ่" in res.json()["detail"]
@@ -242,16 +257,16 @@ def test_bad_size_comes_back_with_the_reason_not_just_a_number(arena, client):
 
 def test_me_reports_the_course_and_whether_you_are_staff(arena, client):
     arena.staff_emails = frozenset({STAFF})
-    _staff, staff_team = _member(arena, STAFF, "อาจารย์")
-    _student, student_team = _member(arena, STUDENT, "นิสิต")
+    staff, _staff_team = _member(arena, STAFF, "อาจารย์")
+    student, _student_team = _member(arena, STUDENT, "นิสิต")
 
-    staff_view = client.get("/api/me", headers=auth(staff_team)).json()
+    staff_view = client.get("/api/me", headers=auth(staff)).json()
     assert staff_view["is_staff"] is True
-    assert staff_view["course"]["max_team_size"] == DEFAULT_MAX_TEAM_SIZE
+    assert staff_view["enrollments"][0]["course"]["max_team_size"] == DEFAULT_MAX_TEAM_SIZE
 
-    student_view = client.get("/api/me", headers=auth(student_team)).json()
+    student_view = client.get("/api/me", headers=auth(student)).json()
     assert student_view["is_staff"] is False
-    assert student_view["course"]["id"] == COURSE
+    assert student_view["enrollments"][0]["course"]["id"] == COURSE
 
 
 def test_no_token_gets_401_not_403(client):

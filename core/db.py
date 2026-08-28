@@ -46,7 +46,7 @@ from core.domain import (
     new_invite_code,
 )
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -57,7 +57,9 @@ CREATE TABLE IF NOT EXISTS meta (
 CREATE TABLE IF NOT EXISTS courses (
     id            TEXT PRIMARY KEY,
     name          TEXT NOT NULL,
-    max_team_size INTEGER NOT NULL
+    max_team_size INTEGER NOT NULL,
+    join_code     TEXT NOT NULL DEFAULT '',
+    archived_at   TEXT
 );
 
 CREATE TABLE IF NOT EXISTS teams (
@@ -79,7 +81,8 @@ CREATE TABLE IF NOT EXISTS users (
     name       TEXT NOT NULL,
     -- รหัสถาวรจาก Google · ใช้จับคู่แทนอีเมลเพราะอีเมลเปลี่ยนได้ sub ไม่เปลี่ยน
     google_sub TEXT NOT NULL UNIQUE,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    token      TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_users_sub ON users(google_sub);
 
@@ -96,7 +99,8 @@ CREATE TABLE IF NOT EXISTS competitions (
     quota_per_day          INTEGER NOT NULL,
     max_final_submissions  INTEGER NOT NULL,
     phases                 TEXT NOT NULL,
-    import_whitelist       TEXT NOT NULL
+    import_whitelist       TEXT NOT NULL,
+    paradigm               TEXT NOT NULL DEFAULT 'reinforcement-learning'
 );
 
 CREATE TABLE IF NOT EXISTS submissions (
@@ -229,8 +233,69 @@ def _migrate_2_to_3(conn: sqlite3.Connection) -> None:
         )
 
 
+def _migrate_3_to_4(conn: sqlite3.Connection) -> None:
+    """v3 → v4 · รองรับหลายวิชา — โทเคนย้ายจากทีมมาที่คน + รหัสเข้าวิชา + paradigm
+
+    **โทเคนของคนสุ่มใหม่ทั้งหมด ไม่ได้ย้ายค่าเดิมมา** ต่างจากตอน v1→v2 ที่ตั้งใจ
+    รักษาโทเคนเดิมไว้ · ที่นี่ทำไม่ได้เพราะความหมายเปลี่ยน: หนึ่งทีมมีได้หลายคน
+    การหยิบโทเคนของทีมมาให้คนใดคนหนึ่งจะทำให้อีกคนได้โทเคนที่เคยเป็นของทีม
+    ซึ่งอ่านเหมือนยังใช้ร่วมกันอยู่ · ทุกคนต้องเข้าหน้าเว็บไปเอาโทเคนใหม่
+
+    ยอมรับได้เพราะตอน migrate ยังไม่มีนิสิตคนไหนถือโทเคน — ต้นทุนเป็นศูนย์วันนี้
+    และจะไม่ถูกกว่านี้อีก
+
+    `teams.token` ยังอยู่ในตารางเพื่อไม่ให้ข้อมูลเก่าหาย แต่ไม่มีใครอ่านมันแล้ว
+    """
+    from core.domain import new_invite_code, new_token
+
+    # **ห้ามสมมติว่าตารางอื่นมีอยู่** — ไฟล์ v1 มีแค่ `teams` · พลาดข้อนี้มาแล้ว
+    # ตอน v2→v3 แล้วพลาดซ้ำที่นี่ ซึ่งแปลว่ามันเป็นกับดักของ migration ทุกตัว
+    # ไม่ใช่ความเผลอครั้งเดียว
+    present = {
+        r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if "users" not in present:
+        conn.execute(
+            "CREATE TABLE users ("
+            " id TEXT PRIMARY KEY, email TEXT NOT NULL, name TEXT NOT NULL,"
+            " google_sub TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL,"
+            " token TEXT NOT NULL DEFAULT '')"
+        )
+        present.add("users")
+
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+    if "token" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN token TEXT NOT NULL DEFAULT ''")
+    for row in conn.execute("SELECT id, token FROM users").fetchall():
+        if not row["token"]:
+            conn.execute("UPDATE users SET token = ? WHERE id = ?", (new_token(), row["id"]))
+
+    if "courses" not in present:
+        return  # v2→v3 สร้างให้อยู่แล้ว — ถ้าไม่มีแปลว่าลำดับ migration ผิด ไม่ใช่เรื่องปกติ
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(courses)")}
+    if "join_code" not in cols:
+        conn.execute("ALTER TABLE courses ADD COLUMN join_code TEXT NOT NULL DEFAULT ''")
+        conn.execute("ALTER TABLE courses ADD COLUMN archived_at TEXT")
+    for row in conn.execute("SELECT id, join_code FROM courses").fetchall():
+        if not row["join_code"]:
+            conn.execute(
+                "UPDATE courses SET join_code = ? WHERE id = ?", (new_invite_code(), row["id"])
+            )
+
+    if "competitions" not in present:
+        return
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(competitions)")}
+    if "paradigm" not in cols:
+        # competition ที่มีอยู่ก่อน v4 เป็นโจทย์ RL ทั้งหมด — ไม่ได้เดา แต่เป็นข้อเท็จจริง
+        # ของ deployment นี้ (มี cp463-vacuum อันเดียว) · ตัวที่สร้างใหม่ต้องระบุเอง
+        conn.execute(
+            "ALTER TABLE competitions ADD COLUMN paradigm TEXT NOT NULL "
+            "DEFAULT 'reinforcement-learning'"
+        )
+
+
 #: เวอร์ชันปลายทาง → ฟังก์ชันที่พาจากเวอร์ชันก่อนหน้ามาถึงมัน
-MIGRATIONS = {2: _migrate_1_to_2, 3: _migrate_2_to_3}
+MIGRATIONS = {2: _migrate_1_to_2, 3: _migrate_2_to_3, 4: _migrate_3_to_4}
 
 
 class Database:
@@ -345,15 +410,17 @@ class Database:
 
     def save_course(self, c: Course) -> None:
         self._write(
-            "INSERT OR REPLACE INTO courses(id, name, max_team_size) VALUES(?,?,?)",
-            (c.id, c.name, c.max_team_size),
+            "INSERT OR REPLACE INTO courses(id, name, max_team_size, join_code, archived_at)"
+            " VALUES(?,?,?,?,?)",
+            (c.id, c.name, c.max_team_size, c.join_code, _dt(c.archived_at)),
         )
 
     def save_user(self, user: User) -> None:
         self._write(
-            "INSERT OR REPLACE INTO users(id, email, name, google_sub, created_at)"
-            " VALUES(?,?,?,?,?)",
-            (user.id, user.email, user.name, user.google_sub, _dt(user.created_at)),
+            "INSERT OR REPLACE INTO users(id, email, name, google_sub, token, created_at)"
+            " VALUES(?,?,?,?,?,?)",
+            (user.id, user.email, user.name, user.google_sub, user.token,
+             _dt(user.created_at)),
         )
 
     def save_competition(self, c: Competition) -> None:
@@ -370,13 +437,14 @@ class Database:
         self._write(
             "INSERT OR REPLACE INTO competitions(id, course_id, slug, title, task_type,"
             " env_plugin, config_path, opens_at, closes_at, quota_per_day,"
-            " max_final_submissions, phases, import_whitelist)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " max_final_submissions, phases, import_whitelist, paradigm)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 c.id, c.course_id, c.slug, c.title, c.task_type, c.env_plugin, c.config_path,
                 _dt(c.opens_at), _dt(c.closes_at), c.quota_per_day, c.max_final_submissions,
                 json.dumps(phases, ensure_ascii=False),
                 json.dumps(sorted(c.import_whitelist)),
+                c.paradigm,
             ),
         )
 
@@ -450,7 +518,8 @@ class Database:
     def load_courses(self) -> dict[str, Course]:
         return {
             r["id"]: Course(
-                id=r["id"], name=r["name"], max_team_size=int(r["max_team_size"])
+                id=r["id"], name=r["name"], max_team_size=int(r["max_team_size"]),
+                join_code=r["join_code"], archived_at=_parse_dt(r["archived_at"]),
             )
             for r in self._rows("courses")
         }
@@ -459,7 +528,8 @@ class Database:
         return {
             r["id"]: User(
                 id=r["id"], email=r["email"], name=r["name"],
-                google_sub=r["google_sub"], created_at=_parse_dt(r["created_at"]),
+                google_sub=r["google_sub"], token=r["token"],
+                created_at=_parse_dt(r["created_at"]),
             )
             for r in self._rows("users")
         }
@@ -484,6 +554,7 @@ class Database:
                 max_final_submissions=r["max_final_submissions"],
                 phases=phases,
                 import_whitelist=frozenset(json.loads(r["import_whitelist"])),
+                paradigm=r["paradigm"],
             )
         return out
 

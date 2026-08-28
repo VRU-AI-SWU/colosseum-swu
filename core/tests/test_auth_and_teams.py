@@ -29,7 +29,14 @@ def arena(tmp_path, monkeypatch):
 
 
 def sign_in(arena, sub, email, name):
-    return arena.sign_in(google_sub=sub, email=email, name=name, course_id=COURSE)
+    """ล็อกอิน + เข้าวิชา — คืน `(user, team)` เหมือนที่ `sign_in` เคยคืน
+
+    ตอนนี้เป็นสองขั้น: ล็อกอินรู้ว่าเป็นใคร แล้วค่อยใส่รหัสเข้าวิชา
+    เทสต์ยังอยากได้ทั้งคู่ในบรรทัดเดียว จึงห่อไว้ที่นี่
+    """
+    user = arena.sign_in(google_sub=sub, email=email, name=name)
+    team = arena.enroll(user=user, join_code=arena.store.course(COURSE).join_code)
+    return user, team
 
 
 # ── ล็อกอิน ─────────────────────────────────────────────────────────
@@ -137,12 +144,12 @@ def test_dissolved_team_drops_off_the_leaderboard(arena):
 
 def test_rotating_the_token_kills_the_old_one(arena):
     """โทเคนเดิมต้องใช้ไม่ได้ทันที ไม่งั้นการเปลี่ยนไม่ได้แก้ปัญหาที่มันหลุดไปแล้ว"""
-    _u, team = sign_in(arena, "sub-1", "a@g.swu.ac.th", "นิสิต")
-    old = team.token
+    user, _team = sign_in(arena, "sub-1", "a@g.swu.ac.th", "นิสิต")
+    old = user.token
     client = TestClient(create_app(arena))
 
     res = client.post(
-        "/api/teams/rotate-token", headers={"Authorization": f"Bearer {old}"}
+        "/api/users/rotate-token", headers={"Authorization": f"Bearer {old}"}
     )
     assert res.status_code == 200, res.text
     new = res.json()["token"]
@@ -158,39 +165,46 @@ def test_rotating_the_token_kills_the_old_one(arena):
 
 
 def test_rotation_keeps_the_team_and_its_history(arena):
-    """เปลี่ยนแค่โทเคน — สมาชิก รหัสเชิญ และคะแนนต้องไม่ขยับ"""
+    """เปลี่ยนแค่โทเคน — ทีม สมาชิก และรหัสเชิญต้องไม่ขยับ"""
     user, team = sign_in(arena, "sub-1", "a@g.swu.ac.th", "นิสิต")
     team_id, members, invite = team.id, list(team.member_ids), team.invite_code
 
-    arena.rotate_token(team=team, actor_id=user.id)
+    arena.rotate_user_token(user=user)
 
     assert team.id == team_id
     assert team.member_ids == members
     assert team.invite_code == invite, "รหัสเชิญเป็นคนละเรื่อง ต้องไม่เปลี่ยนตาม"
     assert team.is_active
-    assert any(e.action == "team.token_rotated" for e in arena.store.audit)
+    assert any(e.action == "user.token_rotated" for e in arena.store.audit)
+
+
+def test_rotation_only_affects_the_person_who_asked(arena):
+    """**ของแถมจากการย้ายโทเคนมาที่คน** — เพื่อนร่วมทีมไม่ต้องตั้งค่าใหม่
+
+    เดิมโทเคนเป็นของทีม โทเคนหลุดของคนเดียวจึงบังคับให้ทุกคนในทีมเปลี่ยนพร้อมกัน
+    ทั้งที่ไม่ได้ทำอะไรผิด
+    """
+    host_user, host = sign_in(arena, "sub-1", "a@g.swu.ac.th", "เจ้าของ")
+    mate, _ = sign_in(arena, "sub-2", "b@g.swu.ac.th", "เพื่อน")
+    arena.join_team(user=mate, invite_code=host.invite_code, course_id=COURSE)
+    mate_token_before = mate.token
+
+    arena.rotate_user_token(user=host_user)
+
+    assert mate.token == mate_token_before, "โทเคนของเพื่อนต้องไม่ถูกแตะ"
+    client = TestClient(create_app(arena))
+    assert client.get(
+        "/api/me", headers={"Authorization": f"Bearer {mate.token}"}
+    ).status_code == 200
 
 
 def test_rotation_is_recorded_for_audit(arena):
     """README §7 — ต้องย้อนดูได้ว่าใครเปลี่ยนเมื่อไร"""
-    user, team = sign_in(arena, "sub-1", "a@g.swu.ac.th", "นิสิต")
-    arena.rotate_token(team=team, actor_id=user.id)
-    event = next(e for e in arena.store.audit if e.action == "team.token_rotated")
-    assert event.target_id == team.id
+    user, _team = sign_in(arena, "sub-1", "a@g.swu.ac.th", "นิสิต")
+    arena.rotate_user_token(user=user)
+    event = next(e for e in arena.store.audit if e.action == "user.token_rotated")
+    assert event.target_id == user.id
     assert event.actor_id == user.id
-
-
-def test_dissolved_team_cannot_rotate(arena):
-    """ทีมที่ยุบแล้วต้องเปลี่ยนโทเคนไม่ได้ — ไม่งั้นจะปลุกมันกลับมาใช้งานได้"""
-    _o, host = sign_in(arena, "sub-1", "a@g.swu.ac.th", "เจ้าของ")
-    joiner, solo = sign_in(arena, "sub-2", "b@g.swu.ac.th", "ผู้เข้าร่วม")
-    arena.join_team(user=joiner, invite_code=host.invite_code, course_id=COURSE)
-
-    client = TestClient(create_app(arena))
-    res = client.post(
-        "/api/teams/rotate-token", headers={"Authorization": f"Bearer {solo.token}"}
-    )
-    assert res.status_code == 401
 
 
 # ── ตัวตนจาก Google ─────────────────────────────────────────────────
@@ -281,39 +295,65 @@ def test_me_and_join_over_http(arena):
     _o, host = sign_in(arena, "sub-1", "a@g.swu.ac.th", "เจ้าของ")
     joiner, solo = sign_in(arena, "sub-2", "b@g.swu.ac.th", "ผู้เข้าร่วม")
     client = TestClient(create_app(arena))
+    joiner_auth = {"Authorization": f"Bearer {joiner.token}"}
 
-    me = client.get("/api/me", headers={"Authorization": f"Bearer {solo.token}"}).json()
-    assert me["team"]["is_solo"] is True
-    assert me["team"]["members"] == [{"name": "ผู้เข้าร่วม", "email": "b@g.swu.ac.th"}]
-    assert me["team"]["invite_code"] == solo.invite_code
+    me = client.get("/api/me", headers=joiner_auth).json()
+    assert len(me["enrollments"]) == 1, "อยู่วิชาเดียว"
+    mine = me["enrollments"][0]["team"]
+    assert mine["is_solo"] is True
+    assert mine["members"] == [{"name": "ผู้เข้าร่วม", "email": "b@g.swu.ac.th"}]
+    assert mine["invite_code"] == solo.invite_code
 
     res = client.post(
         "/api/teams/join",
-        headers={"Authorization": f"Bearer {solo.token}"},
-        data={"invite_code": host.invite_code},
+        headers=joiner_auth,
+        data={"course_id": COURSE, "invite_code": host.invite_code},
     )
     assert res.status_code == 200, res.text
-    assert res.json()["token"] == host.token
+    assert "token" not in res.json(), "โทเคนเป็นของคน ไม่เปลี่ยนเมื่อย้ายทีม"
 
-    after = client.get("/api/me", headers={"Authorization": f"Bearer {host.token}"}).json()
-    assert len(after["team"]["members"]) == 2
-    assert after["team"]["is_solo"] is False
+    after = client.get("/api/me", headers=joiner_auth).json()["enrollments"][0]["team"]
+    assert len(after["members"]) == 2
+    assert after["is_solo"] is False
+    assert after["id"] == host.id, "ย้ายเข้าทีมเจ้าของแล้ว"
 
 
-def test_token_of_a_dissolved_team_stops_working(arena):
-    """ยุบทีมแล้วโทเคนต้องใช้ไม่ได้ทันที
+def test_a_person_can_be_in_two_courses_with_one_token(arena):
+    """**เหตุผลทั้งหมดของการย้ายโทเคนมาที่คน**
 
-    ถ้ายังใช้ได้ การยุบก็แค่ซ่อนทีมจากกระดาน แต่ยังส่งงานในนามนั้นได้อยู่ —
-    เท่ากับไม่ได้ปิดอะไรเลย · นี่คือกลไกที่ใช้ปลดระวางทีม demo ที่โทเคนเดาได้
+    นิสิตที่เรียนทั้ง AI และ ML มีทีมคนละทีม แต่ตั้ง `ARENA_TOKEN` ครั้งเดียว
+    """
+    from core.domain import Course
+
+    other = arena.store.save_course(Course(id="ml-1-2026", name="Machine Learning 1/2026"))
+    user, _team = sign_in(arena, "sub-1", "a@g.swu.ac.th", "นิสิต")
+    arena.enroll(user=user, join_code=other.join_code)
+
+    client = TestClient(create_app(arena))
+    me = client.get("/api/me", headers={"Authorization": f"Bearer {user.token}"}).json()
+    assert {e["course"]["id"] for e in me["enrollments"]} == {COURSE, other.id}
+    assert len({e["team"]["id"] for e in me["enrollments"]}) == 2, "คนละทีมกัน"
+
+
+def test_a_dissolved_team_stops_being_yours(arena):
+    """ยุบทีมแล้วต้องทำอะไรในวิชานั้นไม่ได้อีก
+
+    **ความหมายเปลี่ยนไปจากตอนโทเคนเป็นของทีม** — เดิมการยุบฆ่าโทเคนทิ้ง
+    ตอนนี้โทเคนเป็นของคน คนยังอยู่และยังล็อกอินได้ สิ่งที่หายไปคือ*ทีมในวิชานั้น*
+    ผลที่ต้องการเหมือนเดิม: ไม่ขึ้นกระดาน และส่งงานในนามทีมนั้นไม่ได้อีก
     """
     _o, host = sign_in(arena, "sub-1", "a@g.swu.ac.th", "เจ้าของ")
     joiner, solo = sign_in(arena, "sub-2", "b@g.swu.ac.th", "ผู้เข้าร่วม")
     client = TestClient(create_app(arena))
-
-    ok = client.get("/api/me", headers={"Authorization": f"Bearer {solo.token}"})
-    assert ok.status_code == 200
+    joiner_auth = {"Authorization": f"Bearer {joiner.token}"}
 
     arena.join_team(user=joiner, invite_code=host.invite_code, course_id=COURSE)
+    assert not solo.is_active, "ทีมเดี่ยวเดิมถูกยุบ"
 
-    dead = client.get("/api/me", headers={"Authorization": f"Bearer {solo.token}"})
-    assert dead.status_code == 401, "โทเคนของทีมที่ยุบแล้วต้องใช้ไม่ได้"
+    # คนยังอยู่และยังใช้โทเคนเดิมได้ — แต่ทีมที่โผล่คือทีมใหม่ ไม่ใช่ทีมที่ยุบไปแล้ว
+    me = client.get("/api/me", headers=joiner_auth).json()
+    assert me["enrollments"][0]["team"]["id"] == host.id
+    assert solo.id not in {e["team"]["id"] for e in me["enrollments"]}
+
+    # และทีมที่ยุบแล้วต้องไม่ใช่ทีมที่ระบบจะใช้ทำงานแทนเราอีก
+    assert arena.team_for(user=joiner, course_id=COURSE).id == host.id

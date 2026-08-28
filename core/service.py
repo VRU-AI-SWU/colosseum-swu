@@ -54,6 +54,10 @@ class InviteInvalid(Exception):
     """รหัสเชิญผิดหรือหมดอายุ — ข้อความต้องบอกให้ไปขอรหัสใหม่จากเพื่อน"""
 
 
+class NotEnrolled(Exception):
+    """คนนี้ยังไม่ได้เข้าวิชาที่กำลังจะทำงานด้วย — ข้อความต้องบอกวิธีเข้า"""
+
+
 class TeamFull(Exception):
     pass
 
@@ -96,27 +100,31 @@ class Arena:
     def is_staff(self, email: str) -> bool:
         return bool(email) and email.strip().lower() in self.staff_emails
 
-    def team_acts_as_staff(self, team: Team) -> bool:
-        """โทเคนนี้ใช้สิทธิ์ผู้สอนได้ไหม
+    def rotate_user_token(self, *, user: User) -> User:
+        """ออกโทเคนใหม่ให้คนคนเดียว
 
-        **ต้องเป็นผู้สอนทุกคนในทีม** ไม่ใช่แค่มีผู้สอนอยู่ในทีม — เพราะทั้งทีมใช้
-        โทเคนตัวเดียวกัน ถ้าผู้สอนไปอยู่ในทีมที่มีนิสิตด้วย นิสิตคนนั้นจะถือโทเคน
-        ที่มีสิทธิ์ผู้สอนอยู่ในมือ · ในทางปฏิบัติผู้สอนจะมีทีมเดี่ยวของตัวเองอยู่แล้ว
+        ยืนยันด้วยโทเคน*เดิม* ซึ่งฟังดูย้อนแย้งแต่ถูกต้อง: คนที่ยังถือโทเคนอยู่คือ
+        เจ้าของโดยนิยาม และถ้ามีคนอื่นถือด้วยก็ยิ่งต้องรีบเปลี่ยน
+
+        ต่างจากตอนโทเคนเป็นของทีม — ตอนนั้นเปลี่ยนทีเดียวกระทบทุกคนในทีม
+        ทั้งที่หลุดคนเดียว เพื่อนต้องมาตั้งค่าใหม่โดยไม่ได้ทำอะไรผิด
         """
-        members = [self.store.users.get(uid) for uid in team.member_ids]
-        return bool(members) and all(
-            u is not None and self.is_staff(u.email) for u in members
-        )
+        user.token = new_token()
+        self.store.save_user(user)
+        self.store.record("user.token_rotated", "user", user.id, actor_id=user.id)
+        return user
 
     # ── ตัวตนและทีม ─────────────────────────────────────────────────
 
-    def sign_in(self, *, google_sub: str, email: str, name: str, course_id: str) -> tuple:
-        """ล็อกอินสำเร็จแล้วต้องมีทีมเสมอ — คืน `(user, team)`
+    def sign_in(self, *, google_sub: str, email: str, name: str) -> User:
+        """ล็อกอิน — คืน `User` เท่านั้น ไม่ผูกกับวิชา
 
-        **สร้างทีมเดี่ยวให้อัตโนมัติตั้งแต่ครั้งแรก** ไม่มีหน้าจอ "กรุณาเลือกทีม" ให้ติด
-        เพราะนิสิตที่หากลุ่มไม่ได้มักลงเอยด้วยการทำคนเดียวอยู่แล้ว — สถานะนั้นต้องเป็น
-        เรื่องปกติที่ใช้งานได้ทันที ไม่ใช่ข้อผิดพลาดที่ต้องแก้ก่อนถึงจะเริ่มได้
-        ส่วนคนที่จับกลุ่มได้ค่อยกดเข้าทีมเพื่อนทีหลัง
+        **เดิมรับ `course_id` แล้วสร้างทีมให้ทันที** ซึ่งใช้ได้ตอนมีวิชาเดียวเพราะ
+        เดาถูกเสมอ · พอมีหลายวิชา การเดาจะพาคนไปอยู่ผิดวิชาโดยไม่มีใครรู้
+        จึงแยกเป็นสองขั้น: ล็อกอินรู้ว่าเป็นใคร แล้วค่อย `enroll()` ด้วยรหัสเข้าวิชา
+
+        ผลข้างเคียงที่ตั้งใจ: คนที่ล็อกอินแล้วยังไม่ได้ใส่รหัส จะยังไม่มีทีมและ
+        ไม่โผล่ที่ไหนเลย ซึ่งถูกต้อง — คนนอกวิชาที่หลุดเข้ามาไม่ควรมีตัวตนในระบบ
         """
         user = self.store.user_by_google_sub(google_sub)
         if user is None:
@@ -128,14 +136,49 @@ class Arena:
             user.email, user.name = email, name
             self.store.save_user(user)
 
+        return user
+
+    def enroll(self, *, user: User, join_code: str) -> Team:
+        """เข้าวิชาด้วยรหัสที่ผู้สอนแจกในคาบ — ได้ทีมเดี่ยวทันที
+
+        **สร้างทีมเดี่ยวให้ตั้งแต่แรก** ไม่มีหน้าจอ "กรุณาเลือกทีม" ให้ติด เพราะนิสิต
+        ที่หากลุ่มไม่ได้มักลงเอยด้วยการทำคนเดียวอยู่แล้ว — สถานะนั้นต้องเป็นเรื่องปกติ
+        ที่ใช้งานได้ทันที ไม่ใช่ข้อผิดพลาดที่ต้องแก้ก่อนถึงจะเริ่มได้
+        ส่วนคนที่จับกลุ่มได้ค่อยกดเข้าทีมเพื่อนทีหลัง
+        """
+        course = self.store.course_by_join_code(join_code)
+        if course is None:
+            raise InviteInvalid(
+                "ไม่พบวิชาจากรหัสนี้ — ตรวจตัวอักษรอีกครั้ง หรือขอรหัสจากผู้สอน"
+            )
+
+        existing = self.store.team_of(user.id, course.id)
+        if existing is not None:
+            return existing  # อยู่ในวิชานี้อยู่แล้ว — ไม่ใช่ข้อผิดพลาด
+
+        team = Team(
+            id=new_id(), course_id=course.id, name=user.name, member_ids=[user.id]
+        )
+        self.store.save_team(team)
+        self.store.record(
+            "team.created", "team", team.id, actor_id=user.id, solo=True, course=course.id
+        )
+        return team
+
+    def team_for(self, *, user: User, course_id: str) -> Team:
+        """ทีมของคนนี้ในวิชานั้น — ใช้แปลง "โทเคนของคน" เป็น "ทีมที่กำลังทำงานแทน"
+
+        โยนเมื่อยังไม่ได้เข้าวิชา แทนที่จะสร้างทีมให้เงียบๆ — การสร้างทีมโดยไม่มีใคร
+        ขอ แปลว่าคนที่พิมพ์ slug ผิดจะได้ทีมในวิชาที่ไม่ได้เรียนโดยไม่รู้ตัว
+        """
         team = self.store.team_of(user.id, course_id)
         if team is None:
-            team = Team(
-                id=new_id(), course_id=course_id, name=name, member_ids=[user.id]
+            course = self.store.courses.get(course_id)
+            raise NotEnrolled(
+                f"ยังไม่ได้เข้าวิชา {course.name if course else course_id} — "
+                "ใส่รหัสเข้าวิชาที่หน้าเว็บก่อน (ขอรหัสจากผู้สอน)"
             )
-            self.store.save_team(team)
-            self.store.record("team.created", "team", team.id, actor_id=user.id, solo=True)
-        return user, team
+        return team
 
     def set_alias(self, *, team: Team, raw: str | None, actor_id: str | None) -> Team:
         """ทีมตั้งชื่อที่จะแสดงบนกระดานเอง — README §6.1 "ลดแรงกดดันของทีมท้ายตาราง"

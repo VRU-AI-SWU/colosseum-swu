@@ -144,19 +144,27 @@ class Store:
     def competition_by_slug(self, slug: str) -> Competition | None:
         return next((c for c in self.competitions.values() if c.slug == slug), None)
 
-    def team_by_token(self, token: str) -> Team | None:
-        """หาทีมจาก `Authorization: Bearer <token>`
+    def user_by_token(self, token: str) -> User | None:
+        """โทเคนบอกว่าเป็น**ใคร** ไม่ใช่ว่าอยู่ทีมไหน
 
-        เดิมเป็น `self.teams.get(token)` เพราะ id กับ token เป็นตัวเดียวกัน — id ที่
-        เดาได้จึงกลายเป็นรหัสผ่านที่เดาได้ · ตอนนี้แยกกันแล้ว
-
-        **ทีมที่ยุบแล้วใช้โทเคนไม่ได้** — ไม่งั้นการยุบทีมจะซ่อนมันจากกระดานเฉยๆ
-        แต่ยังส่งงานในนามทีมนั้นได้อยู่ ซึ่งทำให้การยุบไม่ได้ปิดอะไรเลย
+        ทีมที่จะใช้ทำงานหาจากคนคนนี้ + วิชาของ competition ที่กำลังยุ่งด้วย
+        (`team_of`) · ผลคือนิสิตที่เรียนหลายวิชาใช้โทเคนอันเดียวได้ทุกวิชา
         """
         if not token:
             return None
+        return next((u for u in self.users.values() if u.token == token), None)
+
+    def course_by_join_code(self, code: str) -> Course | None:
+        want = (code or "").strip().upper()
         return next(
-            (t for t in self.teams.values() if t.token == token and t.is_active), None
+            (c for c in self.courses.values() if c.is_open and c.join_code.upper() == want), None
+        ) if want else None
+
+    def courses_of(self, user_id: str) -> list[str]:
+        """วิชาที่คนนี้อยู่ — เรียงตามชื่อวิชาให้หน้าเว็บแสดงได้คงที่"""
+        return sorted(
+            {t.course_id for t in self.teams.values() if t.is_active and user_id in t.member_ids},
+            key=lambda cid: self.courses[cid].name if cid in self.courses else cid,
         )
 
     def user_by_google_sub(self, sub: str) -> User | None:

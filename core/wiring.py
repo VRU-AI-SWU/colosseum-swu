@@ -12,7 +12,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from core.domain import Competition, Phase, Team, new_id
+from core.domain import Competition, Phase, Team, User, new_id
 from core.leaderboard import BaselineMark
 from core.service import Arena, build_arena
 from vacuum import config_path as vacuum_config_path
@@ -117,7 +117,8 @@ def demo_arena(
 ) -> tuple[Arena, list[Team]]:
     """Arena ที่พร้อมใช้สำหรับ dev และเทสต์ — มี CP463 Competition 1 ลงทะเบียนไว้แล้ว
 
-    โทเคนของทีมคือ `team-1`, `team-2`, ... (ของชั่วคราวจนกว่าจะมี OAuth)
+    โทเคนของ**คน**คือ `team-1`, `team-2`, ... (ชื่อเดิมไว้เพื่อไม่ให้เทสต์เดิมพัง)
+    แต่ละคนมีทีมเดี่ยวของตัวเองในวิชา `cp463-1-2026`
 
     **idempotent** — เรียกซ้ำบนฐานข้อมูลเดิมจะใช้ competition กับทีมชุดเดิม ไม่สร้างใหม่
     ถ้าสร้างใหม่ทุกครั้ง submission ที่ส่งไปก่อนรีสตาร์ทจะชี้ไป competition id ที่ไม่มีใครใช้
@@ -158,14 +159,25 @@ def demo_arena(
 
     created = []
     for i in range(1, teams + 1):
+        # ⚠️ **โทเคนที่เดาได้ — dev กับเทสต์เท่านั้น**
+        # ของจริงได้โทเคนสุ่มจาก `new_token()` เสมอ ตรงนี้ตั้งค่าตายตัวเพื่อให้เทสต์
+        # และการลองใช้ในเครื่องไม่ต้องไปอ่านค่าสุ่มมาก่อนทุกครั้ง
+        #
+        # ต้องสร้าง **User** ด้วย ไม่ใช่แค่ Team — โทเคนย้ายมาอยู่ที่คนแล้ว
+        # ทีมที่ไม่มีคนอยู่จะยืนยันตัวตนไม่ได้เลย
+        user = User(
+            id=f"user-{i}",
+            email=f"user{i}@example.invalid",
+            name=f"นิสิตที่ {i}",
+            google_sub=f"demo-sub-{i}",
+            token=f"team-{i}",
+        )
+        arena.store.save_user(user)
         team = Team(
             id=f"team-{i}",
             course_id=competition.course_id,
             name=f"ทีมที่ {i}",
-            member_ids=[f"user-{i}"],
-            # ⚠️ **โทเคนที่เดาได้ — dev กับเทสต์เท่านั้น**
-            # ทีมจริงได้โทเคนสุ่มจาก `new_token()` เสมอ ตรงนี้ตั้งค่าตายตัวเพื่อให้
-            # เทสต์และการลองใช้ในเครื่องไม่ต้องไปอ่านค่าสุ่มมาก่อนทุกครั้ง
+            member_ids=[user.id],
             token=f"team-{i}",
         )
         arena.store.save_team(team)

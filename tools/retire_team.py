@@ -8,7 +8,9 @@
 
 ผลของการยุบ — ทั้งสองข้อมีเทสต์คุมอยู่
   · หายจาก leaderboard   `core/leaderboard.py` กรอง `is_active`
-  · โทเคนใช้ไม่ได้ทันที   `core/store.py` `team_by_token` กรอง `is_active`
+  · ทำงานในวิชานั้นต่อไม่ได้ `core/store.py` `team_of` กรอง `is_active` แล้ว
+    `Arena.team_for` จึงโยน `NotEnrolled` — **ไม่ใช่การฆ่าโทเคนอีกแล้ว**
+    เพราะโทเคนเป็นของคน ไม่ใช่ของทีม · คนยังล็อกอินได้ แต่ไม่มีทีมในวิชานั้น
   · ข้อมูลเดิมยังอยู่ครบในฐานข้อมูล
 
 เปิดไฟล์ผ่าน `core.db.Database` ไม่ใช่ `sqlite3` ตรงๆ เพื่อให้ migration ทำงาน
