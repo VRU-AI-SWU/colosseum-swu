@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cp462-tabular"
+description = "CP462 · โจทย์ทำนายผลบนข้อมูลตาราง (classification + regression)"
+readme = "README.md"
+requires-python = ">=3.11"
+
+# ⚠️ **เลขนี้ไม่ใช่ `env_version`** และไม่ต้องตรงกัน — เหตุผลเดียวกับ cp463-vacuum
+#   version (ตรงนี้)  เลขของ *แพ็กเกจ* — ขยับได้ทุกครั้งที่แก้เอกสารหรือ CLI
+#   env_version       เลขของ *สัญญาการให้คะแนน* อยู่ใน tabular/__init__.py
+version = "0.1.0"
+
+# **สิ่งที่รับประกันว่าข้อมูลตรงกันคือ `tabular.selfcheck` ไม่ใช่เลขเวอร์ชันตรงนี้**
+#
+# ตัวสร้างข้อมูลใช้ `numpy.random.Generator(PCG64)` ซึ่งไม่การันตี stream ข้ามเวอร์ชัน
+# แต่การตรึงเวอร์ชันก็ไม่ได้รับประกันอะไรเช่นกัน — numpy เปลี่ยน stream ภายใน minor ได้
+# ตัวที่จับได้จริงคือ selfcheck ซึ่งเทียบ hash ของข้อมูลกับค่า golden ที่บันทึกไว้
+dependencies = [
+    "numpy>=2.1,<3",
+    "pandas>=2.2,<3",
+    "scikit-learn>=1.5,<2",
+    "pyyaml==6.*",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["tabular"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
