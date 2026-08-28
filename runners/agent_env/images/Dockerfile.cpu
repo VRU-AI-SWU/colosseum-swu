@@ -27,6 +27,7 @@ COPY runners/agent_env/__init__.py runners/agent_env/__init__.py
 COPY runners/agent_env/agent_host.py runners/agent_env/agent_host.py
 COPY runners/agent_env/messages.py runners/agent_env/messages.py
 COPY runners/sandbox/__init__.py runners/sandbox/__init__.py
+COPY runners/sandbox/host.py runners/sandbox/host.py
 COPY runners/sandbox/protocol.py runners/sandbox/protocol.py
 
 # ── environment ของโจทย์ (นิสิตต้อง import ได้เพื่อใช้ helper ของ starter kit) ──

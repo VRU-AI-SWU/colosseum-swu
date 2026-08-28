@@ -21,7 +21,7 @@ version = "0.1.0"
 dependencies = [
     "numpy>=2.1,<3",
     "pandas>=2.2,<3",
-    "scikit-learn>=1.5,<2",
+    "scikit-learn==1.9.*",  # ตรึงถึง minor — ดู test_the_prediction_image_pins_the_same_sklearn_as_the_env_package
     "pyyaml==6.*",
 ]
 

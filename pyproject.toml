@@ -18,11 +18,21 @@ dependencies = [
 # API server — ไม่จำเป็นสำหรับ runner on-prem หรือ CLI ของนิสิต
 api = ["fastapi>=0.115", "uvicorn[standard]>=0.30", "python-multipart>=0.0.9"]
 cli = ["httpx>=0.27"]
-dev = ["pytest>=8", "fastapi>=0.115", "httpx>=0.27", "python-multipart>=0.0.9", "uvicorn>=0.30"]
+# runner ของโจทย์ทำนาย (`runners/prediction/`) ต้องประกอบ DataFrame กลับจาก pipe ได้
+# **แค่ pandas เท่านั้น** — sklearn เป็นของ `envs/cp462-tabular` ไม่ใช่ของแพลตฟอร์ม
+#
+# ขอบเขตต้องตรงกับ `envs/cp462-tabular/pyproject.toml` เป๊ะ: pandas 3 เปลี่ยนชนิด
+# ปริยายของคอลัมน์ข้อความจาก `object` เป็น `str` (PDEP-14) งานของ codec คือส่งตาราง
+# ให้ถึงกล่องโดยชนิดตรงกับที่ pipeline ของนิสิตถูก fit ไว้ — ทดสอบบน pandas คนละ
+# major กับของจริงคือการทดสอบสิ่งที่ไม่ได้ใช้
+prediction = ["pandas>=2.2,<3"]
+dev = ["pytest>=8", "fastapi>=0.115", "httpx>=0.27", "python-multipart>=0.0.9",
+       "uvicorn>=0.30", "pandas>=2.2,<3"]
 
 [project.scripts]
 arena = "core.cli:main"
 arena-agent-host = "runners.agent_env.agent_host:main"
+arena-predictor-host = "runners.prediction.predictor_host:main"
 
 [build-system]
 requires = ["hatchling"]

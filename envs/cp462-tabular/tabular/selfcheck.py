@@ -42,6 +42,32 @@ def check_versions() -> bool:
     return True
 
 
+def check_pickle_runtime(golden: dict) -> bool:
+    """**ข้อที่ตัดสินว่า `pipeline.pkl` ของคุณโหลดได้บน colosseum หรือไม่**
+
+    ต่างจาก `check_versions` ข้างบนที่รายงานเฉยๆ — ข้อนี้ตัดสิน เพราะสิ่งที่คุณส่ง
+    ไม่ใช่ซอร์สโค้ดแต่เป็น **โมเดลที่ fit แล้ว** · pickle ที่สร้างด้วย scikit-learn
+    คนละ minor กับตัวที่อยู่ใน container จะโหลดแล้วเตือน (`InconsistentVersionWarning`)
+    ในกรณีที่ดี และล้มด้วย `AttributeError` ที่หาสาเหตุยากในกรณีที่แย่
+    """
+    want = golden.get("pickle_runtime") or {}
+    if not want:
+        return True
+
+    import sklearn
+
+    got = ".".join(sklearn.__version__.split(".")[:2])
+    expected = want["scikit-learn"]
+    if got != expected:
+        _line(False, "scikit-learn ที่ใช้สร้าง pipeline.pkl",
+              f"เครื่องนี้ {sklearn.__version__} · colosseum ใช้ {expected}.x — "
+              f"pickle ข้าม minor โหลดไม่ได้")
+        return False
+    _line(True, "scikit-learn ที่ใช้สร้าง pipeline.pkl",
+          f"{sklearn.__version__} · ตรงกับที่ colosseum ใช้โหลดโมเดลของคุณ")
+    return True
+
+
 def check_data(golden: dict) -> bool:
     """ข้อมูลที่เครื่องนี้สร้างได้ ต้องเหมือนของ grader ทุกบิต"""
     from tabular.config import load
@@ -150,16 +176,28 @@ def main() -> int:
         _line(None, "env_version",
               f"โค้ด {__version__} · golden {golden['env_version']} — คนละรุ่นกัน")
 
-    results = [check_versions(), check_data(golden), check_scores(golden)]
+    results = [
+        check_versions(),
+        check_pickle_runtime(golden),
+        check_data(golden),
+        check_scores(golden),
+    ]
 
     if all(results):
         print(f"\n{GREEN}✓ ผ่านครบทุกข้อ{OFF} — คะแนนที่คุณวัดเองเทียบกับ leaderboard ได้ตรงๆ")
         return 0
 
+    sklearn_pin = (golden.get("pickle_runtime") or {}).get("scikit-learn")
+    sklearn_hint = (
+        f"  ถ้าข้อที่ไม่ผ่านคือ scikit-learn: pip install 'scikit-learn=={sklearn_pin}.*'\n\n"
+        if sklearn_pin
+        else ""
+    )
     print(
         f"\n{RED}✗ ไม่ผ่าน{OFF} — **อย่าเพิ่งเริ่มเขียน** ไม่งั้นคุณจะจูนบนสิ่งที่ไม่ตรงกับตอนวัดจริง\n\n"
         "  สาเหตุที่พบบ่อยที่สุดคือเวอร์ชันของ numpy/pandas/scikit-learn ต่างจากที่ทดสอบไว้\n"
         "  ลองติดตั้งใหม่ด้วย pip install --force-reinstall ตามคำสั่งจากหน้า release\n\n"
+        f"{sklearn_hint}"
         f"  {DIM}ถ้ายังไม่ผ่าน แจ้งผู้สอนพร้อมผลของคำสั่งนี้ทั้งหมด — อย่าแก้ golden.json เอง{OFF}",
         file=sys.stderr,
     )

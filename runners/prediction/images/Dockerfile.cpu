@@ -1,0 +1,73 @@
+# base image ของ container โจทย์ทำนาย — `arena/tabular:cpu`
+#
+# หลักการเดียวกับ image ของโจทย์ RL: **ทุกอย่างที่นิสิตต้องใช้ต้องอยู่ในนี้ตั้งแต่ build เสร็จ**
+# เพราะตอนรันไม่มีเน็ต (`--network none`) จะ `pip install` อะไรเพิ่มไม่ได้เลย
+# ซึ่งเป็นเจตนา ไม่ใช่ข้อจำกัด — package whitelist จึงบังคับตัวเองโดยโครงสร้าง
+#
+#   docker build -f runners/prediction/images/Dockerfile.cpu -t arena/tabular:cpu .
+#
+# ⚠️ ต้อง build จาก root ของ repo
+#
+# **สิ่งที่ต่างจาก image ของ CP463 อย่างมีนัยสำคัญ**
+#
+# 1. `tabular` ไม่ได้อยู่ในนี้ และต้องไม่อยู่ตลอดไป — มันเห็นเฉลยของชุดที่ใช้ตัดสิน
+#    (`tabular.dataset.grading_data`) นิสิตใช้มันบนเครื่องตัวเองตอนเทรน แต่ `predictor.py`
+#    ที่รันในกล่องต้องไม่พึ่งมันเลย · `test_docker_sandbox.py` ตรวจข้อนี้ให้
+#
+# 2. **เวอร์ชันของ scikit-learn ตรึงถึงระดับ minor** ต่างจาก CP463 ที่หลวมกว่าได้
+#    เพราะที่นี่นิสิตส่ง **pickle ที่ fit แล้ว** เข้ามา ไม่ใช่ซอร์สโค้ด · pickle ที่สร้าง
+#    ด้วย sklearn คนละ minor โหลดแล้วได้ `InconsistentVersionWarning` ในกรณีที่ดี
+#    และ `AttributeError` ที่อ่านไม่รู้เรื่องในกรณีที่แย่ · เวอร์ชันตรงนี้ต้องตรงกับ
+#    `envs/cp462-tabular/pyproject.toml` และกับค่าใน `golden.json` เสมอ
+
+FROM python:3.11-slim-bookworm
+
+# ── ผู้ใช้ที่ไม่ใช่ root ──────────────────────────────────────────────
+# uid/gid ตายตัวเพื่อให้ตั้งสิทธิ์ของ volume ที่ mount เข้ามาได้ตรงกันทุกเครื่อง
+RUN groupadd --gid 10001 arena \
+ && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin arena
+
+WORKDIR /opt/arena
+
+# ── โค้ดแพลตฟอร์มส่วนที่เข้า container ได้ ────────────────────────────
+# มีแค่ predictor_host · ตัวแปลงตาราง · ชื่อข้อความ · โปรโตคอล
+# **ไม่มี runner.py** ซึ่งเป็นตัวที่ถือเฉลย และ **ไม่มี launcher.py** ซึ่งรู้วิธีสั่ง docker
+# (`test_image_contents.py` ตรวจรายการนี้ให้ — อย่าเพิ่ม COPY โดยไม่ดูที่นั่นด้วย)
+COPY runners/__init__.py runners/__init__.py
+COPY runners/prediction/__init__.py runners/prediction/__init__.py
+COPY runners/prediction/predictor_host.py runners/prediction/predictor_host.py
+COPY runners/prediction/frame.py runners/prediction/frame.py
+COPY runners/prediction/messages.py runners/prediction/messages.py
+COPY runners/sandbox/__init__.py runners/sandbox/__init__.py
+COPY runners/sandbox/host.py runners/sandbox/host.py
+COPY runners/sandbox/protocol.py runners/sandbox/protocol.py
+
+# ── ไลบรารีที่นิสิตใช้ได้ ─────────────────────────────────────────────
+# รายการนี้คือ **การตัดสินใจเชิงหลักสูตร ไม่ใช่ข้อจำกัดทางเทคนิค** — CP462 เป็นวิชาที่
+# สอนสร้างโมเดลด้วย scikit-learn การเพิ่ม xgboost/lightgbm ทำได้ แต่ต้องเป็นการตัดสินใจ
+# ของผู้สอนว่าอยากให้แข่งกันด้วยอะไร ไม่ใช่เพิ่มเพราะมีคนขอ
+RUN pip install --no-cache-dir \
+        "msgpack==1.1.*" \
+        "numpy==2.1.*" \
+        "pandas==2.3.*" \
+        "scikit-learn==1.9.*" \
+        "joblib==1.5.*" \
+ && find /opt/arena -name "__pycache__" -type d -prune -exec rm -rf {} + \
+ && chmod -R a-w /opt/arena
+
+# `*_NUM_THREADS=1` — BLAS ที่แตก thread เองทำให้ผลต่างกันระหว่างรัน และแย่งซีพียู
+# กับงานอื่นในคิว · ตัวตรวจ determinism จะจับได้ แต่จับเป็น "นิสิตทำผิด"
+# ทั้งที่เป็นความผิดของเรา
+ENV PYTHONPATH=/opt/arena \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    ARENA_SUBMISSION=/submission \
+    HOME=/tmp \
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1
+
+USER arena:arena
+
+# submission ถูก mount เข้ามาที่ /submission แบบ read-only ตอนรัน
+ENTRYPOINT ["python", "-m", "runners.prediction.predictor_host"]

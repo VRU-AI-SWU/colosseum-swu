@@ -9,20 +9,39 @@
     "วัดด้วย numpy 2.x / pandas 2.x / scikit-learn 1.9 บน macOS arm64"
   ],
   "env_version": "1.0.0",
+  "pickle_runtime": {
+    "scikit-learn": "1.9"
+  },
   "tasks": {
     "churn": {
+      "baselines": {
+        "strong": 0.645096,
+        "trivial": 0.427481
+      },
       "config_hash": "sha256:be36b02667eb2cefbf5d148e337db2aca07d35e4d57e680ba8e0eed8fd611de3",
+      "sizes": {
+        "test_private": 1800,
+        "test_public": 1200,
+        "train": 7200,
+        "val": 1800
+      },
       "train": "sha256:c0d3cd037ebc6963",
-      "val": "sha256:6f4bd80412e749a5",
-      "sizes": {"train": 7200, "val": 1800, "test_public": 1200, "test_private": 1800},
-      "baselines": {"trivial": 0.427481, "strong": 0.645096}
+      "val": "sha256:6f4bd80412e749a5"
     },
     "housing": {
+      "baselines": {
+        "strong": 0.795541,
+        "trivial": -0.00087
+      },
       "config_hash": "sha256:71eabd98eb0e17525c892c9f2a2a6d7c31c07d05ca82da9dfcd82023ebeac0eb",
+      "sizes": {
+        "test_private": 1800,
+        "test_public": 1200,
+        "train": 7200,
+        "val": 1800
+      },
       "train": "sha256:5c4abad9c38cc6b9",
-      "val": "sha256:ca73c74a518ce0bf",
-      "sizes": {"train": 7200, "val": 1800, "test_public": 1200, "test_private": 1800},
-      "baselines": {"trivial": -0.00087, "strong": 0.795541}
+      "val": "sha256:ca73c74a518ce0bf"
     }
   }
 }
