@@ -10,7 +10,26 @@ Template สำหรับโจทย์ประเภททำนายผ�
 | **`classical-ml`** | scikit-learn model (pickle) + preprocessing script | CPU lane | วิชา ML พื้นฐาน — tabular data, feature engineering |
 | **`deep-learning`** | PyTorch `state_dict` (.pt) + model/dataset script | GPU lane (RTX 3090) | วิชา DL — image, text, signal |
 
-**ขอบเขตตอนนี้: supervised learning เท่านั้น** (classification เป็นหลัก) — unsupervised / self-supervised / generative ยังไม่รองรับ
+**ขอบเขตตอนนี้: supervised learning เท่านั้น** — unsupervised / self-supervised / generative ยังไม่รองรับ
+
+> 🔻 **แก้ไข 28 ส.ค. 2026 — contract ของ `classical-ml` เปลี่ยน**
+>
+> §2.1 กับ §3.1 เดิมให้ส่ง `preprocess.py` + `model.pkl` แล้ว**ระบบ fit preprocessor ใหม่**
+> ฝั่งเซิร์ฟเวอร์ เหตุผลคือกัน data leakage · เหตุผลนั้นใช้ไม่ได้กับวิธีที่ CP462 จะใช้จริง
+>
+> นิสิต**ไม่มี unseen test set ตอนเทรนอยู่แล้ว** — ผู้สอนแจก dataset พร้อม seed สำหรับ
+> แบ่ง train/val/test ส่วนชุดที่ใช้ตัดสินเก็บไว้ในระบบ · การ leak ระหว่าง train/val
+> ของนิสิตเองจึงไม่ได้โกงแพลตฟอร์ม แต่**ทำร้ายตัวเขาเองบน unseen set**
+> ซึ่งเป็นบทเรียนที่ตรงกับที่วิชาอยากสอนพอดี
+>
+> การ refit ฝั่งเซิร์ฟเวอร์แลกมาด้วยจุดพังที่ไม่จำเป็น — feature ที่ refit ได้ต้องตรงกับ
+> ตอนนิสิตเทรนเป๊ะ ไม่งั้นโมเดลพังเงียบๆ โดยที่ข้อความผิดพลาดไม่ได้ชี้ไปที่สาเหตุ
+>
+> **contract ใหม่: ส่ง `sklearn.pipeline.Pipeline` ที่ fit แล้วมาไฟล์เดียว**
+> ระบบเรียก `.predict(X_unseen)` เท่านั้น · ดู §2.1 และ §3.1 ที่เขียนใหม่แล้ว
+>
+> ผลพลอยได้: รองรับ **regression** ด้วยโค้ดชุดเดียวกัน (เดิมบังคับ `predict_proba`
+> ซึ่งใช้กับ regression ไม่ได้เลย) และนิสิตได้ฝึก `Pipeline` ซึ่งเป็นทักษะที่ควรมี
 
 ---
 
@@ -160,13 +179,17 @@ private set จะทำงานได้ต่อเมื่อ **ทุก�
 
 ```
 submission.zip
-├── model.pkl           # scikit-learn estimator (fitted) — joblib หรือ pickle
-├── preprocess.py       # feature engineering (ดู §3.1)
+├── pipeline.pkl        # sklearn.pipeline.Pipeline ที่ fit แล้ว (joblib)
+├── predictor.py        # โหลด pipeline แล้วเสิร์ฟ .predict() — ดู §3.1
 ├── requirements.txt    # optional — จำกัดตาม whitelist
 └── SOURCES.md          # อ้างอิงที่มาของไอเดีย/โค้ด (บังคับตอนส่ง final)
 ```
 
 ขนาดปกติ < 10 MB → เก็บถาวรได้ทุก submission ไม่เป็นภาระ server
+
+**ทุกอย่างที่แปลงข้อมูลต้องอยู่ใน `Pipeline`** — ไม่ใช่โค้ดที่รันก่อนหน้าแยกต่างหาก
+เพราะระบบส่ง `X_unseen` ดิบเข้าไปตรงๆ · ขั้นตอนที่นิสิตทำนอก pipeline ตอนเทรน
+จะไม่มีใครทำให้ตอนทำนาย แล้วโมเดลจะเห็นข้อมูลคนละรูปแบบกับที่เคยเห็น
 
 ### 2.2 Variant `deep-learning`
 
@@ -191,47 +214,53 @@ submission.zip
 
 ## 3. Contract ของโค้ดนิสิต
 
-### 3.1 `classical-ml` — `preprocess.py`
+### 3.1 `classical-ml` — `predictor.py`
 
 ```python
-import pandas as pd
+# predictor.py
+import joblib
 
-class Preprocessor:
-    """แปลง raw dataframe → feature matrix ที่ model.pkl รับได้"""
+class Predictor:
+    """สิ่งเดียวที่ระบบเรียก — โหลด pipeline ที่ fit แล้ว แล้วทำนาย"""
 
-    def fit(self, df: pd.DataFrame, y: pd.Series) -> "Preprocessor":
-        """เรียนรู้พารามิเตอร์ทั้งหมด (scaler, encoder, imputer, ...) จาก train เท่านั้น"""
-        ...
-        return self
+    def __init__(self, config: dict):
+        # ไฟล์อยู่ในโฟลเดอร์เดียวกับไฟล์นี้เสมอ ไม่ต้องเดา path
+        self.pipe = joblib.load("pipeline.pkl")
 
-    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
-        """ต้อง deterministic และต้องไม่เรียนรู้อะไรจาก df ที่รับเข้ามา"""
-        ...
+    def predict(self, X):
+        """`X` เป็น pandas DataFrame รูปแบบเดียวกับ dataset ที่ผู้สอนแจก
+
+        ต้องคืน array ยาวเท่าจำนวนแถวของ `X`
+          · classification → label ของแต่ละแถว
+          · regression     → ค่าตัวเลขของแต่ละแถว
+        """
+        return self.pipe.predict(X)
 ```
 
-ระบบจะเรียกตามลำดับนี้เป๊ะๆ:
+ระบบเรียกแค่นี้
 
 ```python
-p = Preprocessor().fit(train_df, train_y)     # fit บน train เท่านั้น
-X_test = p.transform(test_df)                  # แล้วค่อย transform test
-y_prob = model.predict_proba(X_test)
+p = Predictor(config)
+y_pred = p.predict(X_unseen)      # X_unseen เป็น DataFrame ดิบ ไม่ผ่านการแปลงใดๆ
 ```
 
-> **ทำไมต้องมี `fit` / `transform` แยกกัน**
-> ที่ร่างไว้เดิมคือ "script ที่ให้ output เป็น dataframe ของ train และ val แล้วระบบเอาไปใช้กับ test"
-> ถ้าเป็นฟังก์ชันเดียวที่รับ dataframe แล้วคืน dataframe จะเกิดปัญหาที่หลีกเลี่ยงไม่ได้ 2 อย่าง
-> 1. **Data leakage** — `StandardScaler().fit_transform(df)` หรือ imputer ที่ใช้ค่า mean ของ df จะไป fit บน test โดยไม่ตั้งใจ ทำให้คะแนนสูงเกินจริง
-> 2. **Column mismatch** — `pd.get_dummies(test_df)` จะได้คอลัมน์ไม่ตรงกับตอน train ถ้า test ไม่มีบางหมวดหมู่ → พังหรือได้ผลมั่ว
->
-> การบังคับ `fit(train)` แล้ว `transform(test)` แก้ทั้งสองข้อ และตรงกับสิ่งที่นิสิต**ควร**ทำอยู่แล้วในทางปฏิบัติ
-> ถ้าทีมไหนอยากส่ง preprocessor ที่ fit ไว้แล้วมาเลย ก็ทำได้ — pickle มันมาในไฟล์ แล้วให้ `fit()` เป็น no-op
+**ข้อกำหนด**
 
-**ข้อกำหนดเพิ่ม**
+- `X_unseen` มีคอลัมน์**เหมือน dataset ที่แจก** ยกเว้นคอลัมน์เป้าหมายที่ถูกตัดออก
+  · ลำดับคอลัมน์เหมือนกัน · dtype เหมือนกัน · **มีค่าว่างได้เหมือนกัน**
+- `predict` ต้อง **deterministic** — มีการสุ่มต้องตรึง seed ภายใน
+- ห้ามอ่านไฟล์นอกโฟลเดอร์ของตัวเอง ห้ามเรียก network (sandbox บังคับอยู่แล้ว)
+- คืนค่าไม่ครบทุกแถว หรือคืนชนิดที่แปลงเป็นตัวเลข/ label ไม่ได้ → submission ถูกปฏิเสธ
+  พร้อมบอกว่าคาดหวังกี่แถวได้มากี่แถว ไม่ใช่ traceback เปล่าๆ
 
-- `transform` ต้อง **deterministic** — ถ้ามีการสุ่ม ต้องตรึง seed ภายใน
-- คอลัมน์และ dtype ของ `transform(test_df)` ต้องตรงกับ `transform(train_df)` ทุกประการ ระบบตรวจอัตโนมัติ
-- ห้ามอ่านไฟล์นอก working directory ห้ามเรียก network
-- `model.pkl` ต้องมี `predict_proba` (หรือ `decision_function`) มิฉะนั้นคำนวณ ROC-AUC / PR curve ไม่ได้
+**ทำไมเป็น `Pipeline` ไม่ใช่ estimator เปล่า** — `X_unseen` เป็นข้อมูลดิบ ถ้าโมเดลรับ
+เฉพาะ feature ที่แปลงแล้ว มันจะพังทันที · การบังคับให้ทุกขั้นตอนอยู่ใน pipeline
+ทำให้ "สิ่งที่นิสิตเทรน" กับ "สิ่งที่ระบบเรียก" เป็นวัตถุเดียวกัน ไม่มีช่องให้เหลื่อม
+
+> เป็น interface เดียวกับ `Agent` ของ `agent_env` โดยตั้งใจ — คลาสเดียว เมธอดเดียว
+> ไฟล์เดียวที่ระบบ import · นิสิตที่เคยส่งโจทย์ RL มาแล้วจะคุ้นทันที
+
+---
 
 ### 3.2 `deep-learning` — `model.py` + `dataset.py`
 
@@ -285,15 +314,25 @@ y_prob = softmax(cat(logits))
 
 ## 4. การกัน Data Leakage
 
-นอกจากบังคับ `fit`/`transform` แล้ว ระบบตรวจอัตโนมัติเพิ่ม 3 ชั้น
+**contract ใหม่ (§3.1) ไม่ได้แปลว่าไม่ต้องตรวจ** — pipeline ที่ fit แล้วยังทำตัวผิดได้
+ถ้ามี transformer ที่คำนวณสถิติจาก batch ที่รับเข้ามาแทนที่จะใช้ค่าที่จำไว้ตอน fit
+(พบบ่อยใน transformer ที่นิสิตเขียนเอง) · การตรวจทั้งสามชั้นเลยยังอยู่ แค่ย้ายจาก
+`transform` ไปที่ `predict`
 
 | การตรวจ | วิธี | ถ้าไม่ผ่าน |
 |---|---|---|
-| **Subset consistency** | เรียก `transform` บน test ทั้งก้อน แล้วเรียกอีกครั้งบน subset สุ่ม 30% เทียบผลของแถวเดียวกัน — ถ้าต่างกัน แปลว่า transform ใช้สถิติของ batch ที่รับเข้ามา = fit บน test | ปฏิเสธ submission พร้อมบอกว่าคอลัมน์ไหนไม่ตรง |
-| **Row permutation invariance** | สลับลำดับแถวแล้ว transform ใหม่ ผลของแต่ละแถวต้องไม่เปลี่ยน | เตือน + ปฏิเสธ |
-| **Schema match** | คอลัมน์/dtype ของ `transform(test)` ต้องตรงกับ `transform(train)` | ปฏิเสธ |
+| **Subset consistency** | `predict` บน test ทั้งก้อน แล้ว `predict` อีกครั้งบน subset สุ่ม 30% เทียบผลของแถวเดียวกัน — ต่างกัน = ใช้สถิติของ batch | ปฏิเสธพร้อมบอกว่าแถวไหนไม่ตรงและต่างกันเท่าไร |
+| **Row permutation invariance** | สลับลำดับแถวแล้ว `predict` ใหม่ ผลของแต่ละแถวต้องไม่เปลี่ยน | ปฏิเสธ |
+| **Determinism** | `predict` ซ้ำสองครั้งบน input เดียวกัน ต้องได้ผลเท่ากันทุกแถว | ปฏิเสธพร้อมบอกให้ตรึง `random_state` |
 
-Subset consistency check เป็นตัวที่จับ leakage ได้จริงและถูกที่สุด — scaler/imputer/target-encoder ที่ fit บน batch จะให้ค่าต่างกันทันทีเมื่อ batch เปลี่ยน
+สองข้อแรกจับ leakage · ข้อสุดท้ายจับโมเดลที่ให้คะแนนต่างกันทุกครั้งที่รัน ซึ่งทำให้
+การจัดอันดับไม่มีความหมายและ rejudge ไม่ได้
+
+**ทั้งสามข้อรันในชุดเดียวกับตอนให้คะแนนจริง** ไม่ใช่รอบแยก — `predict` ถูกเรียกอยู่แล้ว
+การเรียกเพิ่มอีกสองครั้งบน subset เล็กๆ ถูกกว่าการมี stage ตรวจต่างหากมาก
+
+> เป็นกลไกเดียวกับ `--check-reset` ของโจทย์ RL ซึ่งตรวจว่า `reset()` ล้าง state จริง
+> ทั้งคู่ตอบคำถามเดียวกัน: **ผลลัพธ์ขึ้นกับสิ่งที่ไม่ควรมีผลหรือเปล่า**
 
 ---
 
@@ -326,6 +365,19 @@ stdout/stderr ถูกตัดที่ 1 MB และกรอง path ขอ
 
 ## 6. Metrics และ 95% Confidence Interval
 
+**โจทย์มีสองชนิด** — `TaskSpec` ประกาศว่าเป็นอันไหน แล้วชุด metric ตามมาเอง
+
+| ชนิด | ทำนายอะไร | ตัวอย่าง |
+|---|---|---|
+| `classification` | label ของแต่ละแถว | ผู้ป่วยกลุ่มไหน · อีเมลนี้สแปมไหม |
+| `regression` | ตัวเลขของแต่ละแถว | ราคาบ้าน · ปริมาณการใช้ไฟ |
+
+**clustering ไม่รองรับโดยตั้งใจ** — การแข่งที่มีความหมายคือ "แปลความหมายของ cluster
+ได้ดีแค่ไหน" ซึ่งต้องมีคนตัดสิน · metric อัตโนมัติอย่าง silhouette วัดแค่รูปทรงของ
+การจัดกลุ่ม ไม่ได้วัดว่ากลุ่มนั้นมีความหมายกับโจทย์จริงหรือเปล่า — ทีมที่ได้ silhouette
+สูงสุดอาจแบ่งกลุ่มที่ไม่มีใครใช้ประโยชน์ได้เลย · leaderboard ที่จัดอันดับด้วยตัวเลข
+ที่ไม่ตรงกับสิ่งที่อยากวัด แย่กว่าไม่มี leaderboard
+
 ### 6.1 ตัวเลขที่รายงาน
 
 | Metric | binary | multiclass |
@@ -339,10 +391,30 @@ stdout/stderr ถูกตัดที่ 1 MB และกรอง path ขอ
 
 curve เก็บเป็นจุดที่ downsample แล้ว ~200 จุดใน `metrics_json` เพื่อวาดบนหน้าผลได้โดยไม่ต้องเก็บ prediction ดิบ
 
+> ⚠️ ตารางข้างบนใช้ได้เมื่อโมเดลคืน **probability** เท่านั้น (ROC/PR ต้องใช้คะแนน
+> ความเชื่อมั่น ไม่ใช่ label) · contract ใหม่ใน §3.1 เรียกแค่ `.predict()` ซึ่งคืน label
+> ถ้าโจทย์ไหนอยากได้ ROC-AUC ต้องประกาศใน `TaskSpec` ว่าบังคับ `predict_proba`
+> แล้วระบบจะเรียกเพิ่ม — **ไม่ใช่ค่าเริ่มต้น** เพราะจะตัดโมเดลที่ไม่มี proba ออกไปทั้งกลุ่ม
+
+**Regression**
+
+| Metric | หมายเหตุ |
+|---|---|
+| RMSE | หน่วยเดียวกับเป้าหมาย · ลงโทษค่าที่พลาดมากเป็นพิเศษ |
+| MAE | ทนต่อ outlier กว่า RMSE · อ่านง่าย "พลาดเฉลี่ยเท่าไร" |
+| R² | เทียบกับการทายค่าเฉลี่ยเสมอ · ติดลบได้ ซึ่งแปลว่าแย่กว่าทายค่าเฉลี่ย |
+| MAPE | ใช้ได้เฉพาะเมื่อเป้าหมายไม่มีค่าใกล้ศูนย์ ไม่งั้นระเบิด |
+
+**คะแนนหลักของ regression ต้องเป็นตัวที่ "มากกว่าดีกว่า"** เพราะ leaderboard เรียง
+จากมากไปน้อยทั้งระบบ · ใช้ **R²** เป็นค่าเริ่มต้น หรือถ้าอยากใช้ RMSE/MAE ให้เก็บเป็น
+`-RMSE` แล้วแสดงผลกลับด้านตอนวาด — อย่าไปกลับทิศการเรียงเฉพาะบางโจทย์
+เพราะโค้ดที่เรียงสองทิศทางตามชนิดโจทย์คือที่ที่บั๊กชอบซ่อน
+
 ### 6.2 วิธีคำนวณ CI — bootstrap
 
 ```
-B = 1000 resample จาก test set แบบ stratified (สุ่มแบบมีคืนที่)
+B = 1000 resample จาก test set (สุ่มแบบมีคืนที่)
+    classification → stratified ตามคลาส · regression → สุ่มธรรมดา
 seed คงที่ต่อ competition → CI ของทุกทีมเทียบกันได้ และรันซ้ำได้ค่าเดิม
 point estimate = คำนวณจาก test set เต็ม
 CI            = percentile ที่ 2.5 และ 97.5 ของค่าที่ได้จาก B resample
@@ -358,9 +430,10 @@ CI            = percentile ที่ 2.5 และ 97.5 ของค่าที
 
 | สถานการณ์ | แนะนำ |
 |---|---|
-| คลาสสมดุลพอสมควร | **macro-F1** |
-| คลาสไม่สมดุลมาก (positive < 10%) | **PR-AUC** — ROC-AUC จะดูดีเกินจริงเมื่อ negative เยอะมาก |
-| สนใจการจัดอันดับมากกว่าการตัดสินใจ | **ROC-AUC** |
+| classification · คลาสสมดุลพอสมควร | **macro-F1** |
+| classification · คลาสไม่สมดุลมาก (positive < 10%) | **PR-AUC** — ROC-AUC จะดูดีเกินจริงเมื่อ negative เยอะมาก · ต้องบังคับ `predict_proba` |
+| classification · สนใจการจัดอันดับมากกว่าการตัดสินใจ | **ROC-AUC** · ต้องบังคับ `predict_proba` |
+| regression | **R²** — มากกว่าดีกว่าอยู่แล้ว ไม่ต้องกลับด้าน |
 
 ห้ามใช้ accuracy เป็นคะแนนหลักถ้าข้อมูลไม่สมดุล (ทำนายคลาสเดียวรวดก็ได้ 90% แล้ว)
 **เกณฑ์ตัดสินเสมอ**: คะแนนหลัก → ขอบล่างของ CI → metric รองที่ประกาศไว้ → เวลาที่ส่งก่อน
@@ -415,7 +488,7 @@ CI            = percentile ที่ 2.5 และ 97.5 ของค่าที
 | Artifact | ขนาดทั่วไป | นโยบาย |
 |---|---|---|
 | `.py` ทุกไฟล์ | KB | **เก็บถาวร** — ใช้ตรวจความคล้าย, rejudge, ตรวจสอบย้อนหลัง |
-| `model.pkl` (sklearn) | < 10 MB | **เก็บถาวร** |
+| `pipeline.pkl` (sklearn) | < 10 MB | **เก็บถาวร** |
 | `model.pt` (torch) | 50 MB – 2 GB | **เก็บเฉพาะ best-so-far ของแต่ละทีม + submission ที่เลือกเป็น final** ที่เหลือลบทันทีหลังประเมินเสร็จ |
 | predictions | MB | เก็บ 30 วัน (ใช้ debug และคำนวณ metric เพิ่มย้อนหลังได้) |
 | metrics + curves | KB | เก็บถาวร |
@@ -476,7 +549,10 @@ CI            = percentile ที่ 2.5 และ 97.5 ของค่าที
 | # | ประเด็น | หมายเหตุ |
 |---|---|---|
 | 1 | คะแนนหลัก (macro-F1 / PR-AUC / ROC-AUC) | ขึ้นกับความไม่สมดุลของข้อมูล (§6.3) |
-| 2 | `classes` และลำดับ | ต้องตรึงตายตัว โมเดลคืน probability ตามลำดับนี้ |
+| 2 | ชนิดโจทย์ `classification` / `regression` | กำหนดชุด metric ทั้งชุด (§6) |
+| 2ก | classification: `classes` และลำดับ | ต้องตรึงตายตัว |
+| 2ข | classification: บังคับ `predict_proba` ไหม | ต้องบังคับถ้าคะแนนหลักเป็น ROC-AUC/PR-AUC · แลกกับการตัดโมเดลที่ไม่มี proba ออก |
+| 2ค | regression: คะแนนหลักต้อง "มากกว่าดีกว่า" | R² หรือ `-RMSE` (§6.3) |
 | 3 | **สัดส่วน train/val/test_public/test_private** | ผู้สอนกำหนดเอง — 60/15/10/15 เป็นแค่จุดตั้งต้น ต้องดูขนาดชุดข้อมูลจริงและตารางความละเอียดใน §1 ประกอบ พร้อมตั้ง `stratify_by` / `group_by` ให้ถูก |
 | 4 | Package whitelist | เช่น อนุญาต LightGBM/XGBoost ไหม, timm ไหม |
 | 5 | อนุญาต pretrained weights ไหม | ถ้าอนุญาต ต้องรวมมาในไฟล์และกระทบ quota |

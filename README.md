@@ -722,7 +722,7 @@ egress policy ให้ container ต่อ gateway ได้เส้นเด�
 > ส่วนที่แพลตฟอร์มยังไม่มีเลยคือ LLM gateway — ควรเริ่มพัฒนาคู่ขนานระหว่างที่ Competition 1 กำลังรัน (สัปดาห์ 1–6)
 
 ### M5 — วิชาอื่น (prediction-based)
-[template `classical-ml`](docs/task-templates/prediction-based-supervised.md): แจกข้อมูล train/val · รับ pickle + `preprocess.py` · ตรวจ leakage · metrics + bootstrap CI + curves ·
+[template `classical-ml`](docs/task-templates/prediction-based-supervised.md): แจกข้อมูล train/val · รับ `Pipeline` ที่ fit แล้ว + `predictor.py` · ตรวจ leakage/determinism · metrics + bootstrap CI (classification **และ regression**) ·
 จากนั้น [template `deep-learning`](docs/task-templates/prediction-based-supervised.md): GPU lane · state_dict + `model.py`/`dataset.py` · นโยบายลบไฟล์ · ขัดเกลา multi-course
 
 ### หลังจากนั้น
