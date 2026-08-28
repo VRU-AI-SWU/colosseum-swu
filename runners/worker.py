@@ -21,9 +21,10 @@ from pathlib import Path
 from core.domain import Competition, Run, RunKind, RunStatus
 from core.queue import JobQueue, LeaseExpired
 from core.store import ArtifactStore, Store
-from runners.agent_env.launcher import Launcher, SubprocessLauncher
 from runners.agent_env.runner import RunResult, run_submission
+from runners.agent_env.sandbox import SANDBOX
 from runners.agent_env.validate import smoke_test
+from runners.sandbox.launcher import Launcher
 from runners.seeds import SecretsUnavailable, expected_config_hash, load_seeds
 
 HEARTBEAT_EVERY = 20.0
@@ -49,7 +50,7 @@ class Worker:
     queue: JobQueue
     artifacts: ArtifactStore
     workdir: Path
-    launcher: Launcher = field(default_factory=SubprocessLauncher)
+    launcher: Launcher = field(default_factory=SANDBOX.local)
     lanes: tuple[str, ...] = ("cpu",)
     allow_seed_fallback: bool = False
 

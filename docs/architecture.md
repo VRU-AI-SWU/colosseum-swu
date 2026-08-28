@@ -136,7 +136,7 @@ flowchart LR
 
 | ชั้น | บังคับด้วย |
 |---|---|
-| agent อยู่คนละ process กับ environment | [`runners/agent_env/launcher.py`](../runners/agent_env/launcher.py) — `import gc` แล้วไล่หา env ไม่เจอเพราะมันไม่ได้อยู่ใน process เดียวกัน |
+| agent อยู่คนละ process กับ environment | [`runners/sandbox/launcher.py`](../runners/sandbox/launcher.py) — `import gc` แล้วไล่หา env ไม่เจอเพราะมันไม่ได้อยู่ใน process เดียวกัน |
 | API ไม่เคยเห็นค่า seed | worker เป็นคนอ่านจาก `ARENA_SECRETS` และรายงานเป็นเลขลำดับ · เทสต์ `test_api_never_reveals_seed_values` |
 | โค้ดเฉลยไม่อยู่ในแพ็กเกจที่แจก | `ARENA_SECRETS` เท่านั้นที่โหลด Gold/Diamond ได้ · pre-commit hook ตรวจว่าไม่มีวิธี implement หลุดเข้า repo สาธารณะ |
 
@@ -340,7 +340,9 @@ colosseum-swu/                    (สาธารณะ)
 │   └── api.py        REST · ไม่เคยเห็น seed
 ├── runners/       รันงาน — ไม่รู้จัก core
 │   ├── worker.py     หยิบงาน · โหลด seed · รายงานผล
-│   └── agent_env/    protocol · launcher · sandbox
+│   ├── sandbox/      protocol · launcher — ของกลาง ไม่รู้จักโจทย์
+│   ├── agent_env/    RL: episode loop · replay (CP463)
+│   └── prediction/   supervised: predict → score (CP462)
 ├── envs/          โจทย์ · หนึ่งโฟลเดอร์ต่อหนึ่ง competition
 ├── deploy/        ติดตั้งเครื่อง runner ตั้งแต่ศูนย์ · systemd · cloudflared
 └── docs/          เอกสารนี้ · สเปคของโจทย์ · task template

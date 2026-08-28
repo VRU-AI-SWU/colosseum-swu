@@ -20,16 +20,14 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from runners.agent_env.protocol import (
-    ACT,
-    ACTION,
+from runners.agent_env.messages import ACT, ACTION, RESET
+from runners.sandbox.protocol import (
     CLOSE,
     ERROR,
     HELLO,
     OK,
     PROTOCOL_VERSION,
     READY,
-    RESET,
     Channel,
     ProtocolError,
 )

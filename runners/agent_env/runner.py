@@ -19,17 +19,16 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from runners.agent_env import plugin as plugin_mod
-from runners.agent_env.launcher import AgentProcess, Launcher, SubprocessLauncher
-from runners.agent_env.protocol import (
-    ACT,
-    ACTION,
+from runners.agent_env.messages import ACT, ACTION, RESET
+from runners.agent_env.sandbox import SANDBOX
+from runners.sandbox.launcher import Launcher, SandboxProcess
+from runners.sandbox.protocol import (
     CLOSE,
     ERROR,
     HELLO,
     OK,
     PROTOCOL_VERSION,
     READY,
-    RESET,
     ProtocolError,
 )
 
@@ -86,7 +85,7 @@ def run_submission(
     plugin = plugin_mod.resolve(env_plugin)
     config = plugin.apply_overrides(plugin.load_config(str(config_path)), config_overrides or {})
     seeds = list(seeds)
-    launcher = launcher or SubprocessLauncher()
+    launcher = launcher or SANDBOX.local()
     step_timeout = plugin.step_timeout_ms(config) / 1000.0
 
     result = RunResult(
@@ -131,7 +130,7 @@ def run_submission(
     return result
 
 
-def _handshake(agent: AgentProcess, agent_config: dict[str, Any]) -> None:
+def _handshake(agent: SandboxProcess, agent_config: dict[str, Any]) -> None:
     agent.channel.send(HELLO, protocol=PROTOCOL_VERSION, agent_config=agent_config)
     try:
         reply = agent.channel.recv(timeout=HANDSHAKE_TIMEOUT_S)
@@ -152,7 +151,7 @@ def _handshake(agent: AgentProcess, agent_config: dict[str, Any]) -> None:
 
 
 def _run_episode(
-    agent: AgentProcess,
+    agent: SandboxProcess,
     plugin: plugin_mod.EnvPlugin,
     config: Any,
     env: Any,
@@ -198,7 +197,7 @@ class _Failure:
 
 
 def _exchange(
-    agent: AgentProcess, kind: str, payload: dict, expect: str, timeout: float
+    agent: SandboxProcess, kind: str, payload: dict, expect: str, timeout: float
 ) -> dict | _Failure:
     """ส่งข้อความหนึ่งแล้วรอคำตอบ — คืน dict ถ้าสำเร็จ หรือ `_Failure` ถ้า episode พัง"""
     try:

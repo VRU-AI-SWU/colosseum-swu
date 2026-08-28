@@ -12,15 +12,24 @@ from argparse import Namespace
 import pytest
 
 from core.cli import _pick_launcher
-from runners.agent_env.launcher import DockerLauncher, SubprocessLauncher
+from runners.sandbox.launcher import DockerLauncher, Sandbox, SubprocessLauncher
 
 
-class FakeDocker(DockerLauncher):
+class FakeSandbox(Sandbox):
+    """กล่องปลอมที่คุมได้ว่า docker พร้อมหรือไม่ — เทสต์นี้ไม่ต้องมี docker จริง"""
+
     ready = True
 
-    @classmethod
-    def available(cls, image: str = "", docker: str = "") -> bool:
-        return cls.ready
+    def available(self, docker: str = "docker") -> bool:
+        return type(self).ready
+
+
+def sandbox() -> FakeSandbox:
+    return FakeSandbox(
+        image="arena/fake:cpu",
+        host_module="runners.agent_env.agent_host",
+        dockerfile="runners/agent_env/images/Dockerfile.cpu",
+    )
 
 
 def args(sandbox="auto", real_seeds=False) -> Namespace:
@@ -29,43 +38,76 @@ def args(sandbox="auto", real_seeds=False) -> Namespace:
 
 @pytest.fixture(autouse=True)
 def _reset():
-    FakeDocker.ready = True
+    FakeSandbox.ready = True
     yield
 
 
 def test_real_seeds_refuses_subprocess():
     """โหมดให้คะแนนจริงต้องไม่ยอมรันโค้ดนิสิตนอก container ไม่ว่าจะสั่งยังไง"""
-    launcher, _ = _pick_launcher(args("subprocess", real_seeds=True), FakeDocker, SubprocessLauncher)
+    launcher, _ = _pick_launcher(args("subprocess", real_seeds=True), sandbox())
     assert launcher is None, "ต้องหยุด ไม่ใช่เตือนแล้วรันต่อ"
 
 
 def test_real_seeds_requires_docker_to_be_ready():
     """ขอ docker แล้ว docker ไม่พร้อม = หยุด ไม่ใช่ถอยไป subprocess เงียบๆ"""
-    FakeDocker.ready = False
-    launcher, _ = _pick_launcher(args("auto", real_seeds=True), FakeDocker, SubprocessLauncher)
+    FakeSandbox.ready = False
+    launcher, _ = _pick_launcher(args("auto", real_seeds=True), sandbox())
     assert launcher is None
 
 
 def test_real_seeds_picks_docker_when_ready():
-    launcher, note = _pick_launcher(args("auto", real_seeds=True), FakeDocker, SubprocessLauncher)
+    launcher, note = _pick_launcher(args("auto", real_seeds=True), sandbox())
     assert isinstance(launcher, DockerLauncher)
     assert "network none" in note
 
 
 def test_dev_falls_back_to_subprocess_when_docker_missing():
     """เครื่องที่ยังไม่ได้ build image ต้องพัฒนาต่อได้ — แค่ต้องบอกให้ชัดว่าไม่มี sandbox"""
-    FakeDocker.ready = False
-    launcher, note = _pick_launcher(args("auto"), FakeDocker, SubprocessLauncher)
+    FakeSandbox.ready = False
+    launcher, note = _pick_launcher(args("auto"), sandbox())
     assert isinstance(launcher, SubprocessLauncher)
     assert "⚠️" in note
 
 
 def test_dev_prefers_docker_when_available():
-    launcher, _ = _pick_launcher(args("auto"), FakeDocker, SubprocessLauncher)
+    launcher, _ = _pick_launcher(args("auto"), sandbox())
     assert isinstance(launcher, DockerLauncher)
 
 
 def test_explicit_docker_fails_loudly_when_unavailable():
-    FakeDocker.ready = False
-    launcher, _ = _pick_launcher(args("docker"), FakeDocker, SubprocessLauncher)
+    FakeSandbox.ready = False
+    launcher, _ = _pick_launcher(args("docker"), sandbox())
     assert launcher is None
+
+
+# ── image กับ host module ต้องเดินทางไปถึงตัว launcher จริง ──────────
+# `Sandbox` มีอยู่เพื่อกันการจับคู่ผิดข้ามโจทย์ ถ้าค่าไม่ถูกส่งต่อ คลาสนี้ก็ไม่มีประโยชน์
+
+
+def test_docker_launcher_gets_the_image_of_this_task():
+    launcher, _ = _pick_launcher(args("docker"), sandbox())
+    assert launcher.image == "arena/fake:cpu"
+
+
+def test_subprocess_launcher_gets_the_host_module_of_this_task():
+    launcher, _ = _pick_launcher(args("subprocess"), sandbox())
+    assert launcher.host_module == "runners.agent_env.agent_host"
+
+
+def test_build_hint_names_this_tasks_image(capsys):
+    """ข้อความผิดพลาดต้องบอกคำสั่ง build ของโจทย์นี้ ไม่ใช่ของโจทย์อื่น"""
+    FakeSandbox.ready = False
+    _pick_launcher(args("docker"), sandbox())
+    err = capsys.readouterr().err
+    assert "docker build -t arena/fake:cpu -f runners/agent_env/images/Dockerfile.cpu ." in err
+
+
+def test_real_cp463_sandbox_points_at_the_shipped_dockerfile():
+    """ค่าจริงของ CP463 ต้องชี้ไปที่ไฟล์ที่มีอยู่ — พิมพ์ path ผิดจะรู้ตอนมีคนอ่านข้อความ error"""
+    from pathlib import Path
+
+    from runners.agent_env.sandbox import SANDBOX
+
+    repo = Path(__file__).resolve().parent.parent.parent
+    assert (repo / SANDBOX.dockerfile).is_file()
+    assert SANDBOX.image == "arena/vacuum:cpu"

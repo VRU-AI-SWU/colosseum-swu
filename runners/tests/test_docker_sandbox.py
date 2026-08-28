@@ -14,7 +14,7 @@ import subprocess
 
 import pytest
 
-from runners.agent_env.launcher import DockerLauncher
+from runners.sandbox.launcher import DockerLauncher
 from runners.agent_env.runner import run_submission
 from runners.tests.conftest import CONFIGS
 

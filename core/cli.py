@@ -382,8 +382,12 @@ def cmd_leaderboard(args) -> int:
     return 0
 
 
-def _pick_launcher(args, DockerLauncher, SubprocessLauncher):
-    """เลือกตัวรัน agent — คืน `(launcher, คำอธิบาย)` หรือ `(None, _)` ถ้าต้องหยุด
+def _pick_launcher(args, sandbox):
+    """เลือกตัวรันโค้ดนิสิต — คืน `(launcher, คำอธิบาย)` หรือ `(None, _)` ถ้าต้องหยุด
+
+    `sandbox` เป็น `runners.sandbox.launcher.Sandbox` ของโจทย์ที่กำลังจะรัน — image
+    กับ host module มาจากตรงนั้นทั้งคู่ ฟังก์ชันนี้จึงไม่รู้จักโจทย์ชนิดใดเลย
+    และข้อความผิดพลาดชี้คำสั่ง build ที่ถูกต้องของโจทย์นั้นเสมอ
 
     `--sandbox auto` (ค่าเริ่มต้น) ใช้ Docker ถ้ามี image พร้อม ไม่งั้นถอยไปใช้ subprocess
     พร้อมเตือนดังๆ — เพราะการพัฒนาบนเครื่องที่ยังไม่ได้ build image ต้องทำได้
@@ -394,7 +398,7 @@ def _pick_launcher(args, DockerLauncher, SubprocessLauncher):
     ในโหมดนั้นคือการรันโค้ดที่ไม่ไว้ใจบนเครื่องที่มีเฉลยอยู่
     """
     want = args.sandbox
-    ready = DockerLauncher.available()
+    ready = sandbox.available()
 
     if want == "subprocess":
         if args.real_seeds:
@@ -402,31 +406,31 @@ def _pick_launcher(args, DockerLauncher, SubprocessLauncher):
                 "✗ --sandbox subprocess ใช้กับ --real-seeds ไม่ได้\n"
                 "  โหมดนั้นรันโค้ดของนิสิตด้วย seed จริงบนเครื่องที่มีเฉลยอยู่\n"
                 "  โค้ดนั้นต้องอยู่ใน container — build image ก่อนด้วย\n"
-                "  docker build -t arena/vacuum:cpu -f runners/agent_env/images/Dockerfile.cpu .",
+                f"  {sandbox.build_command}",
                 file=sys.stderr,
             )
             return None, ""
-        return SubprocessLauncher(), "subprocess ⚠️ ไม่มี container ห่อ — dev เท่านั้น"
+        return sandbox.local(), "subprocess ⚠️ ไม่มี container ห่อ — dev เท่านั้น"
 
     if want == "docker" or args.real_seeds:
         if not ready:
             print(
                 "✗ ต้องใช้ Docker sandbox แต่ยังไม่พร้อม\n"
-                "  ตรวจว่า docker daemon รันอยู่ และมี image arena/vacuum:cpu\n"
-                "  docker build -t arena/vacuum:cpu -f runners/agent_env/images/Dockerfile.cpu .",
+                f"  ตรวจว่า docker daemon รันอยู่ และมี image {sandbox.image}\n"
+                f"  {sandbox.build_command}",
                 file=sys.stderr,
             )
             return None, ""
-        return DockerLauncher(), "docker · network none · non-root · read-only rootfs"
+        return sandbox.docker(), "docker · network none · non-root · read-only rootfs"
 
     if ready:
-        return DockerLauncher(), "docker (auto) · network none · non-root · read-only rootfs"
+        return sandbox.docker(), "docker (auto) · network none · non-root · read-only rootfs"
     print(
-        "⚠️ ไม่พบ image arena/vacuum:cpu — ถอยไปใช้ subprocess\n"
+        f"⚠️ ไม่พบ image {sandbox.image} — ถอยไปใช้ subprocess\n"
         "   โค้ดของนิสิตจะรันโดยไม่มี container ห่อ ห้ามใช้แบบนี้กับของจริง",
         file=sys.stderr,
     )
-    return SubprocessLauncher(), "subprocess (auto fallback) ⚠️ ไม่มี container ห่อ"
+    return sandbox.local(), "subprocess (auto fallback) ⚠️ ไม่มี container ห่อ"
 
 
 def cmd_serve(args) -> int:
@@ -442,12 +446,12 @@ def cmd_serve(args) -> int:
         google_auth_from_env,
         staff_emails_from_env,
     )
-    from runners.agent_env.launcher import DockerLauncher, SubprocessLauncher
+    from runners.agent_env.sandbox import SANDBOX
     from runners.worker import Worker
 
     root = Path(args.data).resolve()
 
-    launcher, sandbox_note = _pick_launcher(args, DockerLauncher, SubprocessLauncher)
+    launcher, sandbox_note = _pick_launcher(args, SANDBOX)
     if launcher is None:
         return 1
     db_path = None if args.ephemeral else root / "arena.db"

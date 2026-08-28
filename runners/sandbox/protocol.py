@@ -28,16 +28,16 @@ PROTOCOL_VERSION = 1
 _LEN = struct.Struct("<I")
 MAX_FRAME = 32 * 1024 * 1024  # กัน length ที่ถูกแก้ให้ใหญ่มหาศาลจนกิน RAM หมด
 
-# ── ชนิดข้อความ ─────────────────────────────────────────────────────
-# runner → agent
+# ── ชนิดข้อความที่ทุกโจทย์ใช้ร่วมกัน ────────────────────────────────
+# มีแค่การจับมือ การปิด และการรายงานความผิดพลาด — **ชื่อข้อความของงานจริง
+# อยู่ในแพ็กเกจของโจทย์** (`agent_env/messages.py` · `prediction/messages.py`)
+# เพราะไฟล์นี้ไม่ควรรู้ว่ามี episode หรือมีตารางข้อมูล
+# runner → sandbox
 HELLO = "hello"
-RESET = "reset"
-ACT = "act"
 CLOSE = "close"
-# agent → runner
+# sandbox → runner
 READY = "ready"
-OK = "ok"
-ACTION = "action"
+OK = "ok"          # ตอบรับคำสั่งที่ไม่มีผลลัพธ์ให้ส่งกลับ
 ERROR = "error"
 
 _ND = "__nd__"

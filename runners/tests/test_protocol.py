@@ -18,8 +18,8 @@ import time
 import numpy as np
 import pytest
 
-from runners.agent_env.protocol import (
-    ACT,
+from runners.agent_env.messages import ACT
+from runners.sandbox.protocol import (
     _POLL_MAX,
     Channel,
     ProtocolError,

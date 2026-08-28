@@ -18,12 +18,16 @@ RUN groupadd --gid 10001 arena \
 WORKDIR /opt/arena
 
 # ── โค้ดแพลตฟอร์มส่วนที่เข้า container ได้ ────────────────────────────
-# มีแค่ agent_host กับ protocol เท่านั้น — **ไม่มี runner.py** ซึ่งเป็นตัวที่ถือ env และ seed
+# มีแค่ agent_host · ชื่อข้อความ · โปรโตคอล เท่านั้น — **ไม่มี runner.py** ซึ่งเป็นตัวที่
+# ถือ env และ seed และ **ไม่มี launcher.py** ซึ่งเป็นตัวที่รู้วิธีสั่ง docker
 # ถ้าวันใดวันหนึ่งไฟล์ฝั่ง trusted หลุดเข้ามาในนี้ trust boundary จะพังเงียบๆ
+# (`test_trust_boundary.py` ตรวจรายการนี้ให้ — อย่าเพิ่ม COPY โดยไม่ดูที่นั่นด้วย)
 COPY runners/__init__.py runners/__init__.py
 COPY runners/agent_env/__init__.py runners/agent_env/__init__.py
 COPY runners/agent_env/agent_host.py runners/agent_env/agent_host.py
-COPY runners/agent_env/protocol.py runners/agent_env/protocol.py
+COPY runners/agent_env/messages.py runners/agent_env/messages.py
+COPY runners/sandbox/__init__.py runners/sandbox/__init__.py
+COPY runners/sandbox/protocol.py runners/sandbox/protocol.py
 
 # ── environment ของโจทย์ (นิสิตต้อง import ได้เพื่อใช้ helper ของ starter kit) ──
 COPY envs/cp463-vacuum /opt/arena/envs/cp463-vacuum

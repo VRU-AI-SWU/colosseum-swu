@@ -1,12 +1,16 @@
-"""วิธีเปิด process ของ agent — แยกออกจากตัว runner เพื่อให้สลับ sandbox ได้
+"""วิธีเปิด process ของโค้ดนิสิต — แยกออกจากตัว runner เพื่อให้สลับ sandbox ได้
 
 | launcher | ใช้เมื่อไร | แยก process | sandbox |
 |---|---|---|---|
 | `SubprocessLauncher` | ทดสอบ · dev · `arena eval` ในเครื่องนิสิต | ✅ | ❌ |
 | `DockerLauncher` | **ตัวที่ใช้ตัดสินคะแนนจริง** | ✅ | ✅ |
 
-⚠️ `SubprocessLauncher` แยก process แล้วจึงกัน "agent เอื้อมไปอ่าน state ของ env" ได้จริง
-แต่**ไม่ได้กันการเข้าถึงระบบไฟล์หรือเครือข่าย** — ห้ามใช้ตัดสินคะแนนบนเครื่องที่มีของลับอยู่
+⚠️ `SubprocessLauncher` แยก process แล้วจึงกัน "โค้ดนิสิตเอื้อมไปอ่าน state ของฝั่ง
+trusted" ได้จริง แต่**ไม่ได้กันการเข้าถึงระบบไฟล์หรือเครือข่าย** — ห้ามใช้ตัดสินคะแนน
+บนเครื่องที่มีของลับอยู่
+
+ไฟล์นี้ไม่รู้จักโจทย์ — โจทย์แต่ละชนิดบอกมาว่าจะให้เปิด image ไหนและ host module ไหน
+ผ่าน `Sandbox` (ดูเหตุผลที่ต้องผูกสองค่านั้นไว้ด้วยกันที่คลาสนั้น)
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from runners.agent_env.protocol import Channel
+from runners.sandbox.protocol import Channel
 
 MAX_LOG_BYTES = 1024 * 1024  # ตัด log ที่ 1 MB เหมือนกับ template ของ prediction-based
 
@@ -52,8 +56,8 @@ class _Drain(threading.Thread):
 
 
 @dataclass
-class AgentProcess:
-    """process ของ agent ที่เปิดอยู่ พร้อมช่องคุยและ log"""
+class SandboxProcess:
+    """process ของโค้ดนิสิตที่เปิดอยู่ พร้อมช่องคุยและ log"""
 
     channel: Channel
     _proc: subprocess.Popen
@@ -83,13 +87,13 @@ class AgentProcess:
 
 
 class Launcher(Protocol):
-    def start(self, submission_dir: Path) -> AgentProcess: ...
+    def start(self, submission_dir: Path) -> SandboxProcess: ...
 
 
-def _wrap(proc: subprocess.Popen, cleanup: list | None = None) -> AgentProcess:
+def _wrap(proc: subprocess.Popen, cleanup: list | None = None) -> SandboxProcess:
     drain = _Drain(proc.stderr)
     drain.start()
-    return AgentProcess(
+    return SandboxProcess(
         channel=Channel(reader=proc.stdout, writer=proc.stdin),
         _proc=proc,
         _drain=drain,
@@ -99,13 +103,16 @@ def _wrap(proc: subprocess.Popen, cleanup: list | None = None) -> AgentProcess:
 
 @dataclass
 class SubprocessLauncher:
-    """เปิด agent host เป็น process ลูกด้วย interpreter เดียวกัน — ไม่มี sandbox"""
+    """เปิด host ของโจทย์เป็น process ลูกด้วย interpreter เดียวกัน — ไม่มี sandbox"""
 
+    #: โมดูลฝั่ง untrusted ที่จะถูกเรียกด้วย `python -m` เช่น
+    #: `"runners.agent_env.agent_host"` — **ไม่มีค่าเริ่มต้นโดยตั้งใจ** ดูเหตุผลที่ `Sandbox`
+    host_module: str
     python: str = sys.executable
 
-    def start(self, submission_dir: Path) -> AgentProcess:
+    def start(self, submission_dir: Path) -> SandboxProcess:
         proc = subprocess.Popen(
-            [self.python, "-m", "runners.agent_env.agent_host", "--submission", str(submission_dir)],
+            [self.python, "-m", self.host_module, "--submission", str(submission_dir)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -135,7 +142,8 @@ class DockerLauncher:
     ต่อให้หลุดออกจาก container ได้ก็ยังไม่มีอะไรให้อ่าน (README §10.4)
     """
 
-    image: str = "arena/vacuum:cpu"
+    #: **ไม่มีค่าเริ่มต้นโดยตั้งใจ** — ดูเหตุผลที่ `Sandbox`
+    image: str
     memory: str = "8g"
     cpus: str = "1.0"
     pids_limit: int = 256
@@ -144,7 +152,7 @@ class DockerLauncher:
     extra_args: list[str] = field(default_factory=list)
 
     @classmethod
-    def available(cls, image: str = "arena/vacuum:cpu", docker: str = "docker") -> bool:
+    def available(cls, image: str, docker: str = "docker") -> bool:
         """มี docker และมี image อยู่จริงไหม
 
         ตรวจ image ด้วยไม่ใช่แค่ตัว docker เพราะ daemon ที่รันอยู่แต่ไม่มี image
@@ -160,7 +168,7 @@ class DockerLauncher:
         except (subprocess.CalledProcessError, OSError):
             return False
 
-    def start(self, submission_dir: Path) -> AgentProcess:
+    def start(self, submission_dir: Path) -> SandboxProcess:
         submission = Path(submission_dir).resolve()
         cmd = [
             self.docker, "run", "--rm", "-i",
@@ -183,3 +191,39 @@ class DockerLauncher:
             cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0
         )
         return _wrap(proc)
+
+
+@dataclass
+class Sandbox:
+    """กล่องของโจทย์หนึ่งชนิด — image · host module · วิธี build
+
+    **ทำไมต้องมัดสามค่านี้ไว้ด้วยกัน** เพราะการจับคู่ผิดคือความผิดพลาดที่
+    ตรวจไม่เจอจนกว่าจะรันจริงกับ submission ของนิสิต — image ของ RL ไม่มี
+    scikit-learn อยู่ข้างใน ส่วน host ของ prediction ไม่รู้จักข้อความ `act`
+    ทั้งสองอย่างล้มด้วยข้อความที่ไม่ได้ชี้ไปที่ต้นเหตุเลย
+
+    ด้วยเหตุผลเดียวกัน `DockerLauncher.image` กับ `SubprocessLauncher.host_module`
+    จึงไม่มีค่าเริ่มต้น — เดิมมี (`"arena/vacuum:cpu"`) และตอนมีโจทย์ชนิดเดียว
+    ก็ไม่มีปัญหา แต่ตอนนี้ค่าเริ่มต้นแปลว่า "รันโจทย์ CP462 ด้วย image ของ CP463
+    เงียบๆ" ซึ่งเป็นบั๊กที่ไม่มีใครเขียนขึ้นมา
+    """
+
+    image: str
+    host_module: str
+    #: path ของ Dockerfile เทียบจาก root ของ repo — ใช้เขียนคำสั่ง build ในข้อความผิดพลาด
+    dockerfile: str
+
+    def docker(self, **kw) -> DockerLauncher:
+        """ตัวที่ใช้ตัดสินคะแนนจริง"""
+        return DockerLauncher(image=self.image, **kw)
+
+    def local(self, **kw) -> SubprocessLauncher:
+        """ตัวที่ใช้ตอน dev — ⚠️ ไม่มี container ห่อ"""
+        return SubprocessLauncher(host_module=self.host_module, **kw)
+
+    def available(self, docker: str = "docker") -> bool:
+        return DockerLauncher.available(self.image, docker)
+
+    @property
+    def build_command(self) -> str:
+        return f"docker build -t {self.image} -f {self.dockerfile} ."

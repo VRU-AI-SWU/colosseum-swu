@@ -563,8 +563,9 @@ runner process (trusted)              sandbox container (untrusted)
 colosseum-swu/                    (public · MIT)
 ├── core/                         # ไม่รู้จักโจทย์ — ทีม, submission, คิว, leaderboard, เกรด
 ├── runners/                      # หนึ่งตัวต่อ "ประเภทโจทย์" = task template
+│   ├── sandbox/                  #   ของกลาง: protocol + launcher — ไม่รู้จักโจทย์ใดเลย
 │   ├── agent_env/                #   RL: episode loop, replay, แยก process (§10.4)
-│   ├── prediction/               #   supervised: 2-stage predict → score, bootstrap CI
+│   ├── prediction/               #   supervised: predict → score, bootstrap CI
 │   └── llm_agent/                #   LLM gateway, tool layer, trace
 ├── envs/                         # หนึ่งโฟลเดอร์ต่อ "โจทย์" — แต่ละตัวมี pyproject.toml ติดตั้งแยกได้
 │   ├── cp463-vacuum/
@@ -697,7 +698,7 @@ auth (Google OAuth) · course/enrollment/team · competition CRUD · โคร�
 ### M1 — แข่งได้จริง (ต้องเสร็จก่อนนิสิตเริ่ม project) 🎯
 [CP463 Competition 1](docs/competitions/CP463/1-2026/vacuum-robot/overview.md):
 ✅ environment + config 3 phase + scorer + baseline agents + conformance test ([`envs/cp463-vacuum`](envs/cp463-vacuum/)) ·
-✅ runner + sandbox ([`runners/agent_env`](runners/agent_env/)) · ✅ ตรวจสอบ submission ·
+✅ runner + sandbox ([`runners/agent_env`](runners/agent_env/) · [`runners/sandbox`](runners/sandbox/)) · ✅ ตรวจสอบ submission ·
 ✅ คิว + โควตา + leaderboard ระดับตรรกะ ([`core`](core/)) ·
 ✅ API + CLI อัพโหลด · ✅ ที่เก็บถาวรด้วย SQLite ([`core/db.py`](core/db.py)) ·
 ✅ starter kit ที่แจกนิสิต · ✅ ตรึงหมุด baseline บน public seeds ·
