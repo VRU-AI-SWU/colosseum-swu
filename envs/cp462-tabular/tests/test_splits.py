@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 
 from tabular.generator import make
-from tabular.splits import PARTS, as_frame, split
+from tabular.splits import GRADING_PARTS, PARTS, as_frame, grading_split, split
 
-RATIOS = (0.60, 0.15, 0.10, 0.15)
+RATIOS = (0.60, 0.15, 0.25)
 
 
 @pytest.fixture
@@ -62,10 +62,25 @@ def test_class_balance_survives_a_plain_shuffle(churn):
         assert abs(rate - overall) < 0.05, f"{name}: สัดส่วนคลาสเพี้ยนไป {rate - overall:+.3f}"
 
 
-def test_open_parts_never_include_the_grading_sets(churn):
-    """**ด่านสำคัญ** — เผลอส่ง test_private ออกไปคือความผิดพลาดที่กู้ไม่ได้"""
+def test_the_student_split_cannot_hold_a_grading_set(churn):
+    """**ด่านสำคัญ** — `Split` ต้องไม่มีที่ให้ชุดที่ใช้ตัดสินอยู่เลย
+
+    เดิมคลาสนี้ถือ `test_public`/`test_private` ไว้ด้วย แล้วกันการหลุดด้วย
+    `open_parts()` ที่เลือกคืนแค่บางฟิลด์ · การกันแบบนั้นพึ่งวินัยของคนเขียน
+    ตอนนี้ชุดที่ใช้ตัดสินอยู่คนละคลาสและมาจากคนละ dataset — เผลอส่งออกไปไม่ได้
+    เพราะมันไม่ได้อยู่ในนี้ตั้งแต่แรก
+    """
     parts = split(churn, seed=9, ratios=RATIOS)
-    assert set(parts.open_parts()) == {"train", "val"}
+    assert set(parts.open_parts()) == {"train", "val", "test"}
+    for forbidden in GRADING_PARTS:
+        assert not hasattr(parts, forbidden), f"Split ไม่ควรมีฟิลด์ {forbidden}"
+
+
+def test_grading_split_cuts_public_and_private(churn):
+    graded = grading_split(churn, seed=9, public_ratio=0.4)
+    assert graded.sizes() == {"test_public": 2000, "test_private": 3000}
+    assert not (set(graded.test_public.X["account_id"])
+                & set(graded.test_private.X["account_id"]))
 
 
 def test_index_is_reset_so_students_get_predictable_rows(churn):
@@ -86,9 +101,9 @@ def test_as_frame_puts_the_target_last(churn):
 @pytest.mark.parametrize(
     "ratios,reason",
     [
-        ((0.6, 0.2, 0.1), "จำนวนส่วนไม่ครบ"),
-        ((0.6, 0.2, 0.1, 0.2), "รวมกันไม่ได้ 1.0"),
-        ((0.7, 0.3, 0.0, 0.0), "มีส่วนที่เป็นศูนย์"),
+        ((0.6, 0.4), "จำนวนส่วนไม่ครบ"),
+        ((0.6, 0.2, 0.1), "รวมกันไม่ได้ 1.0"),
+        ((0.7, 0.3, 0.0), "มีส่วนที่เป็นศูนย์"),
     ],
 )
 def test_bad_ratios_are_rejected(churn, ratios, reason):
@@ -99,5 +114,5 @@ def test_bad_ratios_are_rejected(churn, ratios, reason):
 def test_too_little_data_says_what_it_would_produce():
     """ข้อความต้องบอกว่าจะได้อะไร ไม่ใช่แค่ว่าผิด — §13 ของ template"""
     tiny = make("churn", seed=1, n=8)
-    with pytest.raises(ValueError, match="test_public"):
-        split(tiny, seed=1, ratios=(0.9, 0.04, 0.03, 0.03))
+    with pytest.raises(ValueError, match="test"):
+        split(tiny, seed=1, ratios=(0.96, 0.02, 0.02))

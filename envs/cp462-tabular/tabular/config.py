@@ -44,14 +44,32 @@ class TaskSpec:
     title: str
     kind: str
     primary: str
+    #: จำนวนแถวของ **ชุดที่แจกนิสิต** — ชุดที่ใช้ตัดสินใช้ `grading_rows`
     n_rows: int
     data_seed: int
     split_seed: int
     bootstrap_seed: int
-    ratios: tuple[float, float, float, float]
+    #: train / val / test ของนิสิต — **ทุกส่วนนิสิตมีอยู่แล้ว**
+    ratios: tuple[float, float, float]
+    #: ขนาดของชุดที่ใช้ตัดสิน · ประกาศต่อสาธารณะได้ — รู้ขนาดไม่ได้ช่วยให้เดาเฉลย
+    grading_rows: int = 0
+    #: สัดส่วนที่เป็น `test_public` ที่เหลือเป็น `test_private`
+    grading_public_ratio: float = 0.4
     #: ลำดับของคลาสที่ตรึงไว้ — classification เท่านั้น · **ต้องไม่เปลี่ยนกลางเทอม**
     #: เพราะ confusion matrix กับ per-class F1 อ้างลำดับนี้
     labels: list[Any] = field(default_factory=list)
+
+    #: 🔒 **เมล็ดของชุดที่ใช้ตัดสิน — ไม่มีในไฟล์ที่แจก และไม่เข้า `config_hash`**
+    #:
+    #: ฝั่ง trusted ฉีดค่านี้เข้ามาตอนโหลด (`tabular.arena.PLUGIN.load_spec`)
+    #: โดยอ่านจาก `ARENA_SECRETS` · ถ้าเป็น `None` แปลว่ากำลังอยู่ฝั่งนิสิต
+    #: แล้ว `grading_data()` จะปฏิเสธพร้อมบอกว่าทำไม
+    #:
+    #: **ไม่เข้า hash โดยตั้งใจ** — `config_hash` คือสัญญาเรื่อง *ข้อมูลของนิสิต
+    #: และวิธีให้คะแนน* ซึ่ง `selfcheck` บนเครื่องนิสิตต้องคำนวณให้ตรงกับของ grader ได้
+    #: ถ้าเมล็ดลับเข้า hash ด้วย ค่าสองฝั่งจะไม่มีทางตรงกันเลย · การกันเมล็ดลับ
+    #: เปลี่ยนกลางเทอมใช้วิธีเดียวกับ CP463: มันอยู่ใน repo ส่วนตัวที่มีประวัติการแก้
+    grading_seed: int | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in KINDS:
@@ -66,12 +84,21 @@ class TaskSpec:
             raise ConfigError("classification ต้องประกาศ `labels` เพื่อตรึงลำดับของคลาส")
         if self.kind == "regression" and self.labels:
             raise ConfigError("regression ต้องไม่มี `labels`")
-        if len(self.ratios) != 4:
-            raise ConfigError(f"ratios ต้องมี 4 ค่า (train/val/test_public/test_private) — ได้ {len(self.ratios)}")
+        if len(self.ratios) != 3:
+            raise ConfigError(f"ratios ต้องมี 3 ค่า (train/val/test ของนิสิต) — ได้ {len(self.ratios)}")
         if abs(sum(self.ratios) - 1.0) > 1e-9:
             raise ConfigError(f"ratios ต้องรวมกันได้ 1.0 — ได้ {sum(self.ratios)}")
         if self.n_rows < 100:
-            raise ConfigError(f"ข้อมูล {self.n_rows} แถวน้อยเกินไปสำหรับการแบ่งสี่ส่วน")
+            raise ConfigError(f"ข้อมูล {self.n_rows} แถวน้อยเกินไปสำหรับการแบ่งสามส่วน")
+        if self.grading_rows < 100:
+            raise ConfigError(
+                f"ชุดที่ใช้ตัดสิน {self.grading_rows} แถวน้อยเกินไป — "
+                "ช่วงความเชื่อมั่นจะกว้างจนอันดับไม่มีความหมาย"
+            )
+        if not 0.0 < self.grading_public_ratio < 1.0:
+            raise ConfigError(
+                f"grading_public_ratio ต้องอยู่ระหว่าง 0 กับ 1 — ได้ {self.grading_public_ratio}"
+            )
 
     def normalized(self) -> dict:
         """รูปแบบมาตรฐานสำหรับคำนวณ hash — เรียงคีย์และแปลง tuple เป็น list"""
@@ -81,6 +108,8 @@ class TaskSpec:
         # `title` เป็นข้อความให้คนอ่าน ไม่กระทบการให้คะแนน — แก้ได้โดยไม่ทำให้
         # คะแนนเก่าเทียบไม่ได้ จึงไม่นับเข้า hash
         data.pop("title")
+        # 🔒 เมล็ดลับต้องไม่เข้า hash — เหตุผลอยู่ที่ฟิลด์นั้น
+        data.pop("grading_seed")
         return data
 
     @property

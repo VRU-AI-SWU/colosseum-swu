@@ -322,15 +322,23 @@ class Competition:
     import_whitelist: frozenset[str] = frozenset()
 
     def effective_whitelist(self) -> frozenset[str]:
-        """whitelist ที่ใช้จริง — รวม **แพ็กเกจของ environment เอง** ให้เสมอ
+        """whitelist ที่ใช้จริง
 
-        นิสิตต้อง import แพ็กเกจนั้นได้โดยนิยาม เพราะ starter kit ทั้งชุดอยู่ในนั้น
-        (baseline ที่ใช้เป็นตัวอย่าง, helper ของแผนที่, ตัวคิดคะแนนที่รันในเครื่องตัวเอง)
-        core ดึงชื่อมาจาก `env_plugin` ได้โดยไม่ต้องรู้ว่าแพ็กเกจนั้นทำอะไร
+        **ประกาศเองแล้วถือว่าประกาศครบ** — รายการที่ตั้งไว้คือรายการที่ใช้ ไม่มีการเติม
+        อะไรให้อีก · ถ้าไม่ได้ตั้ง จะใช้ค่าเริ่มต้นบวกกับ **แพ็กเกจของ environment เอง**
+        เพราะนิสิตต้อง import แพ็กเกจนั้นได้โดยนิยาม (starter kit ทั้งชุดอยู่ในนั้น)
+
+        ⚠️ **ที่ต้องแยกสองทางเพราะ "แพ็กเกจของ env อยู่ในกล่องเสมอ" ไม่จริงทุกโจทย์**
+        `vacuum` ของ CP463 อยู่ใน image เพราะ agent ต้องใช้ helper ของมันตอนรัน
+        แต่ `tabular` ของ CP462 **จงใจไม่อยู่ใน image** เพราะมันเห็นเฉลยของชุดที่ใช้
+        ตัดสิน · นิสิตใช้มันตอนเทรนบนเครื่องตัวเอง แต่ `predictor.py` ในกล่องต้องไม่
+        พึ่งมัน · ถ้าเติมให้เสมอ นิสิตที่ `import tabular` จะผ่านการตรวจ กินโควตา
+        แล้วไปตายในกล่องด้วย ImportError
         """
+        if self.import_whitelist:
+            return self.import_whitelist
         env_package = self.env_plugin.split(":", 1)[0].split(".", 1)[0]
-        base = self.import_whitelist or frozenset({"numpy", "torch"})
-        return base | {env_package}
+        return frozenset({"numpy", "torch", env_package})
 
     def phase_at(self, when: datetime) -> Phase | None:
         return next((p for p in self.phases if p.contains(when)), None)

@@ -90,16 +90,17 @@ def check_data(golden: dict) -> bool:
             ok = False
             continue
 
-        got = {"train": fingerprint(parts.train), "val": fingerprint(parts.val)}
-        bad = [k for k in ("train", "val") if got[k] != want[k]]
+        got = {name: fingerprint(getattr(parts, name)) for name in ("train", "val", "test")}
+        bad = [k for k in got if k in want and got[k] != want[k]]
         if bad:
             _line(False, f"ข้อมูลของ {slug}",
-                  f"{', '.join(bad)} ไม่ตรงกับ grader — {got} ควรเป็น "
-                  f"{{'train': {want['train']!r}, 'val': {want['val']!r}}}")
+                  f"{', '.join(bad)} ไม่ตรงกับ grader — ได้ {got} "
+                  f"ควรเป็น { {k: want[k] for k in got if k in want} }")
             ok = False
         else:
             _line(True, f"ข้อมูลของ {slug}",
-                  f"train {sizes['train']} · val {sizes['val']} · ตรงกับ grader ทุกบิต")
+                  f"train {sizes['train']} · val {sizes['val']} · test {sizes['test']} "
+                  "· ตรงกับ grader ทุกบิต")
     return ok
 
 
@@ -131,16 +132,22 @@ def _reference_pipeline(kind: str):
 
 
 def check_scores(golden: dict) -> bool:
-    """**ตัวตัดสินจริง** — คะแนนที่วัดบนเครื่องนี้ต้องตรงกับที่ grader วัดไว้"""
+    """**ตัวตัดสินจริง** — คะแนนที่วัดบนเครื่องนี้ต้องตรงกับที่ grader วัดไว้
+
+    วัดบน `test` ของนิสิตเอง ไม่ใช่ `test_public` — ชุดที่ใช้ตัดสินสร้างจากเมล็ดลับ
+    ที่ไม่ได้อยู่ในแพ็กเกจ · การเทียบต้องทำบนสิ่งที่ทั้งสองฝั่งคำนวณได้เหมือนกัน
+    ซึ่งก็เพียงพอ เพราะสิ่งที่ต้องพิสูจน์คือ "เครื่องนี้คิดเลขเหมือน grader ไหม"
+    ไม่ใช่ "เครื่องนี้เห็นชุดลับไหม"
+    """
     from tabular.config import load
-    from tabular.dataset import all_parts, grading_data
+    from tabular.dataset import all_parts
     from tabular.metrics import score
 
     ok = True
     for slug, want in golden["tasks"].items():
         spec = load(slug)
         parts = all_parts(spec)
-        test = grading_data(spec, "public")
+        test = parts.test
         trivial, strong = _reference_pipeline(spec.kind)
 
         got = {}

@@ -63,7 +63,7 @@ def _fingerprint(frame: pd.DataFrame | pd.Series) -> str:
     return "sha256:" + hashlib.sha256(blob).hexdigest()[:16]
 
 
-def _base_frame(rng: np.random.Generator, n: int) -> pd.DataFrame:
+def _base_frame(rng: np.random.Generator, n: int, id_offset: int = 0) -> pd.DataFrame:
     """คอลัมน์ตั้งต้นที่ทั้งสองโจทย์ใช้ร่วมกัน
 
     สร้างเป็น numpy array ทั้งหมดก่อนแล้วค่อยประกอบเป็น DataFrame — การสุ่มผ่าน
@@ -76,7 +76,7 @@ def _base_frame(rng: np.random.Generator, n: int) -> pd.DataFrame:
     region = rng.integers(0, len(REGIONS), size=n)
     # คอลัมน์ที่ไม่เกี่ยวกับเป้าหมายเลย — มีไว้ให้เห็นว่าการโยนทุกคอลัมน์เข้าโมเดล
     # ไม่ใช่คำตอบเสมอไป · ชื่อบอกตรงๆ ว่าเป็น id เพื่อไม่ให้เป็นกับดักที่ไม่แฟร์
-    account_id = rng.permutation(n) + 100_000
+    account_id = rng.permutation(n) + 100_000 + id_offset
 
     return pd.DataFrame(
         {
@@ -103,7 +103,7 @@ def _punch_holes(frame: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
     return out
 
 
-def make_churn(seed: int, n: int) -> Dataset:
+def make_churn(seed: int, n: int, id_offset: int = 0) -> Dataset:
     """classification — ทำนายว่าลูกค้าจะเลิกใช้บริการไหม (ไม่สมดุล ~26%)
 
     ความสัมพันธ์เป็นขั้นบันได: ลูกค้าใหม่มากและเก่ามากเลิกน้อย ช่วงเดือนที่ 8–22
@@ -113,7 +113,7 @@ def make_churn(seed: int, n: int) -> Dataset:
     logistic 0.51 · gradient boosting 0.64 — มีบันไดพอให้การเลือกโมเดลมีผลจริง
     """
     rng = np.random.default_rng(seed)
-    frame = _base_frame(rng, n)
+    frame = _base_frame(rng, n, id_offset)
 
     tenure = frame["tenure_months"].to_numpy()
     spend = frame["monthly_spend"].to_numpy()
@@ -147,7 +147,7 @@ def make_churn(seed: int, n: int) -> Dataset:
     )
 
 
-def make_housing(seed: int, n: int) -> Dataset:
+def make_housing(seed: int, n: int, id_offset: int = 0) -> Dataset:
     """regression — ทำนายมูลค่าต่อเดือน (เบ้ขวา)
 
     เป้าหมายเบ้เพราะมูลค่าจริงเบ้เสมอ · ผลของ tenure อิ่มตัวแบบเอกซ์โพเนนเชียล
@@ -157,7 +157,7 @@ def make_housing(seed: int, n: int) -> Dataset:
     gradient boosting 0.79
     """
     rng = np.random.default_rng(seed)
-    frame = _base_frame(rng, n)
+    frame = _base_frame(rng, n, id_offset)
 
     tenure = frame["tenure_months"].to_numpy()
     spend = frame["monthly_spend"].to_numpy()
@@ -186,9 +186,16 @@ def make_housing(seed: int, n: int) -> Dataset:
 TASKS = {"churn": make_churn, "housing": make_housing}
 
 
-def make(task: str, seed: int, n: int) -> Dataset:
+def make(task: str, seed: int, n: int, id_offset: int = 0) -> Dataset:
+    """สร้างข้อมูลหนึ่งชุด
+
+    `id_offset` เลื่อนช่วงของ `account_id` — ชุดที่แจกนิสิตกับชุดที่ใช้ตัดสินเป็น
+    คนละ dataset ที่สร้างจากคนละเมล็ด แต่ `account_id` เริ่มที่ 100_000 เท่ากันทั้งคู่
+    ถ้าไม่เลื่อน สองชุดจะมี id ชนกันทั้งหมด แล้วเทสต์ที่ตรวจว่า "ชุดตัดสินไม่ทับกับ
+    ที่นิสิตได้รับ" จะจับอะไรไม่ได้เลย
+    """
     try:
-        return TASKS[task](seed, n)
+        return TASKS[task](seed, n, id_offset)
     except KeyError:
         raise ValueError(f"ไม่รู้จักโจทย์ {task!r} — ที่มีคือ {sorted(TASKS)}") from None
 

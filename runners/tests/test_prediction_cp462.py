@@ -90,8 +90,16 @@ def test_config_hash_matches_what_the_students_selfcheck_pins(slug):
 
 @pytest.mark.parametrize("slug", SLUGS)
 def test_grading_data_is_not_what_students_get(slug):
-    spec = load(slug)
+    """ชุดที่ใช้ตัดสินมาจาก dataset คนละใบ — และเมล็ดของมันมาจาก ARENA_SECRETS
+
+    `load()` (ฝั่งนิสิต) ได้สเปคที่ไม่มีเมล็ดลับ · `PLUGIN.load_spec()` (ฝั่ง trusted)
+    ฉีดเข้ามา — ความต่างนี้คือสิ่งที่กันไม่ให้นิสิตคำนวณเฉลยเองได้
+    """
     from tabular.dataset import open_data
+
+    assert load(slug).grading_seed is None, "สเปคฝั่งนิสิตต้องไม่มีเมล็ดลับ"
+    spec = PLUGIN.load_spec(str(CONFIG_DIR / f"{slug}.yaml"))
+    assert spec.grading_seed is not None, "ฝั่ง trusted ต้องได้เมล็ดลับมา"
 
     student_ids = set()
     for part in open_data(spec).values():

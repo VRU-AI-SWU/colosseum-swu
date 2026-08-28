@@ -1,13 +1,5 @@
 {
-  "_comment": [
-    "ค่าที่ตรึงไว้เพื่อยืนยันว่าเครื่องนิสิตได้ข้อมูลและคะแนนตรงกับ grader",
-    "",
-    "**ห้ามแก้ตัวเลขในไฟล์นี้ให้ selfcheck ผ่าน** — ถ้า selfcheck แดง แปลว่า",
-    "ข้อมูลหรือการให้คะแนนเปลี่ยนไปจริง ซึ่งหมายความว่าคะแนนเก่าเทียบกับ",
-    "คะแนนใหม่ไม่ได้ ต้องขึ้น env_version แล้ว rejudge ทั้งกระดาน",
-    "",
-    "วัดด้วย numpy 2.x / pandas 2.x / scikit-learn 1.9 บน macOS arm64"
-  ],
+  "_comment": "ค่าที่ `python -m tabular.selfcheck` ใช้เทียบ — สร้างด้วย tools/pin_golden.py อย่าแก้ด้วยมือ · ทุกค่าวัดจากชุดของนิสิตล้วน ไม่มีอะไรจากชุดที่ใช้ตัดสิน",
   "env_version": "1.0.0",
   "pickle_runtime": {
     "scikit-learn": "1.9"
@@ -15,31 +7,31 @@
   "tasks": {
     "churn": {
       "baselines": {
-        "strong": 0.645096,
-        "trivial": 0.427481
+        "strong": 0.667082,
+        "trivial": 0.42341
       },
-      "config_hash": "sha256:be36b02667eb2cefbf5d148e337db2aca07d35e4d57e680ba8e0eed8fd611de3",
+      "config_hash": "sha256:9572a4523e65b841871a7cdd8799c34e059a6c68d9019d318c89c6afca14bce9",
       "sizes": {
-        "test_private": 1800,
-        "test_public": 1200,
+        "test": 3000,
         "train": 7200,
         "val": 1800
       },
+      "test": "sha256:349417a04acabc7d",
       "train": "sha256:c0d3cd037ebc6963",
       "val": "sha256:6f4bd80412e749a5"
     },
     "housing": {
       "baselines": {
-        "strong": 0.795541,
-        "trivial": -0.00087
+        "strong": 0.809715,
+        "trivial": -0.000891
       },
-      "config_hash": "sha256:71eabd98eb0e17525c892c9f2a2a6d7c31c07d05ca82da9dfcd82023ebeac0eb",
+      "config_hash": "sha256:ca946e6a8170994e37a9965526c10a97e92c975d266da837cbfb634aa79e1261",
       "sizes": {
-        "test_private": 1800,
-        "test_public": 1200,
+        "test": 3000,
         "train": 7200,
         "val": 1800
       },
+      "test": "sha256:32612bb2ae46898f",
       "train": "sha256:5c4abad9c38cc6b9",
       "val": "sha256:ca73c74a518ce0bf"
     }

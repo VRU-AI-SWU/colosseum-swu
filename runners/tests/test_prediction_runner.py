@@ -465,16 +465,17 @@ def test_the_checks_use_the_same_rows_every_time(make_submission):
     assert first == second
 
 
-def test_the_tiny_subset_is_what_catches_a_mild_batch_leak(make_submission, monkeypatch):
-    """พิสูจน์ว่าก้อนจิ๋วเป็นตัวจับจริง ไม่ใช่ของประดับ
+def test_the_single_row_probe_is_what_catches_a_mild_batch_leak(make_submission, monkeypatch):
+    """พิสูจน์ว่าการทำนายทีละแถวเป็นตัวจับจริง ไม่ใช่ของประดับ
 
-    predictor ตัวเดียวกับข้อ `batch_dependent` ข้างบน · ปิดก้อนจิ๋วแล้วมันรอด
-    เพราะค่าเฉลี่ยของ subset 30% บังเอิญใกล้ค่าเฉลี่ยของชุดเต็มพอที่ไม่มีแถวไหน
-    ตกคนละฝั่ง — นี่คือเหตุการณ์จริงที่ทำให้ `TINY_SUBSET_ROWS` ถูกเพิ่มเข้ามา
+    predictor ตัวเดียวกับข้อ `batch_dependent` ข้างบน · ปิดการทำนายเดี่ยวแล้วมันรอด
+    ทั้งที่เป็น leakage ชัดๆ — เกิดขึ้นจริงทั้งบนข้อมูลของเทสต์นี้และบนข้อมูลจริง
+    ของ CP462 (subset 30% กับก้อน 5 แถว ต่างกัน 0 แถวทั้งคู่) ซึ่งเป็นเหตุผลที่
+    `SINGLE_ROW_PROBES` มีอยู่
     """
     from runners.prediction import runner as runner_mod
 
-    monkeypatch.setattr(runner_mod, "TINY_SUBSET_ROWS", 10**9)  # ปิดก้อนจิ๋ว
+    monkeypatch.setattr(runner_mod, "SINGLE_ROW_PROBES", 0)  # ปิดการทำนายเดี่ยว
     result = run(
         make_submission(
             """
@@ -489,5 +490,22 @@ def test_the_tiny_subset_is_what_catches_a_mild_batch_leak(make_submission, monk
     )
     assert result.ok, (
         "ถ้าข้อนี้เริ่มล้ม แปลว่า subset 30% จับได้เองแล้ว — ตรวจว่ามีอะไรเปลี่ยน "
-        f"(ขนาดชุด · เมล็ด · สัดส่วน) ก่อนจะสรุปว่าก้อนจิ๋วไม่จำเป็น · ได้ {result.status}"
+        f"(ขนาดชุด · เมล็ด · สัดส่วน) ก่อนจะสรุปว่าการทำนายเดี่ยวไม่จำเป็น · ได้ {result.status}"
     )
+
+
+def test_probe_rows_span_the_predicted_values():
+    """แถวที่หยิบมาทำนายเดี่ยวต้องมีทั้งสองคลาส — ไม่งั้นการยุบของสถิติก้อนไม่ปรากฏ"""
+    from runners.prediction.runner import _probe_rows
+
+    y = np.array([0] * 50 + [1] * 10)
+    rows = _probe_rows(y, 8)
+    assert len(rows) == 8
+    assert set(y[rows]) == {0, 1}, f"หยิบมาแต่คลาสเดียว: {y[rows]}"
+
+
+def test_probe_rows_handle_fewer_rows_than_probes():
+    from runners.prediction.runner import _probe_rows
+
+    assert _probe_rows(np.array([1, 0]), 8) == [0, 1]
+    assert _probe_rows(np.array([]), 8) == []

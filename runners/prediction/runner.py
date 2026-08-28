@@ -48,15 +48,22 @@ HANDSHAKE_TIMEOUT_S = 120.0  # `joblib.load` ของ pipeline ใหญ่ๆ 
 #: สัดส่วนของ subset ที่ใช้ตรวจ batch dependence (template §4)
 SUBSET_FRACTION = 0.3
 
-#: **ก้อนจิ๋วที่ตรวจด้วยอีกก้อนหนึ่ง** — subset 30% อย่างเดียวไม่พอ
+#: **จำนวนแถวที่ทำนายทีละแถวเดี่ยวๆ** — ตัวจับ leakage ที่ไม่พึ่งโชค
 #:
-#: เจอตอนเขียนเทสต์: predictor ที่ทำนายด้วย `x > X["num"].mean()` ซึ่งเป็น leakage
-#: ชัดๆ **รอดการตรวจ 30% ไปได้** เพราะค่าเฉลี่ยของ 18 แถวบังเอิญใกล้ค่าเฉลี่ยของ
-#: 60 แถวมากพอที่ไม่มีแถวไหนตกคนละฝั่ง · ก้อนยิ่งเล็ก สถิติของก้อนยิ่งเหวี่ยงห่าง
-#: จากของชุดเต็ม การตรวจจึงไวขึ้นมาก และราคาของมันคือการเรียก `predict` บนไม่กี่แถว
+#: subset สุ่มอย่างเดียวไม่พอ และเหตุผลไม่ตรงกับที่คิดตอนแรก · predictor ที่ทำนาย
+#: ด้วย `x > X[col].mean()` ซึ่งเป็น leakage ชัดๆ รอดทั้งก้อน 30% และก้อน 5 แถว
+#: บนข้อมูลจริงของ CP462 — วัดแล้วต่างกัน 0 แถวทั้งคู่
 #:
-#: pipeline ที่ถูกต้องทำนายทีละแถวเป็นอิสระอยู่แล้ว ก้อนเล็กจึงไม่ทำให้มันตกด้วย
-TINY_SUBSET_ROWS = 5
+#: เหตุผล: ก้อนเล็กทำให้สถิติเหวี่ยงห่างจริง (mean 244.39 → 253.82) แต่ก็เหลือแถว
+#: ให้จับน้อยลงพอๆ กัน จำนวนแถวที่คาดว่าจะตกคนละฝั่งเลยแทบไม่ขึ้นกับขนาดก้อน
+#: และอยู่แถวๆ 0.2 แถวทั้งสองขนาด · การตรวจแบบสุ่มจึงเป็นการเสี่ยงโชค
+#:
+#: **ก้อนขนาด 1 แถวไม่ใช่การเสี่ยงโชค** — สถิติของก้อนที่มีแถวเดียวเสื่อมสภาพ
+#: โดยนิยาม (`mean(x) == x` · `std(x) == 0` · หมวดที่พบมีหมวดเดียว) อะไรก็ตามที่
+#: คำนวณจากก้อนจะให้ผลต่างจากตอนอยู่ในก้อนใหญ่แน่นอน ไม่ใช่แค่มีโอกาส
+#:
+#: pipeline ที่ถูกต้องทำนายทีละแถวเป็นอิสระอยู่แล้ว — ข้อนี้จึงไม่ทำให้มันตก
+SINGLE_ROW_PROBES = 8
 
 #: จำนวนแถวที่ยกมาแสดงเวลาการตรวจไม่ผ่าน — พอให้เห็นรูปแบบ ไม่ท่วมหน้าจอ
 EXAMPLES_SHOWN = 5
@@ -257,28 +264,56 @@ def _run_checks(box, features, y_pred, timeout, spec, plugin) -> dict[str, bool]
                "  มักเกิดจาก transformer ที่ `fit` ใหม่ตอน `predict` แทนที่จะใช้ค่าที่จำไว้",
     )
 
-    # 3) ทำนายเฉพาะ subset — ผลของแถวที่อยู่ในทั้งสองก้อนต้องตรงกัน
-    #    สองขนาด: 30% ตามที่ template ประกาศไว้ และก้อนจิ๋วที่ไวกว่ามาก (ดู TINY_SUBSET_ROWS)
-    sizes = [max(1, int(n * SUBSET_FRACTION))]
-    if n > TINY_SUBSET_ROWS:
-        sizes.append(TINY_SUBSET_ROWS)
+    batch_advice = (
+        "แปลว่าโมเดลคำนวณสถิติจากก้อนที่รับเข้ามา (ค่าเฉลี่ย · ส่วนเบี่ยงเบน ·\n"
+        "  รายการหมวด) แทนที่จะใช้ค่าที่จำไว้ตอน `fit` — ตอนใช้งานจริงที่ทำนาย\n"
+        "  ทีละแถว โมเดลแบบนี้จะให้ผลคนละอย่างกับที่วัดไว้"
+    )
 
-    for size in sizes:
-        take = np.sort(rng.choice(n, size=size, replace=False))
-        subset = _predict(
-            box, features.iloc[take].reset_index(drop=True), timeout,
-            what=f"subset {len(take)} แถว (ตรวจ leakage)",
+    # 3) ทำนายเฉพาะ subset — ผลของแถวที่อยู่ในทั้งสองก้อนต้องตรงกัน
+    take = np.sort(rng.choice(n, size=max(1, int(n * SUBSET_FRACTION)), replace=False))
+    subset = _predict(
+        box, features.iloc[take].reset_index(drop=True), timeout,
+        what=f"subset {len(take)} แถว (ตรวจ leakage)",
+    )
+    _require_same(
+        y_pred[take], subset, take,
+        status="batch_dependent",
+        headline=f"ทำนายเฉพาะ {len(take)} แถวแล้วได้ผลต่างจากตอนทำนายทั้ง {n} แถว",
+        advice=batch_advice,
+    )
+
+    # 4) ทำนายทีละแถวเดี่ยวๆ — ตัวจับที่ไม่พึ่งโชค (ดู SINGLE_ROW_PROBES)
+    for row in _probe_rows(y_pred, SINGLE_ROW_PROBES):
+        alone = _predict(
+            box, features.iloc[[row]].reset_index(drop=True), timeout,
+            what=f"แถวที่ {row} เดี่ยวๆ (ตรวจ leakage)",
         )
         _require_same(
-            y_pred[take], subset, take,
+            y_pred[[row]], alone, np.array([row]),
             status="batch_dependent",
-            headline=f"ทำนายเฉพาะ {len(take)} แถวแล้วได้ผลต่างจากตอนทำนายทั้ง {n} แถว",
-            advice="แปลว่าโมเดลคำนวณสถิติจากก้อนที่รับเข้ามา (ค่าเฉลี่ย · ส่วนเบี่ยงเบน ·\n"
-                   "  รายการหมวด) แทนที่จะใช้ค่าที่จำไว้ตอน `fit` — ตอนใช้งานจริงที่ทำนาย\n"
-                   "  ทีละแถว โมเดลแบบนี้จะให้ผลคนละอย่างกับที่วัดไว้",
+            headline=f"ทำนายแถวที่ {row} เดี่ยวๆ แล้วได้ผลต่างจากตอนอยู่ในก้อน {n} แถว",
+            advice=batch_advice,
         )
 
     return {"determinism": True, "row_permutation": True, "subset_consistency": True}
+
+
+def _probe_rows(y_pred: np.ndarray, k: int) -> list[int]:
+    """เลือกแถวสำหรับทำนายเดี่ยวๆ ให้**กระจายตามค่าที่ทำนายได้**
+
+    ไม่สุ่ม — เรียงตามคำทำนายแล้วหยิบให้ห่างเท่าๆ กัน เพื่อให้ได้ทั้งแถวที่ถูกทำนาย
+    เป็นคลาสหนึ่งและอีกคลาสหนึ่ง (หรือทั้งค่าสูงและค่าต่ำสำหรับ regression)
+    โมเดลที่ตัดสินด้วยสถิติของก้อนจะยุบคำทำนายไปทางเดียวเมื่อก้อนเหลือแถวเดียว
+    การมีแถวจากทั้งสองฝั่งจึงทำให้จับได้แน่ ไม่ใช่แค่มีโอกาส
+    """
+    n = len(y_pred)
+    if n == 0:
+        return []
+    order = np.argsort(y_pred, kind="stable")
+    k = min(k, n)
+    picks = np.linspace(0, n - 1, k).round().astype(int)
+    return sorted({int(order[p]) for p in picks})
 
 
 def _require_same(expected, got, row_ids, *, status: str, headline: str, advice: str) -> None:

@@ -9,23 +9,45 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from tabular import __version__
 from tabular.config import ConfigError, TaskSpec, load_config
 from tabular.dataset import grading_data
 from tabular.metrics import score
+from tabular.secrets import load_grading_seed
 
 #: เพดานเวลาต่อการเรียก `predict` หนึ่งครั้ง — **ตัวกันงานค้าง ไม่มีผลต่อคะแนน**
 #: กว้างพอสำหรับ pipeline ที่หนัก (ensemble ใหญ่ๆ) บนชุดหลักพันแถว
 PREDICT_TIMEOUT_S = 300.0
 
+#: ตัวแปรแวดล้อมที่ยอมให้ใช้เมล็ดสำรองแทนของจริง — **dev กับเทสต์เท่านั้น**
+#:
+#: อยู่ใน environment ไม่ใช่ในโค้ด ด้วยเหตุผลเดียวกับ `allow_seed_fallback` ของ
+#: CP463: เครื่องที่ไม่มี `ARENA_SECRETS` ต้องพัฒนาและรันเทสต์ได้ แต่การเปิดมัน
+#: ต้องเป็นการกระทำที่มองเห็นได้ ไม่ใช่ค่าเริ่มต้น · `load_grading_seed` เตือนดังๆ
+#: ทุกครั้งที่ใช้ และ worker ของจริงไม่เคยตั้งค่านี้
+ALLOW_FALLBACK_ENV = "ARENA_CP462_ALLOW_SEED_FALLBACK"
+
 
 class TabularPlugin:
     name = "cp462-tabular"
 
+    @property
+    def allow_seed_fallback(self) -> bool:
+        return os.environ.get(ALLOW_FALLBACK_ENV) == "1"
+
     def load_spec(self, path: str) -> TaskSpec:
-        return load_config(path)
+        """โหลดสเปคสาธารณะ **แล้วฉีดเมล็ดของชุดที่ใช้ตัดสินเข้าไป**
+
+        นี่คือจุดเดียวที่เมล็ดลับเข้าสู่ระบบ และมันอยู่ฝั่ง trusted เสมอ —
+        `predictor_host` ไม่เคยเรียกฟังก์ชันนี้ และ `tabular` ก็ไม่ได้อยู่ใน image
+        """
+        spec = load_config(path)
+        return spec.replace(
+            grading_seed=load_grading_seed(spec.slug, allow_fallback=self.allow_seed_fallback)
+        )
 
     def apply_overrides(self, spec: TaskSpec, overrides: dict[str, Any]) -> TaskSpec:
         return spec.replace(**overrides) if overrides else spec

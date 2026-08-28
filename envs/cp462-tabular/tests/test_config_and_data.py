@@ -18,6 +18,7 @@ import pytest
 
 from tabular.config import CONFIG_DIR, ConfigError, TaskSpec, load, load_config
 from tabular.dataset import all_parts, features_only, grading_data, open_data
+from tabular.secrets import FALLBACK_SEED, GradingSeedUnavailable
 
 SLUGS = sorted(p.stem for p in CONFIG_DIR.glob("*.yaml"))
 STARTER = Path(__file__).resolve().parent.parent / "tabular" / "starter"
@@ -27,7 +28,8 @@ def base(**kw) -> TaskSpec:
     args = dict(
         slug="t", task="churn", title="ชื่อ", kind="classification", primary="macro_f1",
         n_rows=1000, data_seed=1, split_seed=2, bootstrap_seed=3,
-        ratios=(0.6, 0.15, 0.1, 0.15), labels=[0, 1],
+        ratios=(0.6, 0.15, 0.25), labels=[0, 1],
+        grading_rows=500, grading_public_ratio=0.4,
     )
     args.update(kw)
     return TaskSpec(**args)
@@ -63,7 +65,9 @@ def test_title_does_not_change_the_hash():
 @pytest.mark.parametrize(
     "field,value",
     [
-        ("ratios", (0.5, 0.2, 0.15, 0.15)),
+        ("ratios", (0.5, 0.2, 0.3)),
+        ("grading_rows", 800),
+        ("grading_public_ratio", 0.5),
         ("data_seed", 999),
         ("split_seed", 999),
         ("bootstrap_seed", 999),
@@ -87,9 +91,11 @@ def test_anything_that_affects_scoring_changes_the_hash(field, value):
         ({"kind": "regression", "primary": "macro_f1"}, "ที่ใช้ได้คือ"),
         ({"labels": []}, "labels"),
         ({"kind": "regression", "primary": "r2", "labels": [0, 1]}, "ต้องไม่มี"),
-        ({"ratios": (0.6, 0.4)}, "4 ค่า"),
-        ({"ratios": (0.6, 0.2, 0.1, 0.2)}, "1.0"),
+        ({"ratios": (0.6, 0.4)}, "3 ค่า"),
+        ({"ratios": (0.6, 0.2, 0.1)}, "1.0"),
         ({"n_rows": 50}, "น้อยเกินไป"),
+        ({"grading_rows": 50}, "น้อยเกินไป"),
+        ({"grading_public_ratio": 1.0}, "ระหว่าง 0 กับ 1"),
     ],
 )
 def test_bad_config_fails_at_load_not_at_scoring(kw, match):
@@ -119,17 +125,46 @@ def test_replace_rejects_unknown_fields():
 
 
 @pytest.mark.parametrize("slug", SLUGS)
-def test_open_data_gives_only_train_and_val(slug):
-    """**ด่านสำคัญที่สุดของไฟล์นี้** — ชุดที่ใช้ตัดสินต้องไม่หลุดออกมา"""
-    assert set(open_data(load(slug))) == {"train", "val"}
+def test_open_data_gives_the_three_student_parts(slug):
+    assert set(open_data(load(slug))) == {"train", "val", "test"}
+
+
+# ── ชุดที่ใช้ตัดสินต้องเข้าถึงไม่ได้จากฝั่งนิสิต ────────────────────
+
+
+@pytest.mark.parametrize("slug", SLUGS)
+def test_students_cannot_compute_the_grading_answers(slug):
+    """**ด่านสำคัญที่สุดของทั้งวิชา**
+
+    เดิมทุกส่วนมาจาก dataset ชุดเดียวที่สร้างจากเมล็ดในไฟล์ config ที่แจก แปลว่า
+    นิสิตรัน `grading_data(load('churn'), 'private')` แล้วได้เฉลยครบทุกแถว
+    วัดแล้วทำ macro-F1 ได้ 1.0000 ด้วยการจำเฉลยแล้วจับคู่ด้วย `account_id`
+
+    ตอนนี้เมล็ดของชุดที่ใช้ตัดสินไม่ได้อยู่ในไฟล์ config และไม่ได้อยู่ในแพ็กเกจ
+    `load(slug)` จึงคืนสเปคที่ไม่มีมัน และ `grading_data` ต้องปฏิเสธ
+    """
+    spec = load(slug)
+    assert spec.grading_seed is None, "สเปคที่โหลดจากไฟล์ที่แจกต้องไม่มีเมล็ดลับ"
+    for kind in ("public", "private"):
+        with pytest.raises(GradingSeedUnavailable):
+            grading_data(spec, kind)
+
+
+@pytest.mark.parametrize("slug", SLUGS)
+def test_the_secret_seed_is_not_in_the_shipped_config(slug):
+    """อ่านไฟล์ตรงๆ ด้วย — เผื่อวันหนึ่งมีคนใส่กลับเข้าไปแล้ว loader เมินมันเงียบๆ"""
+    text = (CONFIG_DIR / f"{slug}.yaml").read_text(encoding="utf-8")
+    for line in text.splitlines():
+        assert not line.strip().startswith("grading_seed:"), (
+            f"configs/{slug}.yaml มี grading_seed — นั่นคือการแจกเฉลยให้นิสิต"
+        )
 
 
 @pytest.mark.parametrize("slug", SLUGS)
 def test_grading_sets_do_not_overlap_what_students_get(slug):
-    spec = load(slug)
-    parts = all_parts(spec)
+    spec = load(slug).replace(grading_seed=FALLBACK_SEED)
     student_ids = set()
-    for part in parts.open_parts().values():
+    for part in all_parts(spec).open_parts().values():
         student_ids |= set(part.X["account_id"])
 
     for kind in ("public", "private"):
@@ -137,14 +172,23 @@ def test_grading_sets_do_not_overlap_what_students_get(slug):
         assert not (graded & student_ids), f"{kind}: มีแถวซ้ำกับที่นิสิตได้รับ"
 
 
+def test_a_different_grading_seed_gives_different_answers():
+    """ชุดที่ใช้ตัดสินต้องขึ้นกับเมล็ดลับจริงๆ — ไม่ใช่มีฟิลด์ไว้เฉยๆ"""
+    spec = load(SLUGS[0])
+    a = grading_data(spec.replace(grading_seed=FALLBACK_SEED), "private")
+    b = grading_data(spec.replace(grading_seed=FALLBACK_SEED + 1), "private")
+    assert not a.X.equals(b.X)
+
+
 def test_grading_data_rejects_a_bad_kind():
+    spec = load(SLUGS[0]).replace(grading_seed=FALLBACK_SEED)
     with pytest.raises(ValueError, match="public"):
-        grading_data(load(SLUGS[0]), "test")
+        grading_data(spec, "ไม่มีจริง")
 
 
 @pytest.mark.parametrize("slug", SLUGS)
 def test_features_only_drops_the_answer(slug):
-    spec = load(slug)
+    spec = load(slug).replace(grading_seed=FALLBACK_SEED)
     test = grading_data(spec, "public")
     X = features_only(test)
     assert test.y.name not in X.columns
@@ -181,16 +225,16 @@ def test_starter_predictor_satisfies_the_contract(tmp_path):
         [sys.executable, "-c",
          "from predictor import Predictor\n"
          "from tabular.config import load\n"
-         "from tabular.dataset import grading_data\n"
+         "from tabular.dataset import open_data\n"
          "spec = load('housing')\n"
-         "test = grading_data(spec, 'public')\n"
+         "test = open_data(spec)['test']\n"
          "y = Predictor({}).predict(test.X)\n"
          "assert len(y) == len(test), (len(y), len(test))\n"
          "print('OK', len(y))"],
         cwd=tmp_path, capture_output=True, text=True, timeout=300,
     )
     assert check.returncode == 0, check.stderr
-    assert "OK 1200" in check.stdout
+    assert "OK 3000" in check.stdout
 
 
 def test_starter_predictor_does_not_import_the_answers():

@@ -27,7 +27,19 @@ def agent_env_validator(archive_url: str, whitelist: frozenset[str]):
     return check_import_whitelist(inspect_archive(archive_url), whitelist)
 
 
-VALIDATORS = {"agent_env": agent_env_validator}
+def prediction_validator(archive_url: str, whitelist: frozenset[str]):
+    """ตัวตรวจไฟล์ของ task template `prediction`"""
+    from runners.prediction.validate import check_import_whitelist, inspect_archive
+
+    return check_import_whitelist(inspect_archive(archive_url), whitelist)
+
+
+#: `Competition.task_type` → ตัวตรวจไฟล์ · competition ที่ประกาศ task_type ที่ไม่มีในนี้
+#: จะถูกปฏิเสธตอนรับไฟล์พร้อมข้อความที่บอกว่าต้องลงทะเบียนที่ไหน (`core/service.py`)
+VALIDATORS = {
+    "agent_env": agent_env_validator,
+    "prediction": prediction_validator,
+}
 
 PIN_DIR = REPO / "core" / "baseline_pins"
 
