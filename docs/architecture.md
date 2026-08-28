@@ -228,6 +228,7 @@ credential ที่อยู่ได้นานเสมอ สิ่งท�
 | Google OAuth | ✅ ใช้งานแล้ว — `@g.swu.ac.th` เท่านั้น ([`core/auth.py`](../core/auth.py)) · token ยังเป็น credential ของ `arena submit` ตามเดิม ดู §4.3 |
 | runner daemon + WebSocket | ยังไม่มี — worker เป็น thread |
 | ผู้สอนตั้งขนาดทีมจาก UI | ✅ `Course` + แผงผู้สอนบนหน้าเว็บ — ดู §4.6 |
+| alias นิรนามบน leaderboard | ✅ ทีมตั้งเองจากแถบทีม · **ผู้สอนเห็นชื่อจริงเสมอ** — `reveal_names` เคยไม่มีใครเรียกด้วย `True` เลย แม้แต่ผู้สอนก็ไม่เห็นชื่อจริง |
 | เพดานไฟล์บน named tunnel | ✅ วัดแล้ว **100 MiB** · `arena submit` ตรวจให้ที่ 95 MB |
 | replay viewer | ✅ `python -m vacuum.viewer replays/1.vrp` → หน้าเว็บไฟล์เดียว ([`vacuum/viewer.py`](../envs/cp463-vacuum/vacuum/viewer.py)) · **ทำงานกับไฟล์ในเครื่องเท่านั้น** เพราะ header ของ `.vrp` มี seed + ผังห้องครบ การเสิร์ฟผ่าน API จะยกผังห้อง public ให้ทั้งชุด |
 | Windows | ✅ **ทดสอบครบทั้งเส้นทางแล้ว** (27 ส.ค. 2026 · Python 3.14.4) — install · `selfcheck` · `eval` · `--check-reset` · `submit --dry-run` · `submit` · `status` · `arena eval` เคยพัง แก้ใน v1.0.2 ([§4.4](#44-windows-select-รับได้เฉพาะ-socket--ปิดแล้ว-v102)) · **คะแนนตรงกับ macOS ทุกบิต** `0.27318887262207453` (float64 ครบ 17 หลัก) |

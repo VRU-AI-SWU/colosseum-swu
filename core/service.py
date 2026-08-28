@@ -16,6 +16,7 @@ from typing import Any, Callable, Protocol
 
 from core.domain import (
     DEFAULT_MAX_TEAM_SIZE,
+    AliasInvalid,
     Competition,
     CompetitionClosed,
     Course,
@@ -28,6 +29,7 @@ from core.domain import (
     Team,
     User,
     new_id,
+    clean_alias,
     new_token,
     utcnow,
 )
@@ -134,6 +136,39 @@ class Arena:
             self.store.save_team(team)
             self.store.record("team.created", "team", team.id, actor_id=user.id, solo=True)
         return user, team
+
+    def set_alias(self, *, team: Team, raw: str | None, actor_id: str | None) -> Team:
+        """ทีมตั้งชื่อที่จะแสดงบนกระดานเอง — README §6.1 "ลดแรงกดดันของทีมท้ายตาราง"
+
+        ปฏิเสธชื่อที่ซ้ำกับทีมอื่นในวิชาเดียวกัน **โดยเทียบทั้งชื่อจริงและชื่อบนกระดาน**
+        ของทีมที่ยังใช้งานอยู่ · ไม่ใช่เรื่องมารยาท — กระดานคือที่ที่คนใช้ตัดสินใจว่า
+        ตัวเองอยู่ตรงไหน สองแถวที่ชื่อเหมือนกันทำให้อ่านผิดได้จริง
+
+        ผู้สอนยังเห็นชื่อจริงเสมอ ตัวนี้จึงไม่ใช่การซ่อนตัวจากการตรวจ
+        """
+        alias = clean_alias(raw)
+        if alias is not None:
+            taken = {
+                name.casefold()
+                for other in self.store.teams.values()
+                if other.is_active and other.course_id == team.course_id and other.id != team.id
+                for name in (other.name, other.alias)
+                if name
+            }
+            if alias.casefold() in taken:
+                raise AliasInvalid(
+                    f"มีทีมอื่นใช้ชื่อ {alias!r} อยู่แล้ว — เลือกชื่อที่ไม่ซ้ำ"
+                )
+
+        before, team.alias = team.alias, alias
+        if before == alias:
+            return team
+        self.store.save_team(team)
+        self.store.record(
+            "team.alias", "team", team.id, actor_id=actor_id,
+            before=before, after=alias,
+        )
+        return team
 
     def set_max_team_size(self, *, course_id: str, size: int, actor_id: str | None) -> Course:
         """ผู้สอนเปลี่ยนขนาดทีมของวิชา — **ผู้เรียกต้องตรวจสิทธิ์มาก่อนแล้ว**

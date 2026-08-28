@@ -25,6 +25,7 @@ from typing import Annotated, Optional
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 
 from core.domain import (
+    AliasInvalid,
     CompetitionClosed,
     QuotaExceeded,
     RunKind,
@@ -162,6 +163,8 @@ def create_app(
                 "name": team.name,
                 "token": team.token,
                 "invite_code": team.invite_code,
+                "alias": team.alias,
+                "shown_as": team.display_name(reveal=False),
                 "members": members,
                 "is_solo": len(team.member_ids) <= 1,
             },
@@ -174,6 +177,21 @@ def create_app(
             # ด่านจริงอยู่ที่ endpoint ซึ่งตรวจซ้ำเสมอ การซ่อนปุ่มเป็นแค่ความสะอาดของ UI
             "is_staff": arena.team_acts_as_staff(team),
         }
+
+    @app.post("/api/teams/alias")
+    def set_alias(team: TeamDep, alias: str = Form("")):
+        """ตั้งชื่อที่จะขึ้นกระดานของทีมตัวเอง — ส่งค่าว่างมาเพื่อกลับไปใช้ชื่อจริง
+
+        ทีมตั้งของตัวเองเท่านั้น ไม่ต้องมีสิทธิ์พิเศษ — README §6.1 ให้เป็นสิทธิ์ของทีม
+        """
+        try:
+            team = arena.set_alias(
+                team=team, raw=alias,
+                actor_id=team.member_ids[0] if team.member_ids else None,
+            )
+        except AliasInvalid as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {"alias": team.alias, "shown_as": team.display_name(reveal=False)}
 
     @app.post("/api/courses/{course_id}/max-team-size")
     def set_max_team_size(course_id: str, team: TeamDep, size: int = Form(...)):
@@ -363,7 +381,10 @@ def create_app(
 
         runs = [r for r in arena.queue.runs.values() if r.competition_id == competition.id]
         marks = baselines.get(slug, [])
-        rows = build(runs, arena.store.teams, kind=run_kind)
+        # ผู้สอนเห็นชื่อจริงเสมอ (README §6.1) — alias เป็นการลดแรงกดดันระหว่างนิสิต
+        # ด้วยกัน ไม่ใช่การซ่อนตัวจากการตรวจ · ก่อนหน้านี้ไม่มีใครเห็นชื่อจริงเลย
+        rows = build(runs, arena.store.teams, kind=run_kind,
+                     reveal_names=arena.team_acts_as_staff(team))
 
         return {
             "competition": slug,

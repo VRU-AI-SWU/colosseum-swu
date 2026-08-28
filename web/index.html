@@ -397,6 +397,29 @@ async function copy(text, el) {
   }
 }
 
+// ── ชื่อบนกระดาน ───────────────────────────────────────────────────
+// README §6.1 — ทีมเลือกเองได้ เพื่อลดแรงกดดันของทีมท้ายตาราง
+// **ผู้สอนยังเห็นชื่อจริงเสมอ** จึงไม่ใช่การซ่อนตัวจากการตรวจ และต้องบอกให้ชัด
+// ไม่งั้นจะมีคนเข้าใจว่าตั้งแล้วทำอะไรก็ได้โดยไม่มีใครรู้ว่าเป็นใคร
+async function promptAlias(team) {
+  const now = team.alias || "";
+  const raw = prompt(
+    "ชื่อที่จะขึ้นบน leaderboard\n\n" +
+    "เว้นว่างเพื่อกลับไปใช้ชื่อจริง (" + team.name + ")\n" +
+    "ผู้สอนเห็นชื่อจริงเสมอ ไม่ว่าจะตั้งเป็นอะไร",
+    now,
+  );
+  if (raw === null) return;   // กดยกเลิก — ต่างจากการเว้นว่างซึ่งแปลว่า "ล้าง"
+  try {
+    const body = new URLSearchParams({ alias: raw });
+    await api("/api/teams/alias", { method: "POST", body });
+    renderTeam(await api("/api/me"));
+    refresh();                // กระดานแสดงชื่อใหม่ทันที ไม่ต้องรอรอบถัดไป
+  } catch (e) {
+    alert(e.message || "เปลี่ยนชื่อไม่สำเร็จ");
+  }
+}
+
 // ── แผงของผู้สอน ───────────────────────────────────────────────────
 // โผล่เฉพาะเมื่อ `/api/me` บอกว่าเป็นผู้สอน · **การซ่อนไม่ใช่ความปลอดภัย** —
 // endpoint ตรวจสิทธิ์ซ้ำเสมอ เพราะใครก็ยิงตรงด้วย curl ได้ และโทเคนของทีม
@@ -448,7 +471,9 @@ function renderTeam(me) {
     `<span><b>${escapeHtml(team.name)}</b> <span class="who">${who}</span></span>` +
     `<span class="who">รหัสเชิญ</span> <span class="chip" id="c-invite">${team.invite_code}</span>` +
     `<span class="who">โทเคน</span> <span class="chip" id="c-token">คลิกเพื่อคัดลอก</span>` +
+    `<span class="who">บนกระดาน</span> <span class="chip" id="c-alias">${escapeHtml(team.shown_as || team.name)}</span>` +
     `<span class="spacer"></span>` +
+    `<button class="linkish" id="alias-edit">เปลี่ยนชื่อบนกระดาน</button>` +
     `<button class="linkish" id="join-open">เข้าทีมเพื่อน</button>` +
     `<button class="linkish" id="help-open">สองรหัสนี้ใช้ยังไง</button>` +
     `<button class="linkish danger" id="rotate">โทเคนหลุด?</button>` +
@@ -469,6 +494,7 @@ function renderTeam(me) {
 
   $("c-invite").onclick = (e) => copy(team.invite_code, e.target);
   $("c-token").onclick = (e) => copy(team.token, e.target);
+  $("alias-edit").onclick = () => promptAlias(team);
   $("join-open").onclick = () => promptJoin();
   $("rotate").onclick = () => rotateToken();
   $("help-open").onclick = () => {

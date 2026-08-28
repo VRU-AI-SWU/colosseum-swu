@@ -107,6 +107,39 @@ class TeamSizeInvalid(Exception):
     """ขนาดทีมที่ตั้งใหม่ใช้ไม่ได้ — ข้อความต้องบอกว่าทำไมและต้องทำอะไรต่อ"""
 
 
+#: ความยาวสูงสุดของชื่อบนกระดาน — ยาวกว่านี้ตารางจะเสียรูปบนมือถือ
+MAX_ALIAS_LENGTH = 24
+
+#: คำที่จองไว้ให้หมุด baseline — ทีมที่ตั้งชื่อว่า "Gold" จะอ่านเหมือนหมุดของผู้สอน
+#: ซึ่งเป็นการเข้าใจผิดที่มีผลต่อการตัดสินใจของคนอื่น ไม่ใช่แค่เรื่องมารยาท
+RESERVED_ALIASES = frozenset({"bronze", "silver", "gold", "diamond", "baseline"})
+
+
+class AliasInvalid(Exception):
+    """ชื่อบนกระดานที่ตั้งใหม่ใช้ไม่ได้"""
+
+
+def clean_alias(raw: str | None) -> str | None:
+    """ตรวจและทำความสะอาดชื่อที่จะขึ้นกระดาน — คืน `None` ถ้าขอกลับไปใช้ชื่อจริง
+
+    **ตัดอักขระควบคุมทิ้ง** เพราะ leaderboard วาดด้วย HTML และชื่อเดินทางผ่าน JSON
+    อักขระอย่าง zero-width space ทำให้สองทีมมีชื่อที่ตาเห็นเหมือนกันได้
+    """
+    if raw is None:
+        return None
+    text = "".join(ch for ch in raw if ch.isprintable() and not ch.isspace() or ch == " ")
+    text = " ".join(text.split())  # ยุบช่องว่างซ้ำ ตัดหัวท้าย
+    if not text:
+        return None  # ส่งค่าว่างมา = ขอใช้ชื่อจริง
+    if len(text) > MAX_ALIAS_LENGTH:
+        raise AliasInvalid(f"ชื่อยาวเกินไป — ไม่เกิน {MAX_ALIAS_LENGTH} ตัวอักษร (ตอนนี้ {len(text)})")
+    if text.lower() in RESERVED_ALIASES:
+        raise AliasInvalid(
+            f"{text!r} เป็นชื่อของหมุด baseline บนกระดาน — เลือกชื่ออื่นที่ไม่ทำให้คนอื่นสับสน"
+        )
+    return text
+
+
 @dataclass
 class Course:
     """วิชาหนึ่งวิชาในเทอมหนึ่ง — เจ้าของกติกาที่ใช้ร่วมกันทุก competition ในวิชานั้น
