@@ -21,7 +21,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from core.db import Database
-from core.domain import AuditEvent, Competition, Run, Submission, Team, User, new_id, utcnow
+from core.domain import (
+    AuditEvent,
+    Competition,
+    Course,
+    Run,
+    Submission,
+    Team,
+    User,
+    new_id,
+    utcnow,
+)
 
 
 @dataclass
@@ -77,6 +87,7 @@ class ArtifactStore:
 
 @dataclass
 class Store:
+    courses: dict[str, Course] = field(default_factory=dict)
     teams: dict[str, Team] = field(default_factory=dict)
     competitions: dict[str, Competition] = field(default_factory=dict)
     submissions: dict[str, Submission] = field(default_factory=dict)
@@ -85,6 +96,12 @@ class Store:
     db: Database | None = None
 
     # ── เขียน (ต้องเรียกทุกครั้งที่แก้ ไม่งั้นของหายตอนรีสตาร์ท) ──────
+
+    def save_course(self, course: Course) -> Course:
+        self.courses[course.id] = course
+        if self.db:
+            self.db.save_course(course)
+        return course
 
     def save_team(self, team: Team) -> Team:
         self.teams[team.id] = team
@@ -111,6 +128,18 @@ class Store:
         return user
 
     # ── lookup ──────────────────────────────────────────────────────
+
+    def course(self, course_id: str) -> Course:
+        """คืนวิชานั้น — สร้างให้ด้วยค่าเริ่มต้นถ้ายังไม่มี
+
+        **ไม่โยนเมื่อหาไม่เจอโดยตั้งใจ** · วิชาเป็นข้อมูลที่เพิ่งเพิ่มเข้ามาใน schema v3
+        deployment ที่ตั้ง competition ไว้ก่อนหน้านั้นจึงอาจยังไม่มีแถวของตัวเอง
+        การปฏิเสธการเข้าทีมเพราะเหตุนี้คือการทำให้นิสิตรับผลของ migration ที่ค้าง
+        """
+        course = self.courses.get(course_id)
+        if course is None:
+            course = self.save_course(Course(id=course_id, name=course_id))
+        return course
 
     def competition_by_slug(self, slug: str) -> Competition | None:
         return next((c for c in self.competitions.values() if c.slug == slug), None)

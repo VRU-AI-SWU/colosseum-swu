@@ -95,6 +95,23 @@ def google_auth_from_env() -> "GoogleAuth | None":
     )
 
 
+def staff_emails_from_env() -> frozenset[str]:
+    """อีเมลของผู้สอน/TA จาก `ARENA_STAFF_EMAILS` — คั่นด้วยจุลภาค
+
+        ARENA_STAFF_EMAILS=aj@g.swu.ac.th,ta@g.swu.ac.th
+
+    **ว่างไว้ = ไม่มีใครเป็นผู้สอน** ซึ่งเป็นค่าเริ่มต้นที่ถูกต้อง · การเดาว่า
+    "คนแรกที่ล็อกอินคือผู้สอน" จะทำให้ใครก็ตามที่รู้ URL ก่อนเพื่อนยึดสิทธิ์ไปได้
+
+    อยู่ใน environment ไม่ใช่ในฐานข้อมูล เหมือน sudoers — ถ้าแก้ผ่านหน้าเว็บได้
+    คนที่ยึดสิทธิ์ได้ครั้งเดียวจะแต่งตั้งตัวเองถาวรและถอดคนอื่นออกได้
+    """
+    import os
+
+    raw = os.environ.get("ARENA_STAFF_EMAILS", "")
+    return frozenset(e.strip().lower() for e in raw.split(",") if e.strip())
+
+
 def demo_arena(
     root: Path, *, teams: int = 3, db_path: Path | str | None = None
 ) -> tuple[Arena, list[Team]]:

@@ -7,6 +7,9 @@ import pathlib
 import sys
 
 REQUIRED = ("ARENA_GOOGLE_CLIENT_ID", "ARENA_GOOGLE_CLIENT_SECRET", "ARENA_WEB_ORIGIN")
+
+#: ไม่บังคับ แต่ถ้าไม่มีจะไม่มีใครเปลี่ยนขนาดทีมจากหน้าเว็บได้เลย
+OPTIONAL = ("ARENA_STAFF_EMAILS",)
 path = pathlib.Path("/etc/arena.env")
 
 st = path.stat()
@@ -48,7 +51,21 @@ for k in REQUIRED:
     else:
         print(f"  {k:<28} {v}")
 
-extra = [k for k in seen if k not in REQUIRED]
+for k in OPTIONAL:
+    v = (seen.get(k) or "").strip()
+    if not v:
+        print(f"  {k:<28} (ไม่ได้ตั้ง — ไม่มีใครเปลี่ยนขนาดทีมจากหน้าเว็บได้)")
+        continue
+    emails = [e.strip() for e in v.split(",") if e.strip()]
+    print(f"  {k:<28} {len(emails)} คน · {', '.join(emails)}")
+    for e in emails:
+        if "@" not in e:
+            problems.append(f"{k}: {e!r} ไม่ใช่อีเมล")
+        elif e != e.lower():
+            # จับคู่ด้วยตัวพิมพ์เล็กอยู่แล้ว แต่การเขียนไม่ตรงกันชวนให้เข้าใจผิดว่าพัง
+            print(f"      ℹ️ {e} มีตัวพิมพ์ใหญ่ — ระบบไม่สนใจตัวพิมพ์ ใช้ได้ปกติ")
+
+extra = [k for k in seen if k not in REQUIRED + OPTIONAL]
 if extra:
     print(f"  ตัวแปรอื่น: {extra}")
 

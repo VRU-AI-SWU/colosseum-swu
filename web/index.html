@@ -148,6 +148,16 @@ footer a { color: var(--muted); }
 }
 .chip:hover { border-color: var(--blood); }
 .team .spacer { margin-left: auto; }
+.staff { border-color: var(--gold); }
+.staff label { color: var(--muted); }
+.staff input {
+  /* `.team` เป็น flex ที่มี `gap` — ถ้าไม่ล็อก flex ช่องตัวเลขจะยืดเต็มแถว
+     แล้วอ่านเหมือนช่องกรอกข้อความยาวๆ ทั้งที่รับได้แค่เลขหลักเดียวสองหลัก */
+  flex: 0 0 auto; width: 4.5em; padding: 3px 6px; font: inherit; font-size: 13px;
+  border: 1px solid var(--rule); border-radius: var(--radius);
+  background: var(--stone); color: var(--ink);
+}
+.staff .warn { color: var(--blood); }
 /* คำอธิบายสองรหัส — ซ่อนไว้เพราะคนที่เข้าใจแล้วไม่ต้องอ่านซ้ำทุกครั้ง
    แต่ต้องอยู่ตรงที่เห็นรหัส ไม่ใช่ในเอกสารคนละที่ */
 .help {
@@ -282,6 +292,7 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
 
   <main id="board" hidden>
     <div class="team" id="team" hidden></div>
+    <div class="team staff" id="staff" hidden></div>
     <div class="target" id="target" hidden></div>
     <div class="scroll">
       <table>
@@ -386,7 +397,47 @@ async function copy(text, el) {
   }
 }
 
-function renderTeam(team) {
+// ── แผงของผู้สอน ───────────────────────────────────────────────────
+// โผล่เฉพาะเมื่อ `/api/me` บอกว่าเป็นผู้สอน · **การซ่อนไม่ใช่ความปลอดภัย** —
+// endpoint ตรวจสิทธิ์ซ้ำเสมอ เพราะใครก็ยิงตรงด้วย curl ได้ และโทเคนของทีม
+// ก็อยู่ในมือนิสิตทุกคนอยู่แล้ว การซ่อนปุ่มเป็นแค่ความสะอาดของหน้าจอ
+function renderStaffPanel(course) {
+  const el = $("staff");
+  el.hidden = false;
+  el.innerHTML =
+    `<span class="who">ผู้สอน</span>` +
+    `<label for="mts">ขนาดทีมสูงสุดของ <b>${escapeHtml(course.name || course.id)}</b></label>` +
+    `<input id="mts" type="number" min="1" max="20" step="1" value="${course.max_team_size}">` +
+    `<button class="linkish" id="mts-save">บันทึก</button>` +
+    `<span class="who" id="mts-msg"></span>`;
+
+  $("mts-save").onclick = async () => {
+    const size = parseInt($("mts").value, 10);
+    const msg = $("mts-msg");
+    msg.className = "who";
+    if (!Number.isInteger(size)) { msg.textContent = "ใส่เป็นตัวเลข"; return; }
+    msg.textContent = "กำลังบันทึก…";
+    try {
+      const body = new URLSearchParams({ size: String(size) });
+      const res = await api(`/api/courses/${encodeURIComponent(course.id)}/max-team-size`,
+                            { method: "POST", body });
+      // วาดแถบทีมใหม่**ก่อน** แล้วค่อยเขียนข้อความ — การวาดใหม่สร้าง #mts-msg ตัวใหม่
+      // ถ้าเขียนก่อน ข้อความยืนยันจะถูกลบทิ้งทันที แล้วผู้สอนจะกดแล้วไม่เห็นอะไรเลย
+      // (ข้อความช่วยเหลือของนิสิตอ้างเลขนี้อยู่ จึงต้องวาดใหม่)
+      renderTeam(await api("/api/me"));
+      $("mts-msg").textContent = `บันทึกแล้ว — ทีมละไม่เกิน ${res.course.max_team_size} คน`;
+    } catch (e) {
+      msg.className = "who warn";
+      // ข้อความจากเซิร์ฟเวอร์บอกว่าทีมไหนใหญ่เกินไป — มีค่ากว่าคำว่า "ผิดพลาด"
+      msg.textContent = e.message || "บันทึกไม่สำเร็จ";
+    }
+  };
+}
+
+function renderTeam(me) {
+  const team = me.team;
+  const course = me.course || {};
+  const maxSize = course.max_team_size || 6;
   myTeam = team;
   const el = $("team");
   el.hidden = false;
@@ -403,7 +454,7 @@ function renderTeam(team) {
     `<button class="linkish danger" id="rotate">โทเคนหลุด?</button>` +
     `<div class="help" id="help" hidden>
        <b>🎟️ รหัสเชิญ</b> — ให้เพื่อนกด “เข้าทีมเพื่อน” แล้วใส่รหัสนี้เพื่อย้ายเข้าทีมคุณ
-       (ทีมละไม่เกิน 6 คน) · บอกเพื่อนได้ อ่านให้ฟังในห้องได้<br>
+       (ทีมละไม่เกิน ${maxSize} คน) · บอกเพื่อนได้ อ่านให้ฟังในห้องได้<br>
        <b>🔑 โทเคน</b> — <span class="warn">เป็นรหัสผ่าน ห้ามบอกใคร</span>
        ใครมีก็ส่งงานในนามทีมคุณได้ กินโควตา และเห็นคะแนนรายตอนของคุณ
        <br><br>
@@ -413,6 +464,8 @@ function renderTeam(team) {
        <br><br>
        <span class="warn">อย่า commit โทเคนขึ้น GitHub</span> — เป็นวิธีที่รหัสผ่านหลุดบ่อยที่สุด
      </div>`;
+
+  if (me.is_staff) renderStaffPanel(course);
 
   $("c-invite").onclick = (e) => copy(team.invite_code, e.target);
   $("c-token").onclick = (e) => copy(team.token, e.target);
@@ -518,7 +571,7 @@ async function refresh() {
   try {
     const board = await api(`/api/competitions/${SLUG}/leaderboard`);
     try {
-      renderTeam((await api("/api/me")).team);
+      renderTeam(await api("/api/me"));
     } catch {
       $("team").hidden = true;  // เซิร์ฟเวอร์รุ่นเก่าที่ยังไม่มี /api/me — ไม่ใช่เรื่องคอขาดบาดตาย
     }

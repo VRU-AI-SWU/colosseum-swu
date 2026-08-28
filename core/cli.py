@@ -436,7 +436,12 @@ def cmd_serve(args) -> int:
     import uvicorn
 
     from core.api import create_app
-    from core.wiring import CP463_VACUUM_LADDER, demo_arena, google_auth_from_env
+    from core.wiring import (
+        CP463_VACUUM_LADDER,
+        demo_arena,
+        google_auth_from_env,
+        staff_emails_from_env,
+    )
     from runners.agent_env.launcher import DockerLauncher, SubprocessLauncher
     from runners.worker import Worker
 
@@ -465,6 +470,11 @@ def cmd_serve(args) -> int:
 
     print(f"โทเคนของทีม: {', '.join(t.id for t in teams)}")
     print(f"sandbox    : {sandbox_note}")
+    arena.staff_emails = staff_emails_from_env()
+    if arena.staff_emails:
+        print(f"ผู้สอน     : {', '.join(sorted(arena.staff_emails))}")
+    else:
+        print("ผู้สอน     : ⚠️ ยังไม่ได้ตั้ง ARENA_STAFF_EMAILS — ไม่มีใครเปลี่ยนขนาดทีมได้")
     google = google_auth_from_env()
     if google:
         print(f"ล็อกอิน    : Google Workspace @{google.allowed_domain}")

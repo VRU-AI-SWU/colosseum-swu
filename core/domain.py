@@ -95,6 +95,47 @@ class User:
     created_at: datetime = field(default_factory=utcnow)
 
 
+#: ขนาดทีมของวิชาที่เพิ่งสร้าง — ผู้สอนเปลี่ยนได้จากหน้าเว็บทีหลัง
+DEFAULT_MAX_TEAM_SIZE = 6
+
+#: เพดานที่ผู้สอนตั้งได้ · ไม่ได้มาจากข้อจำกัดทางเทคนิค แต่เป็นการกันการพิมพ์ผิด
+#: (ใส่ 60 แทน 6) ซึ่งจะกลายเป็น "ทั้งห้องเป็นทีมเดียว" โดยไม่มีใครทันสังเกต
+MAX_TEAM_SIZE_CEILING = 20
+
+
+class TeamSizeInvalid(Exception):
+    """ขนาดทีมที่ตั้งใหม่ใช้ไม่ได้ — ข้อความต้องบอกว่าทำไมและต้องทำอะไรต่อ"""
+
+
+@dataclass
+class Course:
+    """วิชาหนึ่งวิชาในเทอมหนึ่ง — เจ้าของกติกาที่ใช้ร่วมกันทุก competition ในวิชานั้น
+
+    เกิดขึ้นเพราะ `MAX_TEAM_SIZE` เคยเป็นค่าคงที่ในโค้ด การจะเปลี่ยนขนาดทีมจึงต้อง
+    แก้โค้ดแล้ว deploy ใหม่ ซึ่งไม่ใช่สิ่งที่ผู้สอนควรต้องทำกลางเทอม
+
+    **ไม่มี `staff_emails` ที่นี่โดยตั้งใจ** — ว่าใครเป็นผู้สอนเป็นเรื่องของการตั้งค่า
+    เครื่อง ไม่ใช่ข้อมูลที่แก้ผ่านหน้าเว็บได้ ไม่งั้นใครที่ยึดสิทธิ์ผู้สอนได้ครั้งเดียว
+    จะแต่งตั้งตัวเองถาวร · มันอยู่ที่ `Arena.staff_emails` ซึ่งมาจาก `ARENA_STAFF_EMAILS`
+    ใน `/etc/arena.env` เหมือน sudoers
+    """
+
+    id: str
+    name: str
+    max_team_size: int = DEFAULT_MAX_TEAM_SIZE
+
+    def validated_team_size(self, size: int) -> int:
+        """ตรวจค่าที่ผู้สอนกรอก — คืนค่าที่ใช้ได้ หรือโยนพร้อมเหตุผล"""
+        if size < 1:
+            raise TeamSizeInvalid("ขนาดทีมต้องอย่างน้อย 1 คน")
+        if size > MAX_TEAM_SIZE_CEILING:
+            raise TeamSizeInvalid(
+                f"ขนาดทีมสูงสุดที่ตั้งได้คือ {MAX_TEAM_SIZE_CEILING} คน "
+                f"— ถ้าต้องการมากกว่านี้จริง ต้องแก้ `MAX_TEAM_SIZE_CEILING` ในโค้ด"
+            )
+        return size
+
+
 @dataclass
 class Team:
     id: str

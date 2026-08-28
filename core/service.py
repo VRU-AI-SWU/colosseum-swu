@@ -15,8 +15,11 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from core.domain import (
+    DEFAULT_MAX_TEAM_SIZE,
     Competition,
     CompetitionClosed,
+    Course,
+    TeamSizeInvalid,
     QuotaExceeded,
     Run,
     RunKind,
@@ -55,7 +58,9 @@ class TeamFull(Exception):
 
 #: ขนาดทีมสูงสุด — **นโยบายของวิชา ไม่ใช่ข้อจำกัดทางเทคนิค**
 #: ผู้สอนกำหนด 6 คน (ส.ค. 2026) · ตั้งไว้ที่นี่ที่เดียวเพื่อให้เปลี่ยนง่าย
-MAX_TEAM_SIZE = 6
+#: เก็บชื่อเดิมไว้ให้โค้ดที่ import อยู่ — แต่ตอนนี้มันเป็นแค่ **ค่าเริ่มต้นของวิชาใหม่**
+#: ไม่ใช่กฎที่ใช้ตัดสินอีกต่อไป · ตัวที่ใช้จริงคือ `Course.max_team_size`
+MAX_TEAM_SIZE = DEFAULT_MAX_TEAM_SIZE
 
 
 class ArchiveValidator(Protocol):
@@ -78,6 +83,28 @@ class Arena:
     artifacts: ArtifactStore
     #: task_type → ตัวตรวจไฟล์ · ประกอบตอน wiring ไม่ใช่ import ตรงๆ ใน core
     validators: dict[str, ArchiveValidator] = field(default_factory=dict)
+    #: อีเมลของผู้สอน/TA — มาจาก `ARENA_STAFF_EMAILS` ใน `/etc/arena.env`
+    #:
+    #: **เป็นการตั้งค่าเครื่อง ไม่ใช่ข้อมูลในฐานข้อมูล** โดยตั้งใจ เหมือน sudoers —
+    #: ถ้าเก็บในฐานข้อมูลแล้วแก้ผ่านหน้าเว็บได้ ใครที่ยึดสิทธิ์ผู้สอนได้ครั้งเดียว
+    #: จะแต่งตั้งตัวเองถาวรและถอดคนอื่นออกได้ · ว่างไว้ = ไม่มีใครเป็นผู้สอน
+    #: ซึ่งเป็นค่าเริ่มต้นที่ถูกต้อง (ปลอดภัยโดยปริยาย)
+    staff_emails: frozenset[str] = frozenset()
+
+    def is_staff(self, email: str) -> bool:
+        return bool(email) and email.strip().lower() in self.staff_emails
+
+    def team_acts_as_staff(self, team: Team) -> bool:
+        """โทเคนนี้ใช้สิทธิ์ผู้สอนได้ไหม
+
+        **ต้องเป็นผู้สอนทุกคนในทีม** ไม่ใช่แค่มีผู้สอนอยู่ในทีม — เพราะทั้งทีมใช้
+        โทเคนตัวเดียวกัน ถ้าผู้สอนไปอยู่ในทีมที่มีนิสิตด้วย นิสิตคนนั้นจะถือโทเคน
+        ที่มีสิทธิ์ผู้สอนอยู่ในมือ · ในทางปฏิบัติผู้สอนจะมีทีมเดี่ยวของตัวเองอยู่แล้ว
+        """
+        members = [self.store.users.get(uid) for uid in team.member_ids]
+        return bool(members) and all(
+            u is not None and self.is_staff(u.email) for u in members
+        )
 
     # ── ตัวตนและทีม ─────────────────────────────────────────────────
 
@@ -108,6 +135,41 @@ class Arena:
             self.store.record("team.created", "team", team.id, actor_id=user.id, solo=True)
         return user, team
 
+    def set_max_team_size(self, *, course_id: str, size: int, actor_id: str | None) -> Course:
+        """ผู้สอนเปลี่ยนขนาดทีมของวิชา — **ผู้เรียกต้องตรวจสิทธิ์มาก่อนแล้ว**
+
+        ปฏิเสธถ้ามีทีมที่ใหญ่เกินค่าใหม่อยู่แล้ว แทนที่จะยอมแล้วปล่อยให้ทีมนั้น
+        เกินโควตาต่อไปเงียบๆ · สถานะที่ข้อมูลขัดกับกฎของตัวเองเป็นสิ่งที่อธิบาย
+        ให้นิสิตฟังไม่ได้ และจะกลายเป็นข้อโต้แย้งตอนตัดเกรด · ข้อความบอกชื่อทีม
+        ที่เป็นปัญหาไปเลย ผู้สอนจะได้ตัดสินใจได้โดยไม่ต้องไปไล่หาเอง
+        """
+        course = self.store.course(course_id)
+        size = course.validated_team_size(size)
+
+        too_big = sorted(
+            (t for t in self.store.teams.values()
+             if t.is_active and t.course_id == course_id and len(t.member_ids) > size),
+            key=lambda t: -len(t.member_ids),
+        )
+        if too_big:
+            names = ", ".join(f"{t.name} ({len(t.member_ids)} คน)" for t in too_big[:3])
+            more = f" และอีก {len(too_big) - 3} ทีม" if len(too_big) > 3 else ""
+            raise TeamSizeInvalid(
+                f"ลดเหลือ {size} คนไม่ได้ เพราะมีทีมที่ใหญ่กว่านั้นอยู่แล้ว — {names}{more}\n"
+                "ให้สมาชิกย้ายออกจนทีมเล็กพอก่อน หรือตั้งค่าที่ไม่ต่ำกว่าทีมที่ใหญ่ที่สุด"
+            )
+
+        before = course.max_team_size
+        if before == size:
+            return course
+        course.max_team_size = size
+        self.store.save_course(course)
+        self.store.record(
+            "course.max_team_size", "course", course.id,
+            actor_id=actor_id, before=before, after=size,
+        )
+        return course
+
     def join_team(self, *, user: User, invite_code: str, course_id: str) -> Team:
         """ย้ายเข้าทีมของเพื่อนด้วยรหัสเชิญ
 
@@ -125,8 +187,9 @@ class Arena:
         if current is not None and current.id == target.id:
             return target  # อยู่ทีมนี้อยู่แล้ว — ไม่ใช่ข้อผิดพลาด
 
-        if len(target.member_ids) >= MAX_TEAM_SIZE:
-            raise TeamFull(f"ทีมนี้เต็มแล้ว (สูงสุด {MAX_TEAM_SIZE} คน)")
+        limit = self.store.course(course_id).max_team_size
+        if len(target.member_ids) >= limit:
+            raise TeamFull(f"ทีมนี้เต็มแล้ว (สูงสุด {limit} คน)")
 
         if current is not None:
             current.member_ids = [m for m in current.member_ids if m != user.id]
@@ -365,6 +428,7 @@ def build_arena(
     store = Store(db=db)
     queue = JobQueue(db=db)
     if db is not None:
+        store.courses = db.load_courses()
         store.teams = db.load_teams()
         store.users = db.load_users()
         store.competitions = db.load_competitions()

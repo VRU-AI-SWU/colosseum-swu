@@ -31,8 +31,10 @@ from pathlib import Path
 from typing import Any
 
 from core.domain import (
+    DEFAULT_MAX_TEAM_SIZE,
     AuditEvent,
     Competition,
+    Course,
     EpisodeResult,
     Phase,
     Run,
@@ -44,12 +46,18 @@ from core.domain import (
     new_invite_code,
 )
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS courses (
+    id            TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
+    max_team_size INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS teams (
@@ -183,8 +191,46 @@ def _migrate_1_to_2(conn: sqlite3.Connection) -> None:
         )
 
 
+def _migrate_2_to_3(conn: sqlite3.Connection) -> None:
+    """v2 → v3 · เพิ่มตาราง courses เพื่อให้ขนาดทีมเป็นข้อมูล ไม่ใช่ค่าคงที่ในโค้ด
+
+    **สร้างแถวให้ทุก course_id ที่ competition อ้างถึงอยู่แล้ว** ด้วยขนาดทีมเท่าเดิม
+    (`DEFAULT_MAX_TEAM_SIZE`) — ถ้าไม่ทำ ระบบที่เคยรันอยู่จะตื่นมาแล้วหาวิชาไม่เจอ
+    แล้วปฏิเสธการเข้าทีมทั้งหมด ซึ่งเป็นการเปลี่ยนพฤติกรรมที่ไม่มีใครขอ
+
+    ชื่อวิชาตั้งจาก `course_id` ไปก่อน เพราะ v2 ไม่มีที่ให้เก็บชื่อ · ผู้สอนแก้ทีหลังได้
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS courses (
+            id            TEXT PRIMARY KEY,
+            name          TEXT NOT NULL,
+            max_team_size INTEGER NOT NULL
+        )
+        """
+    )
+    # **ห้ามสมมติว่าตารางอื่นมีอยู่** — ไฟล์ v1 มีแค่บางตาราง และ migration ที่ล้ม
+    # กลางทางจะทิ้งฐานข้อมูลไว้ครึ่งๆ กลางๆ ซึ่งแย่กว่าการไม่ migrate เลย
+    present = {
+        r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    known = {r["id"] for r in conn.execute("SELECT id FROM courses")}
+    seen: set[str] = set()
+    for table in ("competitions", "teams"):
+        if table in present:
+            seen |= {
+                r["course_id"]
+                for r in conn.execute(f"SELECT DISTINCT course_id FROM {table}")
+            }
+    for course_id in sorted(seen - known):
+        conn.execute(
+            "INSERT INTO courses(id, name, max_team_size) VALUES(?, ?, ?)",
+            (course_id, course_id, DEFAULT_MAX_TEAM_SIZE),
+        )
+
+
 #: เวอร์ชันปลายทาง → ฟังก์ชันที่พาจากเวอร์ชันก่อนหน้ามาถึงมัน
-MIGRATIONS = {2: _migrate_1_to_2}
+MIGRATIONS = {2: _migrate_1_to_2, 3: _migrate_2_to_3}
 
 
 class Database:
@@ -297,6 +343,12 @@ class Database:
             ),
         )
 
+    def save_course(self, c: Course) -> None:
+        self._write(
+            "INSERT OR REPLACE INTO courses(id, name, max_team_size) VALUES(?,?,?)",
+            (c.id, c.name, c.max_team_size),
+        )
+
     def save_user(self, user: User) -> None:
         self._write(
             "INSERT OR REPLACE INTO users(id, email, name, google_sub, created_at)"
@@ -393,6 +445,14 @@ class Database:
                 dissolved_at=_parse_dt(r["dissolved_at"]),
             )
             for r in self._rows("teams")
+        }
+
+    def load_courses(self) -> dict[str, Course]:
+        return {
+            r["id"]: Course(
+                id=r["id"], name=r["name"], max_team_size=int(r["max_team_size"])
+            )
+            for r in self._rows("courses")
         }
 
     def load_users(self) -> dict[str, User]:

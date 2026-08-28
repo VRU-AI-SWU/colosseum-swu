@@ -30,6 +30,7 @@ from core.domain import (
     RunKind,
     RunStatus,
     Team,
+    TeamSizeInvalid,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
@@ -154,6 +155,7 @@ def create_app(
             for uid in team.member_ids
             if (u := arena.store.users.get(uid)) is not None
         ]
+        course = arena.store.course(team.course_id)
         return {
             "team": {
                 "id": team.id,
@@ -162,8 +164,38 @@ def create_app(
                 "invite_code": team.invite_code,
                 "members": members,
                 "is_solo": len(team.member_ids) <= 1,
-            }
+            },
+            "course": {
+                "id": course.id,
+                "name": course.name,
+                "max_team_size": course.max_team_size,
+            },
+            # หน้าเว็บใช้ตัวนี้ตัดสินว่าจะโชว์แผงของผู้สอนไหม — **ไม่ใช่ด่านความปลอดภัย**
+            # ด่านจริงอยู่ที่ endpoint ซึ่งตรวจซ้ำเสมอ การซ่อนปุ่มเป็นแค่ความสะอาดของ UI
+            "is_staff": arena.team_acts_as_staff(team),
         }
+
+    @app.post("/api/courses/{course_id}/max-team-size")
+    def set_max_team_size(course_id: str, team: TeamDep, size: int = Form(...)):
+        """ผู้สอนเปลี่ยนขนาดทีมสูงสุดของวิชา
+
+        ตรวจสิทธิ์ที่นี่เสมอ ไม่พึ่งว่าหน้าเว็บซ่อนปุ่มให้แล้ว — endpoint เป็นสิ่งที่
+        ยิงตรงได้ด้วย curl และโทเคนของทีมก็อยู่ในมือนิสิตทุกคนอยู่แล้ว
+        """
+        if not arena.team_acts_as_staff(team):
+            raise HTTPException(403, "เฉพาะผู้สอนเท่านั้นที่เปลี่ยนขนาดทีมได้")
+        if course_id != team.course_id:
+            raise HTTPException(403, "เปลี่ยนค่าของวิชาที่ตัวเองไม่ได้สอนไม่ได้")
+        try:
+            course = arena.set_max_team_size(
+                course_id=course_id,
+                size=size,
+                actor_id=team.member_ids[0] if team.member_ids else None,
+            )
+        except TeamSizeInvalid as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {"course": {"id": course.id, "name": course.name,
+                           "max_team_size": course.max_team_size}}
 
     @app.post("/api/teams/rotate-token")
     def rotate_token(team: TeamDep):
