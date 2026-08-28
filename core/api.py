@@ -28,6 +28,7 @@ from core.domain import (
     PARADIGMS,
     AliasInvalid,
     Competition,
+    CourseNameInvalid,
     CompetitionClosed,
     QuotaExceeded,
     RunKind,
@@ -271,28 +272,34 @@ def create_app(
             raise HTTPException(422, str(exc)) from exc
         return {"alias": team.alias, "shown_as": team.display_name(reveal=False)}
 
-    @app.post("/api/courses/{course_id}/max-team-size")
-    def set_max_team_size(course_id: str, user: UserDep, size: int = Form(...)):
-        """ผู้สอนเปลี่ยนขนาดทีมสูงสุดของวิชา
+    @app.post("/api/courses/{course_id}/settings")
+    def course_settings(
+        course_id: str,
+        user: UserDep,
+        size: Optional[int] = Form(None),
+        name: Optional[str] = Form(None),
+    ):
+        """ผู้สอนแก้ค่าของวิชา — ส่งมาเฉพาะฟิลด์ที่อยากเปลี่ยน
+
+        **ชื่อวิชาแก้ได้ด้วย** เพราะวิชาที่ migrate มาจาก schema เก่าได้ชื่อเป็น id
+        ของเครื่อง (`cp463-1-2026`) ซึ่งนิสิตต้องอ่าน · การไม่มีทางแก้แปลว่า
+        ต้องเข้าไปยุ่งกับฐานข้อมูลตรงๆ ซึ่งไม่ใช่สิ่งที่ผู้สอนควรต้องทำ
 
         ตรวจสิทธิ์ที่นี่เสมอ ไม่พึ่งว่าหน้าเว็บซ่อนปุ่มให้แล้ว — endpoint ยิงตรงได้ด้วย curl
-
-        **ถามจากตัวคนตรงๆ ได้แล้ว** — เดิมต้องมีกฎ "ทั้งทีมต้องเป็นผู้สอน" เพราะโทเคน
-        ใช้ร่วมกันทั้งทีม ถ้าผู้สอนไปอยู่ทีมเดียวกับนิสิต นิสิตจะถือโทเคนที่มีสิทธิ์นั้น
-        พอโทเคนเป็นของคน ปัญหานั้นหายไปเอง
         """
         if not arena.is_staff(user.email):
-            raise HTTPException(403, "เฉพาะผู้สอนเท่านั้นที่เปลี่ยนขนาดทีมได้")
+            raise HTTPException(403, "เฉพาะผู้สอนเท่านั้นที่แก้ค่าของวิชาได้")
         if course_id not in arena.store.courses:
             raise HTTPException(404, f"ไม่รู้จักวิชา {course_id!r}")
         try:
-            course = arena.set_max_team_size(
-                course_id=course_id, size=size, actor_id=user.id
+            course = arena.update_course(
+                course_id=course_id, size=size, name=name, actor_id=user.id
             )
-        except TeamSizeInvalid as exc:
+        except (TeamSizeInvalid, CourseNameInvalid) as exc:
             raise HTTPException(422, str(exc)) from exc
         return {"course": {"id": course.id, "name": course.name,
-                           "max_team_size": course.max_team_size}}
+                           "max_team_size": course.max_team_size,
+                           "join_code": course.join_code}}
 
     @app.post("/api/teams/join")
     def join_team(user: UserDep, course_id: str = Form(...), invite_code: str = Form(...)):

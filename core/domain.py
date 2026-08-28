@@ -189,6 +189,14 @@ MAX_ALIAS_LENGTH = 24
 RESERVED_ALIASES = frozenset({"bronze", "silver", "gold", "diamond", "baseline"})
 
 
+#: ชื่อวิชายาวได้กว่าชื่อทีม เพราะมันมีทั้งรหัสวิชา ชื่อเต็ม และภาคเรียน
+MAX_COURSE_NAME_LENGTH = 60
+
+
+class CourseNameInvalid(Exception):
+    """ชื่อวิชาที่ตั้งใหม่ใช้ไม่ได้"""
+
+
 class AliasInvalid(Exception):
     """ชื่อบนกระดานที่ตั้งใหม่ใช้ไม่ได้"""
 

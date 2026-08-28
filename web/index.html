@@ -148,8 +148,26 @@ footer a { color: var(--muted); }
 }
 .chip:hover { border-color: var(--blood); }
 .team .spacer { margin-left: auto; }
+
+/* ── ตัวเลือกวิชาและโจทย์ ────────────────────────────────────────────
+   จัดกลุ่ม competition ตาม paradigm เพราะนั่นคือสิ่งที่บอกว่านิสิต*กำลังเรียนอะไร*
+   ส่วนวิชาเป็นเรื่องของการลงทะเบียน — คนหนึ่งอยู่หลายวิชาและวิชาหนึ่งคร่อมหลาย paradigm */
+.picker { margin: 0 0 18px; display: flex; flex-wrap: wrap; gap: 8px 14px;
+  align-items: center; font-size: 13px; }
+.picker .who { color: var(--muted); }
+.picker select {
+  font: inherit; font-size: 13px; padding: 4px 8px; max-width: 100%;
+  border: 1px solid var(--rule); border-radius: var(--radius);
+  background: var(--stone-2); color: var(--ink);
+}
+.picker .para {
+  font-size: 11px; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--muted); border: 1px solid var(--rule); border-radius: 99px;
+  padding: 2px 9px;
+}
 .staff { border-color: var(--gold); }
 .staff label { color: var(--muted); }
+.staff input#c-name { width: 16em; }
 .staff input {
   /* `.team` เป็น flex ที่มี `gap` — ถ้าไม่ล็อก flex ช่องตัวเลขจะยืดเต็มแถว
      แล้วอ่านเหมือนช่องกรอกข้อความยาวๆ ทั้งที่รับได้แค่เลขหลักเดียวสองหลัก */
@@ -260,12 +278,27 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
 
 <div class="wrap">
 
+  <nav class="picker" id="picker" hidden></nav>
+
   <section class="cal" id="cal" hidden>
     <div class="cal-head">
       <h2>ปฏิทินการแข่ง</h2>
       <span class="cal-now" id="cal-now"></span>
     </div>
     <div class="cal-strip" id="cal-strip"></div>
+  </section>
+
+
+  <section class="gate" id="enroll" hidden>
+    <h2>เข้าวิชา</h2>
+    <p>ใส่ <b>รหัสเข้าวิชา</b> ที่ผู้สอนแจกในคาบ · ล็อกอินแล้วแต่ยังไม่ได้อยู่วิชาไหน
+       จึงยังไม่เห็นอะไร</p>
+    <div class="row">
+      <input id="join-code" placeholder="เช่น 7PRHNN" autocomplete="off"
+             spellcheck="false" maxlength="6">
+      <button class="ghost" id="join-go">เข้าวิชา</button>
+    </div>
+    <div class="err" id="enroll-err" hidden></div>
   </section>
 
   <section class="gate" id="gate" hidden>
@@ -326,8 +359,10 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
 const API = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)
   ? "http://localhost:8000"
   : "https://colosseum-api.vru-ai.com";
-const SLUG = "cp463-vacuum-1-2026";
 const KEY = "colosseum.token";
+//: วิชาและ competition ที่เลือกไว้ล่าสุด — จำไว้เพื่อไม่ให้ต้องเลือกใหม่ทุกครั้ง
+//: เดิมมี `SLUG` ตายตัวอันเดียว ซึ่งใช้ได้ตอนมี competition เดียวทั้งระบบ
+const PICK_KEY = "colosseum.pick";
 const REFRESH_MS = 30000;
 //: เครดิตรูป hero — เว้นว่างไว้ถ้ารูปเป็นของเราเองหรือไม่ต้องให้เครดิต
 //: ถ้าใช้รูปที่มีสัญญาอนุญาตบังคับให้ระบุที่มา (CC BY, Unsplash ฯลฯ) ใส่ตรงนี้
@@ -338,7 +373,22 @@ const fmt = (n) => (n === null || n === undefined) ? "—" : n.toFixed(4);
 
 let token = localStorage.getItem(KEY) || "";
 let timer = null;
-let myTeam = null;
+let me = null;          // ผลล่าสุดของ /api/me — ตัวตน + ทุกวิชาที่อยู่
+let courseId = "";      // วิชาที่กำลังดู
+let slug = "";          // competition ที่กำลังดู
+
+function savePick() {
+  try { localStorage.setItem(PICK_KEY, JSON.stringify({ courseId, slug })); } catch {}
+}
+function loadPick() {
+  try { return JSON.parse(localStorage.getItem(PICK_KEY) || "{}"); } catch { return {}; }
+}
+
+/** วิชาที่กำลังดูอยู่ (จาก me.enrollments) หรือ null ถ้ายังไม่ได้เลือก/ไม่ได้อยู่วิชาไหน */
+function current() {
+  if (!me || !me.enrollments.length) return null;
+  return me.enrollments.find((e) => e.course.id === courseId) || me.enrollments[0];
+}
 
 // โทเคนกลับมาจาก /auth/google/callback ทาง fragment ของ URL
 //
@@ -364,7 +414,9 @@ function takeTokenFromUrl() {
 
 function show(view) {
   $("gate").hidden = view !== "gate";
+  $("enroll").hidden = view !== "enroll";
   $("board").hidden = view !== "board";
+  $("picker").hidden = view !== "board";
 }
 
 async function api(path, options = {}) {
@@ -397,11 +449,90 @@ async function copy(text, el) {
   }
 }
 
+// ── ตัวเลือกวิชาและโจทย์ ───────────────────────────────────────────
+// **จัดกลุ่ม competition ตาม paradigm** เพราะนั่นคือสิ่งที่บอกว่านิสิตกำลังเรียนอะไร
+// (RL / supervised / unsupervised) ส่วนวิชาเป็นเรื่องของการลงทะเบียน — คนหนึ่งอยู่
+// หลายวิชา และวิชาหนึ่งคร่อมหลาย paradigm ได้ตามธรรมชาติ
+
+function paradigmName(id) {
+  const p = (me.paradigms || []).find((x) => x.id === id);
+  return p ? p.name : id;
+}
+
+function renderCourseBar() {
+  const enrolment = current();
+  const el = $("picker");
+  const many = me.enrollments.length > 1;
+
+  const courseSel = many
+    ? `<select id="pick-course" aria-label="วิชา">` +
+      me.enrollments.map((e) =>
+        `<option value="${escapeHtml(e.course.id)}"${e.course.id === courseId ? " selected" : ""}>` +
+        `${escapeHtml(e.course.name)}</option>`).join("") +
+      `</select>`
+    : `<b>${escapeHtml(enrolment.course.name)}</b>`;
+
+  // จัดกลุ่มตาม paradigm — ใช้ <optgroup> เพื่อให้เห็นกลุ่มโดยไม่ต้องมี UI เพิ่ม
+  const byParadigm = new Map();
+  for (const c of enrolment.competitions) {
+    if (!byParadigm.has(c.paradigm)) byParadigm.set(c.paradigm, []);
+    byParadigm.get(c.paradigm).push(c);
+  }
+  const compSel = enrolment.competitions.length
+    ? `<select id="pick-comp" aria-label="โจทย์">` +
+      [...byParadigm].map(([pid, list]) =>
+        `<optgroup label="${escapeHtml(paradigmName(pid))}">` +
+        list.map((c) =>
+          `<option value="${escapeHtml(c.slug)}"${c.slug === slug ? " selected" : ""}>` +
+          `${escapeHtml(c.title)}${c.is_open ? "" : " (ปิดรับแล้ว)"}</option>`).join("") +
+        `</optgroup>`).join("") +
+      `</select>`
+    : `<span class="who">ยังไม่มีโจทย์ในวิชานี้</span>`;
+
+  const chosen = enrolment.competitions.find((c) => c.slug === slug);
+  el.innerHTML =
+    `<span class="who">วิชา</span> ${courseSel}` +
+    `<span class="who">โจทย์</span> ${compSel}` +
+    (chosen ? `<span class="para">${escapeHtml(paradigmName(chosen.paradigm))}</span>` : "") +
+    `<span class="spacer"></span>` +
+    `<button class="linkish" id="join-more">เข้าอีกวิชา</button>`;
+
+  if (many) $("pick-course").onchange = (e) => {
+    courseId = e.target.value;
+    slug = "";            // วิชาใหม่มีโจทย์คนละชุด — เลือกใหม่จากศูนย์
+    savePick(); refresh();
+  };
+  if (enrolment.competitions.length) $("pick-comp").onchange = (e) => {
+    slug = e.target.value; savePick(); refresh();
+  };
+  $("join-more").onclick = () => show("enroll");
+}
+
+async function joinCourse() {
+  const code = $("join-code").value.trim();
+  const err = $("enroll-err");
+  if (!code) { err.hidden = false; err.textContent = "ใส่รหัสก่อน"; return; }
+  try {
+    const res = await api("/api/courses/join",
+                          { method: "POST", body: new URLSearchParams({ code }) });
+    courseId = res.course_id;
+    slug = "";
+    savePick();
+    $("join-code").value = "";
+    err.hidden = true;
+    refresh();
+  } catch (e) {
+    err.hidden = false;
+    err.textContent = e.message || "เข้าวิชาไม่สำเร็จ";
+  }
+}
+
 // ── ชื่อบนกระดาน ───────────────────────────────────────────────────
 // README §6.1 — ทีมเลือกเองได้ เพื่อลดแรงกดดันของทีมท้ายตาราง
 // **ผู้สอนยังเห็นชื่อจริงเสมอ** จึงไม่ใช่การซ่อนตัวจากการตรวจ และต้องบอกให้ชัด
 // ไม่งั้นจะมีคนเข้าใจว่าตั้งแล้วทำอะไรก็ได้โดยไม่มีใครรู้ว่าเป็นใคร
-async function promptAlias(team) {
+async function promptAlias(enrolment) {
+  const team = enrolment.team;
   const now = team.alias || "";
   const raw = prompt(
     "ชื่อที่จะขึ้นบน leaderboard\n\n" +
@@ -411,10 +542,9 @@ async function promptAlias(team) {
   );
   if (raw === null) return;   // กดยกเลิก — ต่างจากการเว้นว่างซึ่งแปลว่า "ล้าง"
   try {
-    const body = new URLSearchParams({ alias: raw });
+    const body = new URLSearchParams({ course_id: enrolment.course.id, alias: raw });
     await api("/api/teams/alias", { method: "POST", body });
-    renderTeam(await api("/api/me"));
-    refresh();                // กระดานแสดงชื่อใหม่ทันที ไม่ต้องรอรอบถัดไป
+    refresh();                // ดึง /api/me ใหม่ + กระดานแสดงชื่อใหม่ทันที
   } catch (e) {
     alert(e.message || "เปลี่ยนชื่อไม่สำเร็จ");
   }
@@ -429,39 +559,43 @@ function renderStaffPanel(course) {
   el.hidden = false;
   el.innerHTML =
     `<span class="who">ผู้สอน</span>` +
-    `<label for="mts">ขนาดทีมสูงสุดของ <b>${escapeHtml(course.name || course.id)}</b></label>` +
+    `<label for="c-name">ชื่อวิชา</label>` +
+    `<input id="c-name" type="text" maxlength="60" value="${escapeHtml(course.name)}">` +
+    `<label for="mts">ทีมละไม่เกิน</label>` +
     `<input id="mts" type="number" min="1" max="20" step="1" value="${course.max_team_size}">` +
+    `<span class="who">รหัสเข้าวิชา</span>` +
+    `<span class="chip" id="c-join">${escapeHtml(course.join_code || "—")}</span>` +
     `<button class="linkish" id="mts-save">บันทึก</button>` +
     `<span class="who" id="mts-msg"></span>`;
 
+  if (course.join_code) $("c-join").onclick = (e) => copy(course.join_code, e.target);
+
   $("mts-save").onclick = async () => {
-    const size = parseInt($("mts").value, 10);
     const msg = $("mts-msg");
     msg.className = "who";
-    if (!Number.isInteger(size)) { msg.textContent = "ใส่เป็นตัวเลข"; return; }
+    const size = parseInt($("mts").value, 10);
+    if (!Number.isInteger(size)) { msg.textContent = "ขนาดทีมต้องเป็นตัวเลข"; return; }
     msg.textContent = "กำลังบันทึก…";
     try {
-      const body = new URLSearchParams({ size: String(size) });
-      const res = await api(`/api/courses/${encodeURIComponent(course.id)}/max-team-size`,
+      const body = new URLSearchParams({ size: String(size), name: $("c-name").value });
+      const res = await api(`/api/courses/${encodeURIComponent(course.id)}/settings`,
                             { method: "POST", body });
-      // วาดแถบทีมใหม่**ก่อน** แล้วค่อยเขียนข้อความ — การวาดใหม่สร้าง #mts-msg ตัวใหม่
-      // ถ้าเขียนก่อน ข้อความยืนยันจะถูกลบทิ้งทันที แล้วผู้สอนจะกดแล้วไม่เห็นอะไรเลย
-      // (ข้อความช่วยเหลือของนิสิตอ้างเลขนี้อยู่ จึงต้องวาดใหม่)
-      renderTeam(await api("/api/me"));
-      $("mts-msg").textContent = `บันทึกแล้ว — ทีมละไม่เกิน ${res.course.max_team_size} คน`;
+      // วาดใหม่**ก่อน** แล้วค่อยเขียนข้อความ — การวาดใหม่สร้าง #mts-msg ตัวใหม่
+      // ถ้าเขียนก่อน ข้อความยืนยันจะถูกลบทิ้งทันทีแล้วผู้สอนจะไม่รู้ว่าสำเร็จไหม
+      await refresh();
+      $("mts-msg").textContent =
+        `บันทึกแล้ว — ${res.course.name} · ทีมละไม่เกิน ${res.course.max_team_size} คน`;
     } catch (e) {
       msg.className = "who warn";
-      // ข้อความจากเซิร์ฟเวอร์บอกว่าทีมไหนใหญ่เกินไป — มีค่ากว่าคำว่า "ผิดพลาด"
       msg.textContent = e.message || "บันทึกไม่สำเร็จ";
     }
   };
 }
 
-function renderTeam(me) {
-  const team = me.team;
-  const course = me.course || {};
+function renderTeam(enrolment) {
+  const team = enrolment.team;
+  const course = enrolment.course;
   const maxSize = course.max_team_size || 6;
-  myTeam = team;
   const el = $("team");
   el.hidden = false;
   const who = team.members.length
@@ -469,8 +603,8 @@ function renderTeam(me) {
     : "ยังไม่ผูกกับบัญชี Google";
   el.innerHTML =
     `<span><b>${escapeHtml(team.name)}</b> <span class="who">${who}</span></span>` +
-    `<span class="who">รหัสเชิญ</span> <span class="chip" id="c-invite">${team.invite_code}</span>` +
-    `<span class="who">โทเคน</span> <span class="chip" id="c-token">คลิกเพื่อคัดลอก</span>` +
+    `<span class="who">รหัสเชิญทีม</span> <span class="chip" id="c-invite">${team.invite_code}</span>` +
+    `<span class="who">โทเคนของคุณ</span> <span class="chip" id="c-token">คลิกเพื่อคัดลอก</span>` +
     `<span class="who">บนกระดาน</span> <span class="chip" id="c-alias">${escapeHtml(team.shown_as || team.name)}</span>` +
     `<span class="spacer"></span>` +
     `<button class="linkish" id="alias-edit">เปลี่ยนชื่อบนกระดาน</button>` +
@@ -478,23 +612,23 @@ function renderTeam(me) {
     `<button class="linkish" id="help-open">สองรหัสนี้ใช้ยังไง</button>` +
     `<button class="linkish danger" id="rotate">โทเคนหลุด?</button>` +
     `<div class="help" id="help" hidden>
-       <b>🎟️ รหัสเชิญ</b> — ให้เพื่อนกด “เข้าทีมเพื่อน” แล้วใส่รหัสนี้เพื่อย้ายเข้าทีมคุณ
-       (ทีมละไม่เกิน ${maxSize} คน) · บอกเพื่อนได้ อ่านให้ฟังในห้องได้<br>
-       <b>🔑 โทเคน</b> — <span class="warn">เป็นรหัสผ่าน ห้ามบอกใคร</span>
-       ใครมีก็ส่งงานในนามทีมคุณได้ กินโควตา และเห็นคะแนนรายตอนของคุณ
+       <b>🎟️ รหัสเชิญทีม</b> — ให้เพื่อน<b>ในวิชาเดียวกัน</b>กด “เข้าทีมเพื่อน”
+       แล้วใส่รหัสนี้เพื่อย้ายเข้าทีมคุณ (ทีมละไม่เกิน ${maxSize} คน)
+       · บอกเพื่อนได้ อ่านให้ฟังในห้องได้<br>
+       <b>🔑 โทเคนของคุณ</b> — <span class="warn">เป็นรหัสผ่านของ*คุณ* ห้ามบอกใคร</span>
+       ใครมีก็ส่งงานในนามคุณได้ กินโควตา และเห็นคะแนนรายตอนของคุณ
        <br><br>
-       เอาโทเคนไปตั้งบนเครื่องตัวเองครั้งเดียว แล้ว <code>arena submit</code> ใช้ได้ตลอด<br>
+       <b>โทเคนอันเดียวใช้ได้ทุกวิชา</b> — ตั้งครั้งเดียวบนเครื่องตัวเอง แล้ว
+       <code>arena submit</code> ของวิชาไหนก็ได้ ระบบรู้เองว่าโจทย์นั้นอยู่วิชาอะไร<br>
        <code>export ARENA_URL=https://colosseum-api.vru-ai.com</code><br>
        <code>export ARENA_TOKEN=&lt;โทเคน&gt;</code>
        <br><br>
        <span class="warn">อย่า commit โทเคนขึ้น GitHub</span> — เป็นวิธีที่รหัสผ่านหลุดบ่อยที่สุด
      </div>`;
 
-  if (me.is_staff) renderStaffPanel(course);
-
   $("c-invite").onclick = (e) => copy(team.invite_code, e.target);
-  $("c-token").onclick = (e) => copy(team.token, e.target);
-  $("alias-edit").onclick = () => promptAlias(team);
+  $("c-token").onclick = (e) => copy(me.user.token, e.target);
+  $("alias-edit").onclick = () => promptAlias(enrolment);
   $("join-open").onclick = () => promptJoin();
   $("rotate").onclick = () => rotateToken();
   $("help-open").onclick = () => {
@@ -505,27 +639,24 @@ function renderTeam(me) {
 }
 
 async function rotateToken() {
-  // ผลย้อนกลับไม่ได้และกระทบคนอื่นด้วย — บอกให้ครบก่อนกด ไม่ใช่หลังกด
-  const members = myTeam?.members?.length ?? 1;
-  const warning =
-    "ออกโทเคนใหม่ให้ทีม?\n\n" +
-    "โทเคนเดิมจะใช้ไม่ได้ทันที และ arena submit จะขึ้น 401 จนกว่าจะตั้งค่าใหม่" +
-    (members > 1
-      ? `\n\n⚠️ ทีมนี้มี ${members} คน — เพื่อนร่วมทีมทุกคนจะส่งงานไม่ได้จนกว่าจะมาเอาโทเคนใหม่ไป`
-      : "") +
-    "\n\nทำเมื่อคิดว่าโทเคนหลุดไปอยู่ในมือคนอื่นแล้วเท่านั้น";
-  if (!confirm(warning)) return;
+  // **ไม่ต้องเตือนเรื่องเพื่อนร่วมทีมอีกแล้ว** — โทเคนเป็นของคน การเปลี่ยนของเรา
+  // ไม่แตะของใคร · เดิมต้องเตือนเพราะทั้งทีมใช้โทเคนเดียวกัน
+  if (!confirm(
+    "ออกโทเคนใหม่ให้คุณ?\n\n" +
+    "โทเคนเดิมจะใช้ไม่ได้ทันที และ arena submit จะขึ้น 401 จนกว่าจะตั้งค่าใหม่\n" +
+    "เพื่อนร่วมทีมไม่ได้รับผลกระทบ — แต่ละคนมีโทเคนของตัวเอง\n\n" +
+    "ทำเมื่อคิดว่าโทเคนหลุดไปอยู่ในมือคนอื่นแล้วเท่านั้น"
+  )) return;
 
   try {
-    const res = await api("/api/teams/rotate-token", { method: "POST" });
+    const res = await api("/api/users/rotate-token", { method: "POST" });
     token = res.token;
     localStorage.setItem(KEY, token);
     await copy(token, { textContent: "" });   // ใส่ clipboard ให้เลย จะได้เอาไปตั้งต่อได้ทันที
     alert(
       "ออกโทเคนใหม่แล้ว และคัดลอกไว้ใน clipboard ให้เรียบร้อย\n\n" +
       "ตั้งค่าใหม่บนเครื่องของคุณ:\n" +
-      "export ARENA_TOKEN=<วางที่นี่>" +
-      (members > 1 ? "\n\nอย่าลืมส่งให้เพื่อนร่วมทีมด้วย" : "")
+      "export ARENA_TOKEN=<วางที่นี่>"
     );
     start();
   } catch (e) {
@@ -534,18 +665,21 @@ async function rotateToken() {
 }
 
 async function promptJoin() {
+  const enrolment = current();
+  const max = enrolment.course.max_team_size || 6;
   const code = prompt(
-    "ใส่รหัสเชิญ 6 ตัวอักษรที่ได้จากเพื่อนในทีม (ทีมละไม่เกิน 6 คน)\n\n" +
+    `ใส่รหัสเชิญ 6 ตัวอักษรที่ได้จากเพื่อน**ในวิชา ${enrolment.course.name}** ` +
+    `(ทีมละไม่เกิน ${max} คน)\n\n` +
     "⚠️ ถ้าคุณเคยส่งงานในฐานะทีมเดี่ยวมาก่อน คะแนนเดิมจะหายจาก leaderboard\n" +
     "เพราะมันเป็นผลงานของคนเดียว ไม่ใช่ของทีมใหม่"
   );
   if (!code) return;
   try {
-    const body = new FormData();
-    body.append("invite_code", code.trim());
-    const joined = await api("/api/teams/join", { method: "POST", body });
-    token = joined.token;
-    localStorage.setItem(KEY, token);
+    const body = new URLSearchParams({
+      course_id: enrolment.course.id, invite_code: code.trim(),
+    });
+    await api("/api/teams/join", { method: "POST", body });
+    // ไม่มีโทเคนคืนมาแล้ว — ของเราไม่เปลี่ยนเมื่อย้ายทีม
     start();
   } catch (e) {
     alert(e.message || "เข้าทีมไม่สำเร็จ");
@@ -594,25 +728,61 @@ function escapeHtml(s) {
 }
 
 async function refresh() {
+  // **ลำดับสำคัญ** — ต้องรู้ก่อนว่าเราอยู่วิชาไหนบ้าง ถึงจะรู้ว่าจะดึงกระดานของอันไหน
+  // เดิมดึงกระดานก่อนได้เพราะมี competition เดียวทั้งระบบ
   try {
-    const board = await api(`/api/competitions/${SLUG}/leaderboard`);
-    try {
-      renderTeam(await api("/api/me"));
-    } catch {
-      $("team").hidden = true;  // เซิร์ฟเวอร์รุ่นเก่าที่ยังไม่มี /api/me — ไม่ใช่เรื่องคอขาดบาดตาย
-    }
+    me = await api("/api/me");
+  } catch (e) {
+    if (e.status === 401) { logout("โทเคนไม่ถูกต้อง — ล็อกอินใหม่อีกครั้ง"); return; }
+    $("err").hidden = false;
+    $("err").textContent = "ดึงข้อมูลไม่ได้: " + (e.message || e);
+    return;
+  }
+
+  if (!me.enrollments.length) { show("enroll"); return; }
+
+  const pick = loadPick();
+  // เช็ค `courseId` ตรงๆ ไม่ใช่ `current()` — `current()` fallback เป็นวิชาแรกเสมอ
+  // จึงไม่เคยคืน null ตอนอยู่วิชาไหนสักวิชา แล้วค่าที่จำไว้จะไม่มีวันถูกใช้
+  if (!courseId) courseId = pick.courseId || me.enrollments[0].course.id;
+  const enrolment = current();     // fallback เองถ้าวิชาที่จำไว้ถูกถอนไปแล้ว
+  courseId = enrolment.course.id;
+
+  const slugs = enrolment.competitions.map((c) => c.slug);
+  if (!slugs.includes(slug)) slug = slugs.includes(pick.slug) ? pick.slug : (slugs[0] || "");
+  savePick();
+
+  renderCourseBar();
+  renderTeam(enrolment);
+  if (me.is_staff) renderStaffPanel(enrolment.course);
+
+  if (!slug) {
+    // วิชาที่ยังไม่มีโจทย์ — ไม่ใช่ข้อผิดพลาด แค่ยังไม่ถึงเวลา
+    $("cap").textContent = "วิชานี้ยังไม่มีโจทย์";
+    $("rows").innerHTML = "";
+    $("target").hidden = true;
+    $("err").hidden = true;
+    show("board");
+    return;
+  }
+
+  try {
+    const board = await api(`/api/competitions/${slug}/leaderboard`);
     const teams = board.rows.filter((r) => r.type === "team");
     renderRows(board.rows);
     renderTarget(board.next_target, teams.find((r) => r.is_you));
-    $("cap").textContent = `${board.kind} leaderboard · ${teams.length} ทีม`;
+    const title = (enrolment.competitions.find((c) => c.slug === slug) || {}).title || slug;
+    $("cap").textContent = `${title} · ${board.kind} · ${teams.length} ทีม`;
     $("updated").textContent = "อัพเดต " + new Date().toLocaleTimeString("th-TH");
     $("err").hidden = true;
     show("board");
   } catch (e) {
-    if (e.status === 401) { logout("โทเคนไม่ถูกต้อง — ขอจากผู้สอนอีกครั้ง"); return; }
+    if (e.status === 401) { logout("โทเคนไม่ถูกต้อง — ล็อกอินใหม่อีกครั้ง"); return; }
     $("err").hidden = false;
     $("err").textContent = "ดึงข้อมูลไม่ได้: " + (e.message || e);
   }
+
+  loadCalendar();
   try {
     const h = await api("/api/health");
     const depth = (h.queue_depth.cpu || 0) + (h.queue_depth.gpu || 0);
@@ -635,7 +805,9 @@ function start() {
 function logout(msg) {
   clearInterval(timer);
   token = "";
-  myTeam = null;
+  me = null;
+  courseId = "";
+  slug = "";
   localStorage.removeItem(KEY);
   $("team").hidden = true;
   show("gate");
@@ -688,7 +860,8 @@ const thaiDate = (iso) =>
 async function loadCalendar() {
   let cal;
   try {
-    const res = await fetch(API + "/api/competitions/" + SLUG);
+    if (!slug) return;
+    const res = await fetch(API + "/api/competitions/" + slug);
     if (!res.ok) return;              // ไม่มีปฏิทินก็แค่ไม่แสดง ไม่ใช่เรื่องคอขาดบาดตาย
     cal = await res.json();
   } catch { return; }                 // ออฟไลน์ — leaderboard สำคัญกว่า อย่าให้พังทั้งหน้า
@@ -734,7 +907,9 @@ async function loadCalendar() {
   $("cal").hidden = false;
 }
 
-loadCalendar();
+$("join-go").addEventListener("click", joinCourse);
+$("join-code").addEventListener("keydown", (e) => { if (e.key === "Enter") joinCourse(); });
+
 takeTokenFromUrl();
 if (token) start(); else show("gate");
 </script>

@@ -191,7 +191,7 @@ def test_student_token_is_refused_even_though_the_ui_hides_the_panel(arena, clie
     student, _team = _member(arena, STUDENT, "นิสิต")
 
     res = client.post(
-        f"/api/courses/{COURSE}/max-team-size", data={"size": 20}, headers=auth(student)
+        f"/api/courses/{COURSE}/settings", data={"size": 20}, headers=auth(student)
     )
     assert res.status_code == 403, res.text
     assert arena.store.course(COURSE).max_team_size == DEFAULT_MAX_TEAM_SIZE
@@ -202,7 +202,7 @@ def test_staff_token_can_change_it(arena, client):
     staff, _staff_team = _member(arena, STAFF, "อาจารย์")
 
     res = client.post(
-        f"/api/courses/{COURSE}/max-team-size", data={"size": 3}, headers=auth(staff)
+        f"/api/courses/{COURSE}/settings", data={"size": 3}, headers=auth(staff)
     )
     assert res.status_code == 200, res.text
     assert res.json()["course"]["max_team_size"] == 3
@@ -215,7 +215,7 @@ def test_unknown_course_is_404_not_a_silent_no_op(arena, client):
     staff, _staff_team = _member(arena, STAFF, "อาจารย์")
 
     res = client.post(
-        "/api/courses/วิชาที่ไม่มีจริง/max-team-size", data={"size": 3}, headers=auth(staff)
+        "/api/courses/วิชาที่ไม่มีจริง/settings", data={"size": 3}, headers=auth(staff)
     )
     assert res.status_code == 404, res.text
 
@@ -234,7 +234,7 @@ def test_staff_authority_is_deployment_wide_not_per_course(arena, client):
     other = arena.store.save_course(Course(id="วิชาของคนอื่น", name="วิชาของคนอื่น"))
 
     res = client.post(
-        f"/api/courses/{other.id}/max-team-size", data={"size": 3}, headers=auth(staff)
+        f"/api/courses/{other.id}/settings", data={"size": 3}, headers=auth(staff)
     )
     assert res.status_code == 200, res.text
 
@@ -249,7 +249,7 @@ def test_bad_size_comes_back_with_the_reason_not_just_a_number(arena, client):
         arena.join_team(user=mate, invite_code=owner_team.invite_code, course_id=COURSE)
 
     res = client.post(
-        f"/api/courses/{COURSE}/max-team-size", data={"size": 2}, headers=auth(staff)
+        f"/api/courses/{COURSE}/settings", data={"size": 2}, headers=auth(staff)
     )
     assert res.status_code == 422, res.text
     assert "ทีมใหญ่" in res.json()["detail"]
@@ -271,4 +271,60 @@ def test_me_reports_the_course_and_whether_you_are_staff(arena, client):
 
 def test_no_token_gets_401_not_403(client):
     """ไม่มีโทเคนเลย = ยังไม่รู้ว่าเป็นใคร ซึ่งต่างจาก 'รู้แล้วว่าไม่ใช่ผู้สอน'"""
-    assert client.post(f"/api/courses/{COURSE}/max-team-size", data={"size": 3}).status_code == 401
+    assert client.post(f"/api/courses/{COURSE}/settings", data={"size": 3}).status_code == 401
+
+
+# ── ชื่อวิชา ────────────────────────────────────────────────────────
+# วิชาที่ migrate มาจาก schema เก่าได้ชื่อเป็น id ของเครื่อง (`cp463-1-2026`)
+# ซึ่งนิสิตต้องอ่าน · ต้องมีทางแก้ที่ไม่ใช่การเข้าไปยุ่งกับฐานข้อมูลตรงๆ
+
+
+def test_staff_can_rename_a_course(arena, client):
+    arena.staff_emails = frozenset({STAFF})
+    staff, _t = _member(arena, STAFF, "อาจารย์")
+    res = client.post(
+        f"/api/courses/{COURSE}/settings",
+        data={"name": "CP463 · Artificial Intelligence 1/2026"},
+        headers=auth(staff),
+    )
+    assert res.status_code == 200, res.text
+    assert arena.store.course(COURSE).name == "CP463 · Artificial Intelligence 1/2026"
+
+
+def test_omitted_fields_are_left_alone_not_cleared(arena, client):
+    """ฟอร์มที่ส่งเฉพาะฟิลด์ที่แก้เป็นเรื่องปกติ — การตีความว่า "ล้าง" จะลบชื่อทิ้ง"""
+    arena.staff_emails = frozenset({STAFF})
+    staff, _t = _member(arena, STAFF, "อาจารย์")
+    arena.update_course(course_id=COURSE, size=None, name="ชื่อดี", actor_id=None)
+
+    client.post(f"/api/courses/{COURSE}/settings", data={"size": 3}, headers=auth(staff))
+    course = arena.store.course(COURSE)
+    assert course.name == "ชื่อดี", "ไม่ได้ส่ง name มา = ไม่แตะ"
+    assert course.max_team_size == 3
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "ก" * 61])
+def test_bad_course_names_are_rejected(arena, bad):
+    from core.domain import CourseNameInvalid
+
+    with pytest.raises(CourseNameInvalid):
+        arena.update_course(course_id=COURSE, size=None, name=bad, actor_id=None)
+
+
+def test_rename_is_audited(arena):
+    arena.update_course(course_id=COURSE, size=None, name="ชื่อใหม่", actor_id="u1")
+    event = next(e for e in arena.store.audit if e.action == "course.renamed")
+    assert event.payload["after"] == "ชื่อใหม่"
+    assert event.actor_id == "u1"
+
+
+def test_students_do_not_see_the_join_code(arena, client):
+    """รหัสเข้าวิชาเป็นของผู้สอนไว้แจก — ไม่ใช่ของที่ทุกคนหยิบไปส่งต่อได้เอง"""
+    arena.staff_emails = frozenset({STAFF})
+    staff, _s = _member(arena, STAFF, "อาจารย์")
+    student, _t = _member(arena, STUDENT, "นิสิต")
+
+    staff_view = client.get("/api/me", headers=auth(staff)).json()
+    student_view = client.get("/api/me", headers=auth(student)).json()
+    assert staff_view["enrollments"][0]["course"]["join_code"]
+    assert student_view["enrollments"][0]["course"]["join_code"] is None

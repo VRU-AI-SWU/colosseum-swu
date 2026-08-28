@@ -16,7 +16,9 @@ from typing import Any, Callable, Protocol
 
 from core.domain import (
     DEFAULT_MAX_TEAM_SIZE,
+    MAX_COURSE_NAME_LENGTH,
     AliasInvalid,
+    CourseNameInvalid,
     Competition,
     CompetitionClosed,
     Course,
@@ -212,6 +214,35 @@ class Arena:
             before=before, after=alias,
         )
         return team
+
+    def update_course(
+        self, *, course_id: str, size: int | None, name: str | None, actor_id: str | None
+    ) -> Course:
+        """แก้ค่าของวิชาเท่าที่ส่งมา — `None` แปลว่า "ไม่แตะ" ไม่ใช่ "ล้างทิ้ง"
+
+        แยกความหมายนี้ให้ชัด เพราะฟอร์มที่ส่งเฉพาะฟิลด์ที่แก้เป็นเรื่องปกติ
+        แต่การตีความค่าที่ไม่ได้ส่งว่า "ล้าง" จะลบชื่อวิชาทิ้งโดยไม่มีใครขอ
+        """
+        course = self.store.course(course_id)
+        if name is not None:
+            cleaned = " ".join(str(name).split())
+            if not cleaned:
+                raise CourseNameInvalid("ชื่อวิชาว่างไม่ได้")
+            if len(cleaned) > MAX_COURSE_NAME_LENGTH:
+                raise CourseNameInvalid(
+                    f"ชื่อวิชายาวเกินไป — ไม่เกิน {MAX_COURSE_NAME_LENGTH} ตัวอักษร "
+                    f"(ตอนนี้ {len(cleaned)})"
+                )
+            if cleaned != course.name:
+                before, course.name = course.name, cleaned
+                self.store.save_course(course)
+                self.store.record(
+                    "course.renamed", "course", course.id,
+                    actor_id=actor_id, before=before, after=cleaned,
+                )
+        if size is not None:
+            self.set_max_team_size(course_id=course_id, size=size, actor_id=actor_id)
+        return self.store.course(course_id)
 
     def set_max_team_size(self, *, course_id: str, size: int, actor_id: str | None) -> Course:
         """ผู้สอนเปลี่ยนขนาดทีมของวิชา — **ผู้เรียกต้องตรวจสิทธิ์มาก่อนแล้ว**
