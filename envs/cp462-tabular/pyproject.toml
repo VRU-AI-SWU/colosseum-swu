@@ -30,6 +30,7 @@ dev = ["pytest>=8"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["tabular"]
+# golden.json กับ configs/ ต้องไปกับ wheel — selfcheck ของนิสิตต้องใช้
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

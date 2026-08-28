@@ -45,6 +45,10 @@
 | `generator.py` | สร้างข้อมูล — ทำซ้ำได้ทุกบิต ไม่พึ่งการสุ่มของ pandas/sklearn |
 | `splits.py` | แบ่ง train / val / test_public / test_private ด้วยเมล็ดที่ตรึงไว้ |
 | `metrics.py` | คะแนน + bootstrap CI ทั้งสองชนิดโจทย์ · **อยู่ฝั่ง trusted เห็นเฉลย** |
+| `config.py` | TaskSpec + `config_hash` — สัญญาที่บันทึกลงทุก run |
+| `dataset.py` | ทางเข้าข้อมูล · `open_data` (นิสิต) แยกจาก `grading_data` (🔒) |
+| `selfcheck.py` | `python -m tabular.selfcheck` — ตัวรับประกันว่าเครื่องนิสิตตรงกับ grader |
+| `starter/` | `predictor.py` (สิ่งที่ระบบเรียก) + `train.py` (จุดตั้งต้น) |
 
 ## ทดสอบ
 
@@ -53,13 +57,21 @@ uv venv --python 3.12 && uv pip install -e ".[dev]"
 pytest -q
 ```
 
+ตรวจว่าเครื่องให้ผลตรงกับ grader
+
+```bash
+python -m tabular.selfcheck
+```
+
+**ตัวนี้คือสิ่งที่รับประกัน ไม่ใช่เลขเวอร์ชัน** — พิสูจน์แล้วว่าจับได้เมื่อแก้ตัวสร้าง
+ข้อมูล แก้เมล็ดการแบ่ง แก้สัดส่วน หรือแก้คะแนนหลัก
+
 ## สถานะ
 
 | | |
 |---|---|
 | ตัวสร้างข้อมูล + การแบ่งชุด | ✅ พร้อม |
-| metric + bootstrap CI | ✅ พร้อม (54 เทสต์รวม) |
-| TaskSpec / config | ⬜ |
-| `selfcheck` | ⬜ |
-| starter kit | ⬜ |
+| metric + bootstrap CI | ✅ พร้อม |
+| TaskSpec / config + `selfcheck` | ✅ พร้อม |
+| starter kit | ✅ พร้อม (88 เทสต์รวม) |
 | runner ฝั่งแพลตฟอร์ม (`task_type="prediction"`) | ⬜ |
