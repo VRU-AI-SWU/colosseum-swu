@@ -41,6 +41,48 @@ VALIDATORS = {
     "prediction": prediction_validator,
 }
 
+#: environment ที่ **ติดตั้งอยู่บน deployment นี้** — หน้าเว็บสร้างฟอร์มจากรายการนี้
+#:
+#: อยู่ที่นี่เพราะ `core/` ไม่ import `runners/` หรือ `envs/` ตรงๆ · การเพิ่ม
+#: environment ใหม่จึงแตะที่เดียว เหมือน `VALIDATORS`
+#:
+#: **ไม่ได้สแกนหาเอง** — รายการที่ประกาศไว้ชัดเจนอ่านง่ายกว่า และทำให้เครื่องที่
+#: บังเอิญมีแพ็กเกจติดตั้งอยู่ไม่กลายเป็นเครื่องที่เปิดให้สร้าง competition ของ
+#: โจทย์นั้นโดยไม่มีใครตั้งใจ
+ENV_PLUGINS = ("vacuum.arena:PLUGIN", "tabular.arena:PLUGIN")
+
+
+def environments() -> list[dict]:
+    """สิ่งที่ deployment นี้สร้าง competition ได้ พร้อมหน้าตาของ config
+
+    **ข้ามตัวที่ import ไม่ได้แทนที่จะล้ม** — เครื่อง dev อาจติดตั้ง env ไม่ครบ
+    และหน้าเว็บที่แสดงรายการสั้นกว่าความจริง ดีกว่าหน้าเว็บที่เปิดไม่ขึ้นเลย
+    """
+    from runners.prediction.plugin import resolve as resolve_prediction
+    from runners.agent_env.plugin import resolve as resolve_agent_env
+
+    out = []
+    for spec in ENV_PLUGINS:
+        for task_type, resolve in (
+            ("agent_env", resolve_agent_env),
+            ("prediction", resolve_prediction),
+        ):
+            try:
+                plugin = resolve(spec)
+            except (ImportError, AttributeError, TypeError, ValueError):
+                continue
+            out.append(
+                {
+                    "env_plugin": spec,
+                    "task_type": task_type,
+                    "name": getattr(plugin, "name", spec),
+                    "version": getattr(plugin, "version", ""),
+                    "fields": plugin.config_schema(),
+                }
+            )
+            break
+    return out
+
 PIN_DIR = REPO / "core" / "baseline_pins"
 
 LABELS = {

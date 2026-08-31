@@ -21,7 +21,7 @@
 
 import json
 from datetime import datetime, timezone
-from typing import Annotated, Optional
+from typing import Annotated, Callable, Optional
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 
@@ -70,6 +70,7 @@ def create_app(
     baselines: Optional[dict[str, list[BaselineMark]]] = None,
     allow_origins: Optional[list] = None,
     google: Optional[GoogleAuth] = None,
+    environments: Optional[Callable[[], list[dict]]] = None,
 ) -> FastAPI:
     """`allow_origins` = โดเมนของหน้าเว็บที่เรียก API นี้ได้ (README §10.1)
 
@@ -551,6 +552,26 @@ def create_app(
                 for p in competition.phases
             ],
         }
+
+    @app.get("/api/environments")
+    def list_environments(user: UserDep):
+        """โจทย์ชนิดไหนที่ deployment นี้สร้าง competition ได้ พร้อมหน้าตาของ config
+
+        หน้าเว็บสร้างฟอร์มจากตรงนี้ **ไม่ใช่เขียนฟอร์มมือต่อ env** — ฟอร์มที่เขียนมือ
+        จะเพี้ยนจาก config จริงในวันที่มีคนเพิ่มฟิลด์ แล้วผู้สอนกรอกครบแต่บันทึกไม่ได้
+
+        **เฉพาะคนที่จัดการวิชาได้อย่างน้อยหนึ่งวิชา** — ไม่ใช่ความลับ แต่เป็นข้อมูล
+        สำหรับคนที่จะสร้างโจทย์ และมันเปิดเผยชื่อโมดูลบนเครื่อง ซึ่งนิสิตไม่ต้องรู้
+        """
+        if not arena.managed_courses(user.email):
+            raise HTTPException(403, "เฉพาะผู้สอนเท่านั้น")
+        # ⚠️ ชื่อฟังก์ชันนี้ต้อง **ไม่ตรงกับ** พารามิเตอร์ `environments` ของ
+        # `create_app` — ตั้งชื่อซ้ำเมื่อไร ชื่อในขอบเขตนี้จะไปชี้ที่ตัว endpoint เอง
+        # แล้วบรรทัดล่างจะเรียกตัวเองแทนที่จะเรียกของที่ฉีดเข้ามา
+        #
+        # ฉีดเข้ามาตอน wiring เหมือน `validators` และ `baselines` — `core/api.py`
+        # ต้องไม่ import `runners/` หรือ `envs/` ตรงๆ (README §10.5)
+        return {"environments": environments() if environments else []}
 
     @app.post("/api/competitions/{slug}/calendar")
     def set_calendar(slug: str, user: UserDep, phases: str = Form(...)):

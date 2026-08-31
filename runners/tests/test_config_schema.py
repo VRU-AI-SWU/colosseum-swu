@@ -1,0 +1,305 @@
+"""หน้าตาของ config ที่หน้าเว็บใช้สร้างฟอร์ม — ต้องตรงกับ config จริงเสมอ
+
+ฟอร์มที่สร้างจาก schema ผิด **ไม่ได้พังทันที** — มันรับค่าที่ loader ปฏิเสธ
+แล้วผู้สอนที่กรอกครบทุกช่องกดบันทึกไม่ได้ โดยข้อความที่เห็นเป็นข้อความของ loader
+ซึ่งพูดถึงฟิลด์ที่ฟอร์มไม่ได้แสดงด้วยซ้ำ · หรือแย่กว่านั้นคือตกฟิลด์ไปเงียบๆ
+แล้วได้ config ที่ไม่ครบ
+
+เทสต์ในไฟล์นี้จึงผูกสามอย่างเข้าด้วยกัน
+
+  1. schema ต้องครอบ **ทุกฟิลด์** ของ config จริง (อนุมานจาก dataclass จึงได้ฟรี
+     แต่ยังต้องยืนยันว่าการอนุมานถูก)
+  2. schema ต้องครอบ **ทุกคีย์ที่ปรากฏใน YAML ที่แจกจริง** — ไฟล์ที่ใช้อยู่คือ
+     หลักฐานว่าคีย์ไหนมีจริง
+  3. **ขอบเขตที่ประกาศต้องตรงกับที่ loader บังคับจริง** — ยิงค่านอกขอบเขตเข้าไป
+     แล้วต้องถูกปฏิเสธ ไม่ใช่เชื่อว่าคนเขียนจำถูก
+"""
+
+from __future__ import annotations
+
+import pytest
+import yaml
+
+from runners.sandbox.schema import Limit, derive
+
+# ── ตัวช่วยที่ใช้ร่วมกันทุก env ──────────────────────────────────────
+
+
+def keys_of(schema) -> set[str]:
+    return {f["key"] for f in schema}
+
+
+def yaml_keys(path) -> set[str]:
+    """คีย์แบบ dotted ที่ปรากฏจริงในไฟล์ YAML"""
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    out = set()
+    for key, value in data.items():
+        if isinstance(value, dict):
+            out |= {f"{key}.{name}" for name in value}
+        else:
+            out.add(key)
+    return out
+
+
+# ── ตัวอนุมานเอง ────────────────────────────────────────────────────
+
+
+def test_a_field_without_a_default_is_required_not_an_error():
+    """config บางตัวบังคับให้ประกาศเอง (CP462) บางตัวมีค่าเริ่มต้นครบ (CP463)
+    ทั้งสองแบบต้องอธิบายเป็นฟอร์มได้"""
+    from dataclasses import dataclass, field
+
+    @dataclass
+    class Sample:
+        must_fill: str
+        has_default: int = 3
+        listy: list = field(default_factory=list)
+
+    got = {f.key: f for f in derive(Sample)}
+    assert got["must_fill"].required and got["must_fill"].default is None
+    assert not got["has_default"].required and got["has_default"].default == 3
+    assert got["listy"].default == []
+
+
+def test_booleans_do_not_become_number_boxes():
+    """`isinstance(True, int)` เป็นจริงใน Python — ถ้าเช็คผิดลำดับ ช่องกาถูกจะกลาย
+    เป็นช่องกรอกตัวเลข ซึ่งผู้สอนจะพิมพ์ 1/0 ลงไปแล้วงงว่าทำไมมันแปลก"""
+    from dataclasses import dataclass
+
+    @dataclass
+    class Sample:
+        flag: bool = True
+        number: int = 1
+
+    got = {f.key: f.type for f in derive(Sample)}
+    assert got["flag"] == "bool"
+    assert got["number"] == "int"
+
+
+def test_a_declared_choice_list_makes_it_an_enum():
+    from dataclasses import dataclass
+
+    @dataclass
+    class Sample:
+        mode: str = "a"
+
+    got = derive(Sample, {"mode": Limit(choices=("a", "b"))})[0]
+    assert got.type == "enum" and got.choices == ("a", "b")
+
+
+def test_config_nested_more_than_one_level_fails_loudly():
+    """ฟอร์มที่ตกฟิลด์ไปเงียบๆ แย่กว่าฟอร์มที่สร้างไม่ได้"""
+    from dataclasses import dataclass, field
+
+    @dataclass
+    class Deep:
+        x: int = 1
+
+    @dataclass
+    class Mid:
+        deep: Deep = field(default_factory=Deep)
+
+    @dataclass
+    class Top:
+        mid: Mid = field(default_factory=Mid)
+
+    with pytest.raises(TypeError, match="ซ้อนเกินหนึ่งชั้น"):
+        derive(Top)
+
+
+# ── CP463 (agent_env) ───────────────────────────────────────────────
+
+vacuum = pytest.importorskip("vacuum", reason="ต้องติดตั้ง envs/cp463-vacuum")
+
+
+@pytest.fixture(scope="module")
+def vacuum_schema():
+    from vacuum.arena import PLUGIN
+
+    return PLUGIN.config_schema()
+
+
+@pytest.mark.parametrize("phase", ["warmup", "main", "final"])
+def test_vacuum_schema_covers_every_key_in_the_shipped_yaml(vacuum_schema, phase):
+    """ไฟล์ที่ใช้อยู่จริงคือหลักฐานว่าคีย์ไหนมีจริง — schema ต้องครอบให้ครบ"""
+    from vacuum.config import CONFIG_DIR
+
+    missing = yaml_keys(CONFIG_DIR / f"{phase}.yaml") - keys_of(vacuum_schema)
+    assert not missing, f"{phase}.yaml มีคีย์ที่ฟอร์มไม่รู้จัก: {sorted(missing)}"
+
+
+def test_vacuum_enum_choices_match_the_modules_own_constants(vacuum_schema):
+    """ตัวเลือกบนฟอร์มต้องมาจากค่าคงที่เดียวกับที่ validate() ใช้ ไม่ใช่พิมพ์ซ้ำ"""
+    from vacuum.config import DIRT_DISTRIBUTIONS, OBSTACLE_GENERATORS
+
+    got = {f["key"]: tuple(f.get("choices", ())) for f in vacuum_schema}
+    assert got["room.obstacle_generator"] == tuple(OBSTACLE_GENERATORS)
+    assert got["room.dirt_distribution"] == tuple(DIRT_DISTRIBUTIONS)
+
+
+@pytest.mark.parametrize(
+    "key,bad",
+    [
+        ("room.width", 1),                      # ต่ำกว่า minimum
+        ("room.obstacle_density", 1.5),         # เกิน maximum
+        ("room.dirt_ratio", 0.0),               # ต้องมากกว่า 0
+        ("dynamics.action_noise", -0.1),
+        ("dynamics.sticky_dirt", 2.0),
+        ("room.obstacle_generator", "ไม่มีจริง"),
+        ("room.dirt_distribution", "ไม่มีจริง"),
+    ],
+)
+def test_values_outside_the_declared_limits_are_really_rejected(key, bad):
+    """**ข้อสำคัญที่สุด** — ขอบเขตที่ประกาศต้องตรงกับที่ `validate()` บังคับจริง
+
+    ถ้าประกาศหลวมกว่าความจริง ฟอร์มจะรับค่าที่ loader ปฏิเสธ · ถ้าประกาศแคบกว่า
+    ผู้สอนจะตั้งค่าที่ระบบรองรับไม่ได้ · ทั้งสองแบบไม่มีอะไรฟ้องนอกจากเทสต์นี้
+    """
+    from vacuum import load_config
+    from vacuum.config import CONFIG_DIR, ConfigError
+
+    base = load_config(CONFIG_DIR / "main.yaml")
+    with pytest.raises(ConfigError):
+        base.replace(**{key: bad})
+
+
+def test_vacuum_marks_the_untouchable_fields_as_fixed(vacuum_schema):
+    """`guarantee_connected: false` ไม่รองรับใน v1.0.0 — ฟอร์มต้องไม่เสนอให้ปิด"""
+    fixed = {f["key"] for f in vacuum_schema if f["fixed"]}
+    assert {"task", "version", "room.guarantee_connected", "scoring.metric"} <= fixed
+
+
+# ── CP462 (prediction) ──────────────────────────────────────────────
+
+tabular = pytest.importorskip("tabular", reason="ต้องติดตั้ง envs/cp462-tabular")
+
+
+@pytest.fixture(scope="module")
+def tabular_schema():
+    from tabular.arena import PLUGIN
+
+    return PLUGIN.config_schema()
+
+
+@pytest.mark.parametrize("slug", ["churn", "housing"])
+def test_tabular_schema_covers_every_key_in_the_shipped_yaml(tabular_schema, slug):
+    from tabular.config import CONFIG_DIR
+
+    missing = yaml_keys(CONFIG_DIR / f"{slug}.yaml") - keys_of(tabular_schema)
+    assert not missing, f"{slug}.yaml มีคีย์ที่ฟอร์มไม่รู้จัก: {sorted(missing)}"
+
+
+def test_tabular_enum_choices_come_from_the_config_module(tabular_schema):
+    from tabular.config import KINDS, PRIMARY_BY_KIND
+
+    got = {f["key"]: tuple(f.get("choices", ())) for f in tabular_schema}
+    assert got["kind"] == tuple(KINDS)
+    assert set(got["primary"]) == {m for ms in PRIMARY_BY_KIND.values() for m in ms}
+
+
+def test_the_grading_seed_is_never_a_form_field(tabular_schema):
+    """🔒 เมล็ดของชุดที่ใช้ตัดสินอยู่ใน ARENA_SECRETS — ฟอร์มต้องไม่มีทางตั้งมัน
+
+    ถ้าตั้งจากฟอร์มได้ ผู้สอนที่รู้ค่าจะคำนวณเฉลยเองได้ และค่าจะไปนอนอยู่ใน
+    ฐานข้อมูลที่ API อ่านได้ ซึ่งเป็นสิ่งที่ทั้งการออกแบบพยายามเลี่ยง
+    """
+    seed = next(f for f in tabular_schema if f["key"] == "grading_seed")
+    assert seed["fixed"], "grading_seed ต้องเป็นช่องที่แก้ผ่านฟอร์มไม่ได้"
+
+
+@pytest.mark.parametrize(
+    "field,bad",
+    [
+        ("kind", "clustering"),
+        ("primary", "roc_auc"),
+        ("n_rows", 50),
+        ("grading_rows", 50),
+        ("grading_public_ratio", 1.0),
+    ],
+)
+def test_tabular_values_outside_the_declared_limits_are_really_rejected(field, bad):
+    from tabular.config import CONFIG_DIR, ConfigError, load_config
+
+    base = load_config(CONFIG_DIR / "churn.yaml")
+    with pytest.raises(ConfigError):
+        base.replace(**{field: bad})
+
+
+# ── ทะเบียนที่ API ส่งออกไป ─────────────────────────────────────────
+
+
+def test_the_catalogue_lists_both_environments_with_their_task_type():
+    from core.wiring import environments
+
+    got = {e["env_plugin"]: e for e in environments()}
+    assert got["vacuum.arena:PLUGIN"]["task_type"] == "agent_env"
+    assert got["tabular.arena:PLUGIN"]["task_type"] == "prediction"
+    assert all(e["fields"] for e in got.values()), "ทุก env ต้องมีหน้าตาของ config"
+
+
+def test_every_registered_task_type_has_a_validator():
+    """ผูกสองทะเบียนเข้าด้วยกัน — env ที่สร้าง competition ได้แต่ตรวจไฟล์ไม่ได้
+    จะรับ submission เข้ามาแล้วล้มตอนตรวจ ซึ่งไม่มีใครสังเกตจนกว่าจะมีคนส่งงาน"""
+    from core.wiring import VALIDATORS, environments
+
+    for env in environments():
+        assert env["task_type"] in VALIDATORS, f"{env['env_plugin']}: ไม่มีตัวตรวจไฟล์"
+
+
+# ── ขอบเขตทุกตัวที่ประกาศ ต้องเป็นของจริง (ไล่อัตโนมัติ) ────────────
+
+
+def out_of_range(field) -> list:
+    """ค่าที่ควรถูกปฏิเสธตามขอบเขตที่ประกาศไว้"""
+    out = []
+    if field.get("choices"):
+        out.append("ค่าที่ไม่มีในรายการ")
+    if field.get("minimum") is not None:
+        out.append(field["minimum"] - 1 if field["type"] == "int" else field["minimum"] - 0.5)
+    if field.get("maximum") is not None:
+        out.append(field["maximum"] + 1 if field["type"] == "int" else field["maximum"] + 0.5)
+    return out
+
+
+def check_limits_are_real(schema, base, error):
+    """ทุกขอบเขตที่ประกาศ ต้องมี loader บังคับอยู่จริง — ไล่จาก schema เอง
+
+    ต่างจากเทสต์รายข้อข้างบนตรงที่ **ฟิลด์ใหม่เข้าข่ายอัตโนมัติ** · ประกาศขอบเขต
+    ที่ loader ไม่ได้บังคับ = ฟอร์มปฏิเสธค่าที่ระบบรองรับได้จริง ซึ่งผู้สอนจะเจอ
+    เป็น "ตั้งค่านี้ไม่ได้" โดยไม่มีเหตุผล
+    """
+    unenforced = []
+    for field in schema:
+        if field["fixed"]:
+            continue
+        for bad in out_of_range(field):
+            try:
+                base.replace(**{field["key"]: bad})
+            except error:
+                continue
+            except Exception:
+                continue  # ปฏิเสธด้วยชนิดอื่นก็ถือว่าปฏิเสธ
+            unenforced.append(f"{field['key']} = {bad!r}")
+    return unenforced
+
+
+def test_every_declared_limit_in_vacuum_is_enforced_by_the_loader(vacuum_schema):
+    from vacuum import load_config
+    from vacuum.config import CONFIG_DIR, ConfigError
+
+    base = load_config(CONFIG_DIR / "main.yaml")
+    unenforced = check_limits_are_real(vacuum_schema, base, ConfigError)
+    assert not unenforced, (
+        "ขอบเขตที่ประกาศแต่ loader ไม่ได้บังคับ — ฟอร์มจะปฏิเสธค่าที่ระบบรับได้จริง:\n  "
+        + "\n  ".join(unenforced)
+    )
+
+
+def test_every_declared_limit_in_tabular_is_enforced_by_the_loader(tabular_schema):
+    from tabular.config import CONFIG_DIR, ConfigError, load_config
+
+    base = load_config(CONFIG_DIR / "churn.yaml")
+    unenforced = check_limits_are_real(tabular_schema, base, ConfigError)
+    assert not unenforced, (
+        "ขอบเขตที่ประกาศแต่ loader ไม่ได้บังคับ:\n  " + "\n  ".join(unenforced)
+    )

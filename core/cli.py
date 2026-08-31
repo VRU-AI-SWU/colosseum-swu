@@ -466,6 +466,7 @@ def cmd_serve(args) -> int:
         demo_arena,
         google_auth_from_env,
         course_staff_from_env,
+        environments,
         staff_emails_from_env,
     )
     from runners.worker import SANDBOXES, Worker
@@ -538,6 +539,7 @@ def cmd_serve(args) -> int:
             baselines={"cp463-vacuum-1-2026": CP463_VACUUM_LADDER},
             allow_origins=args.allow_origin or None,
             google=google,
+            environments=environments,
         ),
         host=args.host,
         port=args.port,

@@ -12,8 +12,9 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from runners.sandbox.schema import Limit, as_dicts, derive
 from tabular import __version__
-from tabular.config import ConfigError, TaskSpec, load_config
+from tabular.config import KINDS, PRIMARY_BY_KIND, ConfigError, TaskSpec, load_config
 from tabular.dataset import grading_data
 from tabular.metrics import score
 from tabular.secrets import load_grading_seed
@@ -29,6 +30,35 @@ PREDICT_TIMEOUT_S = 300.0
 #: ต้องเป็นการกระทำที่มองเห็นได้ ไม่ใช่ค่าเริ่มต้น · `load_grading_seed` เตือนดังๆ
 #: ทุกครั้งที่ใช้ และ worker ของจริงไม่เคยตั้งค่านี้
 ALLOW_FALLBACK_ENV = "ARENA_CP462_ALLOW_SEED_FALLBACK"
+
+#: ขอบเขตที่อนุมานจาก dataclass ไม่ได้ — มันอยู่ใน `TaskSpec.__post_init__`
+#:
+#: ⚠️ **ต้องตรงกับสิ่งที่ `__post_init__` บังคับจริง** ไม่งั้นฟอร์มจะรับค่าที่
+#: loader ปฏิเสธ · `test_schema.py` ยิงค่านอกขอบเขตเข้า loader จริงเพื่อยืนยัน
+# ⚠️ ประกาศเฉพาะขอบเขตที่ `__post_init__` บังคับจริง — ดูเหตุผลที่ vacuum/arena.py
+CONFIG_LIMITS = {
+    "slug": Limit(help="ชื่อสั้นของโจทย์ — ใช้อ้างในคำสั่งและใน URL"),
+    "task": Limit(help="ชื่อชุดข้อมูลใน `generator.TASKS` — จุดที่จะสลับเป็นข้อมูลจริง"),
+    "title": Limit(help="ชื่อที่นิสิตเห็น — แก้ได้ตลอด ไม่กระทบคะแนนเก่า"),
+    "kind": Limit(choices=KINDS, help="clustering ยังไม่รองรับโดยตั้งใจ"),
+    "primary": Limit(
+        choices=tuple(sorted({m for ms in PRIMARY_BY_KIND.values() for m in ms})),
+        help="คะแนนหลัก — ต้องเข้าคู่กับชนิดโจทย์ และ 'มากกว่าดีกว่า' เสมอ",
+    ),
+    "n_rows": Limit(minimum=100, help="จำนวนแถวของชุดที่แจกนิสิต"),
+    "data_seed": Limit(help="เมล็ดของชุดที่แจก — สาธารณะ นิสิตใช้สร้างข้อมูลเดียวกัน"),
+    "split_seed": Limit(help="เมล็ดการแบ่ง train/val/test"),
+    "bootstrap_seed": Limit(help="เมล็ดของช่วงความเชื่อมั่น — ตรึงให้ทุกทีมเทียบกันได้"),
+    "ratios": Limit(fixed=True, help="สัดส่วน train/val/test — แก้ผ่านฟอร์มยังไม่รองรับ"),
+    "labels": Limit(fixed=True, help="ลำดับคลาสที่ตรึงไว้ — classification เท่านั้น"),
+    "grading_rows": Limit(minimum=100, help="จำนวนแถวของชุดที่ใช้ตัดสิน"),
+    "grading_public_ratio": Limit(
+        minimum=0.01, maximum=0.99, help="สัดส่วนที่เป็น test_public ที่เหลือเป็น private"
+    ),
+    "grading_seed": Limit(
+        fixed=True, help="🔒 เมล็ดของชุดลับ — อยู่ใน ARENA_SECRETS ไม่ใช่ในฟอร์ม"
+    ),
+}
 
 
 class TabularPlugin:
@@ -77,6 +107,10 @@ class TabularPlugin:
             kind=spec.kind, primary=spec.primary,
             seed=spec.bootstrap_seed, labels=spec.labels or None,
         )
+
+    def config_schema(self) -> list[dict[str, Any]]:
+        """หน้าตาของ config สำหรับสร้างฟอร์ม — **อนุมานจาก dataclass ไม่ได้เขียนมือ**"""
+        return as_dicts(derive(TaskSpec, CONFIG_LIMITS))
 
     def predict_timeout_s(self, spec: TaskSpec) -> float:
         return PREDICT_TIMEOUT_S

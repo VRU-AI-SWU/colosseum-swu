@@ -344,3 +344,23 @@ def test_a_typo_in_the_course_id_is_called_out(monkeypatch, tmp_path):
         {"ARENA_STAFF_EMAILS": AJ, env_key_for_course("cp999-9-9999"): TA},
     )
     assert any("ไม่มีวิชานี้" in ln for ln in lines), lines
+
+
+# ── ทะเบียน environment ────────────────────────────────────────────
+
+
+def test_only_instructors_see_the_environment_catalogue(arena):
+    """ไม่ใช่ความลับ แต่เป็นข้อมูลสำหรับคนที่จะสร้างโจทย์ และเปิดเผยชื่อโมดูลบนเครื่อง"""
+    client = TestClient(create_app(arena, environments=lambda: [{"env_plugin": "x:P"}]))
+    assert client.get("/api/environments", headers=auth(sign_in(arena, TA))).status_code == 200
+    assert client.get("/api/environments", headers=auth(sign_in(arena, AJ))).status_code == 200
+    assert (
+        client.get("/api/environments", headers=auth(sign_in(arena, STUDENT))).status_code == 403
+    )
+
+
+def test_the_catalogue_is_empty_when_nothing_is_wired(arena):
+    """ไม่ฉีดเข้ามา = รายการว่าง ไม่ใช่ 500 — `core/api.py` ต้องไม่ import runners เอง"""
+    client = TestClient(create_app(arena))
+    body = client.get("/api/environments", headers=auth(sign_in(arena, AJ))).json()
+    assert body == {"environments": []}
