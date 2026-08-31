@@ -364,3 +364,160 @@ def test_the_catalogue_is_empty_when_nothing_is_wired(arena):
     client = TestClient(create_app(arena))
     body = client.get("/api/environments", headers=auth(sign_in(arena, AJ))).json()
     assert body == {"environments": []}
+
+
+# ── สร้างวิชาและโจทย์จากหน้าเว็บ ───────────────────────────────────
+
+
+CHURN_YAML = (
+    "slug: newtask\ntask: churn\ntitle: โจทย์ใหม่\nkind: classification\n"
+    "primary: macro_f1\nlabels: [0, 1]\nn_rows: 12000\n"
+    "data_seed: 1\nsplit_seed: 2\nbootstrap_seed: 3\n"
+    "ratios: [0.6, 0.15, 0.25]\ngrading_rows: 3000\ngrading_public_ratio: 0.4\n"
+)
+
+
+def fake_prepare(env_plugin, config_text):
+    """แทน `core.wiring.prepare_config` — เทสต์นี้ตรวจ endpoint ไม่ใช่ตัวโหลดของ env"""
+    if "พัง" in config_text:
+        raise ValueError("room.width ต้อง >= 2")
+    return {
+        "task_type": "prediction",
+        "config_hash": "sha256:aa",
+        "title": "โจทย์ใหม่",
+        "paradigm": "supervised-learning",
+        "whitelist": frozenset({"numpy", "pandas"}),
+    }
+
+
+CALENDAR = json.dumps({
+    "warmup": ["2026-09-15", "2026-09-30"],
+    "main": ["2026-10-01", "2026-10-31"],
+    "final": ["2026-11-01", "2026-11-30"],
+})
+
+
+def authoring(arena):
+    return TestClient(create_app(arena, prepare_config=fake_prepare))
+
+
+def new_competition(**kw) -> dict:
+    body = {
+        "course_id": COURSE, "slug": "cp462-new-1-2026",
+        "env_plugin": "tabular.arena:PLUGIN", "config": CHURN_YAML, "phases": CALENDAR,
+    }
+    body.update(kw)
+    return body
+
+
+def test_only_system_staff_can_create_a_course(arena):
+    """ไม่ใช่ `can_manage_course` เพราะยังไม่มีวิชาให้ผูกสิทธิ์ — และถ้าใครก็สร้างได้
+    นิสิตจะสร้างวิชาของตัวเองแล้วสั่งงานเข้าคิว"""
+    client = authoring(arena)
+    form = {"course_id": "cp999-1-2026", "name": "วิชาใหม่", "size": 4}
+
+    assert client.post("/api/courses", headers=auth(sign_in(arena, STUDENT)),
+                       data=form).status_code == 403
+    assert client.post("/api/courses", headers=auth(sign_in(arena, TA)),
+                       data=form).status_code == 403, "ผู้สอนของวิชาอื่นไม่ใช่ผู้ดูแลระบบ"
+
+    got = client.post("/api/courses", headers=auth(sign_in(arena, AJ)), data=form)
+    assert got.status_code == 200, got.text
+    course = got.json()["course"]
+    assert course["id"] == "cp999-1-2026" and course["max_team_size"] == 4
+    assert len(course["join_code"]) == 6, "ต้องได้รหัสเข้าวิชาไปแจกในคาบทันที"
+
+
+@pytest.mark.parametrize("bad", ["cp999_1_2026", "CP 999", "", "วิชา"])
+def test_a_bad_course_id_is_rejected_the_same_way_as_the_cli(arena, bad):
+    client = authoring(arena)
+    r = client.post("/api/courses", headers=auth(sign_in(arena, AJ)),
+                    data={"course_id": bad, "name": "x", "size": 4})
+    assert r.status_code == 400
+
+
+def test_creating_a_course_does_not_make_you_its_instructor(arena):
+    """สิทธิ์มาจาก environment เท่านั้น — ถ้าคนสร้างกลายเป็นผู้สอนอัตโนมัติ
+    ใครที่สร้างวิชาได้จะแต่งตั้งตัวเองได้ ซึ่งคือช่องที่ทั้งการออกแบบพยายามปิด"""
+    client = authoring(arena)
+    client.post("/api/courses", headers=auth(sign_in(arena, AJ)),
+                data={"course_id": "cp999-1-2026", "name": "วิชาใหม่", "size": 4})
+    assert "cp999-1-2026" not in arena.course_staff
+
+
+def test_the_course_instructor_can_create_a_competition(arena):
+    client = authoring(arena)
+    got = client.post("/api/competitions", headers=auth(sign_in(arena, TA)),
+                      data=new_competition())
+    assert got.status_code == 200, got.text
+    body = got.json()
+    assert body["config_hash"] == "sha256:aa"
+    assert body["competition"]["task_type"] == "prediction"
+
+    made = arena.store.competition_by_slug("cp462-new-1-2026")
+    assert made.config_text == CHURN_YAML, "config ต้องถูกเก็บเป็นเนื้อหา"
+    assert made.config_path == "", "ไม่มีไฟล์บนเครื่อง — นี่คือจุดที่ schema v5 ปลดล็อก"
+    assert made.config_source() == ("text", CHURN_YAML)
+    assert "tabular" not in made.effective_whitelist()
+
+
+def test_a_student_cannot_create_a_competition(arena):
+    client = authoring(arena)
+    r = client.post("/api/competitions", headers=auth(sign_in(arena, STUDENT)),
+                    data=new_competition())
+    assert r.status_code == 403
+    assert arena.store.competition_by_slug("cp462-new-1-2026") is None
+
+
+def test_an_instructor_of_another_course_cannot_create_in_this_one(arena):
+    arena.course_staff = {**arena.course_staff, "cp463-1-2026": frozenset({OTHER})}
+    client = authoring(arena)
+    r = client.post("/api/competitions", headers=auth(sign_in(arena, OTHER)),
+                    data=new_competition())
+    assert r.status_code == 403
+
+
+def test_a_config_the_environment_rejects_is_not_stored(arena):
+    """**ตรวจด้วยตัวโหลดจริงของ env ก่อนบันทึกเสมอ** — ข้อความที่ผู้สอนเห็นต้องเป็น
+    ของ env ไม่ใช่ข้อความกลางๆ ที่ไม่บอกว่าฟิลด์ไหนผิด"""
+    client = authoring(arena)
+    r = client.post("/api/competitions", headers=auth(sign_in(arena, TA)),
+                    data=new_competition(config="พัง"))
+    assert r.status_code == 400
+    assert "room.width" in r.json()["detail"], "ต้องส่งข้อความของ env ต่อให้ผู้สอน"
+    assert arena.store.competition_by_slug("cp462-new-1-2026") is None
+
+
+def test_a_duplicate_slug_is_refused(arena):
+    client = authoring(arena)
+    r = client.post("/api/competitions", headers=auth(sign_in(arena, TA)),
+                    data=new_competition(slug=SLUG))
+    assert r.status_code == 400
+    assert SLUG in r.json()["detail"]
+
+
+def test_a_bad_calendar_is_refused_before_anything_is_written(arena):
+    client = authoring(arena)
+    overlap = json.dumps({"warmup": ["2026-09-15", "2026-10-15"],
+                          "main": ["2026-10-01", "2026-10-31"],
+                          "final": ["2026-11-01", "2026-11-30"]})
+    r = client.post("/api/competitions", headers=auth(sign_in(arena, TA)),
+                    data=new_competition(phases=overlap))
+    assert r.status_code == 400 and "ทับกัน" in r.json()["detail"]
+    assert arena.store.competition_by_slug("cp462-new-1-2026") is None
+
+
+def test_creating_without_the_registry_wired_says_so(arena):
+    """`core/api.py` ไม่ import runners เอง — ถ้าไม่ได้ฉีดเข้ามาต้องบอกตรงๆ ไม่ใช่ 500"""
+    client = TestClient(create_app(arena))
+    r = client.post("/api/competitions", headers=auth(sign_in(arena, TA)),
+                    data=new_competition())
+    assert r.status_code == 503
+
+
+def test_who_created_it_is_recorded(arena):
+    client = authoring(arena)
+    ta = sign_in(arena, TA)
+    client.post("/api/competitions", headers=auth(ta), data=new_competition())
+    events = [e for e in arena.store.audit if e.action == "competition.created"]
+    assert events and events[-1].actor_id == ta.id

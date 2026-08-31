@@ -83,6 +83,69 @@ def environments() -> list[dict]:
             break
     return out
 
+class ConfigRejected(Exception):
+    """config ที่ส่งมาจากฟอร์มใช้สร้าง competition ไม่ได้ — ข้อความมาจาก env จริง"""
+
+
+def prepare_config(env_plugin: str, config_text: str) -> dict:
+    """ให้ **env จริง** อ่าน config ที่ฟอร์มส่งมา แล้วคืนสิ่งที่ต้องบันทึก
+
+    ⚠️ **ตรวจด้วยตัวโหลดจริง ไม่ใช่ตรวจเองซ้ำ** — ถ้าเขียนตัวตรวจแยกไว้ที่นี่
+    มันจะเพี้ยนจาก `validate()` ของ env แล้วฟอร์มจะรับ config ที่ตอนรันจริงใช้ไม่ได้
+    ซึ่งเป็นความผิดพลาดที่ไปโผล่ตอนนิสิตส่งงานแล้ว
+
+    เขียนลงไฟล์ชั่วคราวเพราะสัญญาของ plugin รับ path — เหตุผลเดียวกับที่
+    `Worker._config_file` ทำ
+    """
+    import tempfile
+
+    from runners.agent_env.plugin import resolve as resolve_agent_env
+    from runners.prediction.plugin import resolve as resolve_prediction
+
+    for task_type, resolve, load in (
+        ("agent_env", resolve_agent_env, "load_config"),
+        ("prediction", resolve_prediction, "load_spec"),
+    ):
+        try:
+            plugin = resolve(env_plugin)
+        except (ImportError, AttributeError, TypeError, ValueError):
+            continue
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.yaml"
+            path.write_text(config_text, encoding="utf-8")
+            try:
+                spec = getattr(plugin, load)(str(path))
+            except Exception as exc:  # noqa: BLE001 — ข้อความของ env อ่านรู้เรื่องกว่าที่เราจะเขียนเอง
+                raise ConfigRejected(str(exc)) from exc
+
+        return {
+            "task_type": task_type,
+            "config_hash": plugin.config_hash(spec),
+            "title": getattr(spec, "title", "") or "",
+            "paradigm": PARADIGM_OF_TASK[task_type],
+            "whitelist": DEFAULT_WHITELIST_OF_TASK[task_type],
+        }
+
+    raise ConfigRejected(f"ไม่รู้จัก env_plugin {env_plugin!r} บน deployment นี้")
+
+
+#: ชนิดโจทย์ → paradigm ที่ใช้เป็นค่าเริ่มต้นตอนสร้างจากหน้าเว็บ
+#:
+#: **เป็นค่าเริ่มต้น ไม่ใช่กฎ** — `unsupervised-learning` ใช้ runner `prediction`
+#: เหมือนกัน ผู้สอนจึงเปลี่ยนได้ตอนสร้าง (ดูเหตุผลที่ `class Paradigm`)
+PARADIGM_OF_TASK = {
+    "agent_env": "reinforcement-learning",
+    "prediction": "supervised-learning",
+}
+
+#: whitelist เริ่มต้นต่อชนิดโจทย์ — ต้องตรงกับที่ติดตั้งอยู่ใน image ของชนิดนั้น
+DEFAULT_WHITELIST_OF_TASK = {
+    "agent_env": frozenset(),  # ว่าง = ใช้ค่าปริยายของ `effective_whitelist()`
+    "prediction": frozenset({"numpy", "pandas", "sklearn", "scipy", "joblib"}),
+}
+
+
 PIN_DIR = REPO / "core" / "baseline_pins"
 
 LABELS = {

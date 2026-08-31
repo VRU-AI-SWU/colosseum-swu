@@ -18,6 +18,7 @@ from core.domain import (
     DEFAULT_MAX_TEAM_SIZE,
     MAX_COURSE_NAME_LENGTH,
     AliasInvalid,
+    CourseIdInvalid,
     CourseNameInvalid,
     Competition,
     CompetitionClosed,
@@ -32,8 +33,12 @@ from core.domain import (
     User,
     new_id,
     clean_alias,
+    clean_course_name,
+    new_invite_code,
     new_token,
+    require_paradigm,
     utcnow,
+    valid_course_id,
 )
 from core.db import Database
 from core.queue import JobQueue, check_quota
@@ -238,6 +243,84 @@ class Arena:
         )
         return team
 
+    def create_course(
+        self, *, course_id: str, name: str, max_team_size: int, actor_id: str | None
+    ) -> Course:
+        """สร้างวิชาใหม่ — กติกาของ id และชื่ออยู่ที่ `core/domain.py` ที่เดียว
+
+        **ไม่ตั้งใครเป็นผู้สอนของวิชานี้** — สิทธิ์มาจาก `ARENA_COURSE_STAFF_<ID>`
+        ใน environment เท่านั้น (เหมือน sudoers) คนที่สร้างจึงต้องเป็นผู้สอนระดับ
+        ทั้งระบบอยู่แล้ว ซึ่งจัดการทุกวิชาได้โดยนิยาม · ถ้าให้คนสร้างกลายเป็นผู้สอน
+        อัตโนมัติ ใครก็ตามที่สร้างวิชาได้จะแต่งตั้งตัวเองได้ ซึ่งคือช่องที่ทั้ง
+        การออกแบบพยายามปิด
+        """
+        course_id = valid_course_id(course_id)
+        if course_id in self.store.courses:
+            raise CourseIdInvalid(f"มีวิชา {course_id!r} อยู่แล้ว")
+
+        course = Course(
+            id=course_id,
+            name=clean_course_name(name),
+            max_team_size=Course(id=course_id, name="x").validated_team_size(max_team_size),
+            join_code=new_invite_code(),
+        )
+        self.store.save_course(course)
+        self.store.record("course.created", "course", course.id, actor_id=actor_id, name=course.name)
+        return course
+
+    def create_competition(
+        self,
+        *,
+        slug: str,
+        course_id: str,
+        title: str,
+        task_type: str,
+        env_plugin: str,
+        config_text: str,
+        paradigm: str,
+        ranges: dict[str, tuple[str, str]],
+        quota_per_day: int = 5,
+        import_whitelist: frozenset[str] = frozenset(),
+        actor_id: str | None,
+    ) -> Competition:
+        """สร้าง competition ใหม่ — **config เดินทางมาเป็นเนื้อหา ไม่ใช่ path**
+
+        ผู้เรียกต้องตรวจ config กับ plugin จริงมาก่อนแล้ว (`core/wiring.prepare_config`)
+        ที่นี่ไม่รู้จัก environment ใดเลยตามหลักของ `core/`
+        """
+        from core.calendar import build_phases, day_range
+
+        slug = valid_course_id(slug)  # กติกาเดียวกัน — slug ก็โผล่ใน URL
+        if self.store.competition_by_slug(slug) is not None:
+            raise CourseIdInvalid(f"มี competition {slug!r} อยู่แล้ว")
+        if course_id not in self.store.courses:
+            raise CourseIdInvalid(f"ไม่รู้จักวิชา {course_id!r}")
+        require_paradigm(paradigm)
+
+        phases = build_phases({name: day_range(*pair) for name, pair in ranges.items()})
+        competition = Competition(
+            id=new_id(),
+            course_id=course_id,
+            slug=slug,
+            title=title.strip() or slug,
+            task_type=task_type,
+            env_plugin=env_plugin,
+            config_path="",          # ไม่มีไฟล์บนเครื่อง — นี่คือจุดที่ v5 ปลดล็อก
+            config_text=config_text,
+            opens_at=phases[0].starts_at,
+            closes_at=phases[-1].ends_at,
+            quota_per_day=quota_per_day,
+            import_whitelist=frozenset(import_whitelist),
+            paradigm=paradigm,
+            phases=phases,
+        )
+        self.store.save_competition(competition)
+        self.store.record(
+            "competition.created", "competition", competition.id,
+            actor_id=actor_id, slug=slug, course=course_id, task_type=task_type,
+        )
+        return competition
+
     def update_course(
         self, *, course_id: str, size: int | None, name: str | None, actor_id: str | None
     ) -> Course:
@@ -248,14 +331,7 @@ class Arena:
         """
         course = self.store.course(course_id)
         if name is not None:
-            cleaned = " ".join(str(name).split())
-            if not cleaned:
-                raise CourseNameInvalid("ชื่อวิชาว่างไม่ได้")
-            if len(cleaned) > MAX_COURSE_NAME_LENGTH:
-                raise CourseNameInvalid(
-                    f"ชื่อวิชายาวเกินไป — ไม่เกิน {MAX_COURSE_NAME_LENGTH} ตัวอักษร "
-                    f"(ตอนนี้ {len(cleaned)})"
-                )
+            cleaned = clean_course_name(name)
             if cleaned != course.name:
                 before, course.name = course.name, cleaned
                 self.store.save_course(course)

@@ -197,6 +197,50 @@ class CourseNameInvalid(Exception):
     """ชื่อวิชาที่ตั้งใหม่ใช้ไม่ได้"""
 
 
+def clean_course_name(raw: str) -> str:
+    """ตรวจและทำความสะอาดชื่อวิชา — **กติกาเดียวกันทั้งตอนสร้างและตอนแก้**
+
+    ยุบช่องว่างซ้ำเหมือน `clean_alias` เพราะชื่อที่มีช่องว่างสองช่องกลางคำจะดู
+    เหมือนพิมพ์ผิดบนหน้าเว็บ และเทียบกับชื่อเดิมไม่ตรงทั้งที่คนอ่านว่าเหมือนกัน
+    """
+    cleaned = " ".join(str(raw or "").split())
+    if not cleaned:
+        raise CourseNameInvalid("ชื่อวิชาว่างไม่ได้")
+    if len(cleaned) > MAX_COURSE_NAME_LENGTH:
+        raise CourseNameInvalid(
+            f"ชื่อวิชายาวเกินไป — ไม่เกิน {MAX_COURSE_NAME_LENGTH} ตัวอักษร (ตอนนี้ {len(cleaned)})"
+        )
+    return cleaned
+
+
+class CourseIdInvalid(Exception):
+    """id ของวิชาใช้ไม่ได้"""
+
+
+#: อักขระที่ใช้ใน id ของวิชาได้ — id โผล่ใน URL, ชื่อไฟล์ และ **ชื่อตัวแปรแวดล้อม**
+#: (`ARENA_COURSE_STAFF_<COURSE_ID>`) จึงต้องแคบกว่าที่ URL ยอมรับ
+COURSE_ID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-")
+
+
+def valid_course_id(text: str) -> str:
+    """ตรวจและทำให้เป็นรูปมาตรฐาน — **กติกาเดียวกันทั้ง CLI และหน้าเว็บ**
+
+    เดิมกติกานี้อยู่ในเครื่องมือ CLI ที่เดียว · พอหน้าเว็บสร้างวิชาได้ด้วย
+    สองทางจะตัดสินคนละแบบเมื่อไรก็ได้ แล้ววิชาที่สร้างจากเว็บอาจมี id ที่
+    เครื่องมือ CLI อ้างถึงไม่ได้
+    """
+    text = (text or "").strip().lower()
+    if not text:
+        raise CourseIdInvalid("ต้องมี id ของวิชา")
+    bad = sorted(set(text) - COURSE_ID_CHARS)
+    if bad:
+        raise CourseIdInvalid(
+            f"id ใช้ได้เฉพาะ a-z 0-9 และ - เท่านั้น (เจอ {''.join(bad)!r})\n"
+            "  แนะนำรูปแบบ <รหัสวิชา>-<ภาค>-<ปี> เช่น cp462-1-2026"
+        )
+    return text
+
+
 class AliasInvalid(Exception):
     """ชื่อบนกระดานที่ตั้งใหม่ใช้ไม่ได้"""
 

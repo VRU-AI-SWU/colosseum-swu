@@ -30,7 +30,9 @@ from core.domain import (  # noqa: E402
     MAX_COURSE_NAME_LENGTH,
     MAX_TEAM_SIZE_CEILING,
     Course,
+    CourseIdInvalid,
     new_invite_code,
+    valid_course_id,
 )
 
 #: `id` ของวิชาไปโผล่ใน `Team.course_id` ของทุกทีมและใน audit trail
@@ -39,16 +41,11 @@ ID_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789-")
 
 
 def valid_id(text: str) -> str:
-    text = text.strip().lower()
-    if not text:
-        raise argparse.ArgumentTypeError("ต้องมี id ของวิชา")
-    bad = sorted(set(text) - ID_CHARS)
-    if bad:
-        raise argparse.ArgumentTypeError(
-            f"id ใช้ได้เฉพาะ a-z 0-9 และ - เท่านั้น (เจอ {''.join(bad)!r})\n"
-            "  แนะนำรูปแบบ <รหัสวิชา>-<ภาค>-<ปี> เช่น cp462-1-2026"
-        )
-    return text
+    """กติกาอยู่ที่ `core/domain.py` ที่เดียว — ห่อเป็น ArgumentTypeError ให้ argparse"""
+    try:
+        return valid_course_id(text)
+    except CourseIdInvalid as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def main() -> int:

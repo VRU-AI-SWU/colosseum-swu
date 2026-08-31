@@ -29,9 +29,11 @@ from core.domain import (
     PARADIGMS,
     AliasInvalid,
     Competition,
+    CourseIdInvalid,
     CourseNameInvalid,
     CompetitionClosed,
     QuotaExceeded,
+    ParadigmUnknown,
     RunKind,
     RunStatus,
     Team,
@@ -65,12 +67,34 @@ def _default_course_id(arena: Arena) -> str:
     return competitions[0].course_id
 
 
+def _phase_ranges(raw_json: str) -> dict[str, tuple[str, str]]:
+    """`{"warmup": ["2026-09-15", "2026-09-30"], ...}` → รูปที่ `set_calendar` รับ
+
+    ใช้ร่วมกันระหว่าง endpoint ที่สร้าง competition กับที่เลื่อนปฏิทิน — สองทางนี้
+    รับรูปเดียวกัน ถ้าแปลงคนละที่จะรับคนละรูปโดยไม่มีใครตั้งใจ
+    """
+    try:
+        raw = json.loads(raw_json)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(400, f"phases ไม่ใช่ JSON ที่อ่านได้: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise HTTPException(400, "phases ต้องเป็น object ของ ชื่อ phase → [วันเริ่ม, วันจบ]")
+
+    ranges = {}
+    for name, pair in raw.items():
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            raise HTTPException(400, f"{name}: ต้องเป็น [วันเริ่ม, วันจบ] — ได้ {pair!r}")
+        ranges[str(name)] = (str(pair[0]), str(pair[1]))
+    return ranges
+
+
 def create_app(
     arena: Arena,
     baselines: Optional[dict[str, list[BaselineMark]]] = None,
     allow_origins: Optional[list] = None,
     google: Optional[GoogleAuth] = None,
     environments: Optional[Callable[[], list[dict]]] = None,
+    prepare_config: Optional[Callable[[str, str], dict]] = None,
 ) -> FastAPI:
     """`allow_origins` = โดเมนของหน้าเว็บที่เรียก API นี้ได้ (README §10.1)
 
@@ -553,6 +577,80 @@ def create_app(
             ],
         }
 
+    @app.post("/api/courses")
+    def create_course(
+        user: UserDep,
+        # `Form("")` ไม่ใช่ `Form(...)` โดยตั้งใจ — ให้ค่าว่างตกมาถึงตัวตรวจของเรา
+        # แล้วผู้สอนได้ข้อความไทยที่บอกวิธีแก้ แทน 422 ของ FastAPI ที่เป็นภาษาอังกฤษ
+        # และพูดถึงโครงสร้าง request ซึ่งคนกรอกฟอร์มไม่ได้สนใจ
+        course_id: str = Form(""),
+        name: str = Form(""),
+        size: int = Form(6),
+    ):
+        """สร้างวิชาใหม่ — **ผู้สอนระดับทั้งระบบเท่านั้น**
+
+        ไม่ใช่ `can_manage_course` เพราะยังไม่มีวิชาให้ผูกสิทธิ์ · และการปล่อยให้
+        ใครก็ได้สร้างวิชาแปลว่านิสิตสร้างวิชาของตัวเองแล้วสั่งงานเข้าคิวได้
+        (`ARENA_STAFF_EMAILS` ทำหน้าที่เหมือน sudoers — ดู `Arena.staff_emails`)
+        """
+        if not arena.is_staff(user.email):
+            raise HTTPException(403, "เฉพาะผู้สอนระดับทั้งระบบเท่านั้นที่สร้างวิชาใหม่ได้")
+        try:
+            course = arena.create_course(
+                course_id=course_id, name=name, max_team_size=size, actor_id=user.id
+            )
+        except (CourseIdInvalid, CourseNameInvalid, TeamSizeInvalid) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"course": {"id": course.id, "name": course.name,
+                           "max_team_size": course.max_team_size,
+                           "join_code": course.join_code}}
+
+    @app.post("/api/competitions")
+    def create_competition(
+        user: UserDep,
+        course_id: str = Form(""),
+        slug: str = Form(""),
+        env_plugin: str = Form(""),
+        config: str = Form(""),
+        phases: str = Form("{}"),
+        title: str = Form(""),
+        paradigm: str = Form(""),
+        quota_per_day: int = Form(5),
+    ):
+        """สร้าง competition ใหม่จากหน้าเว็บ — config เดินทางมาเป็น **เนื้อหา** ไม่ใช่ path
+
+        **ตรวจ config ด้วยตัวโหลดจริงของ environment นั้น** ก่อนบันทึกเสมอ ไม่ใช่
+        ตรวจเองซ้ำ — ตัวตรวจที่เขียนแยกจะเพี้ยนจาก `validate()` ของ env แล้วฟอร์ม
+        จะรับ config ที่ตอนรันจริงใช้ไม่ได้ ซึ่งไปโผล่ตอนนิสิตส่งงานแล้ว
+        """
+        if not arena.can_manage_course(user.email, course_id):
+            raise HTTPException(403, f"เฉพาะผู้สอนของวิชา {course_id} เท่านั้นที่สร้างโจทย์ได้")
+        if prepare_config is None:
+            raise HTTPException(503, "deployment นี้ยังไม่ได้ต่อทะเบียน environment")
+
+        try:
+            meta = prepare_config(env_plugin, config)
+        except Exception as exc:  # noqa: BLE001 — ข้อความมาจาก env จริง อ่านรู้เรื่องกว่า
+            raise HTTPException(400, f"config ใช้ไม่ได้: {exc}") from exc
+
+        try:
+            competition = arena.create_competition(
+                slug=slug,
+                course_id=course_id,
+                title=title or meta["title"],
+                task_type=meta["task_type"],
+                env_plugin=env_plugin,
+                config_text=config,
+                paradigm=paradigm or meta["paradigm"],
+                ranges=_phase_ranges(phases),
+                quota_per_day=quota_per_day,
+                import_whitelist=meta["whitelist"],
+                actor_id=user.id,
+            )
+        except (CourseIdInvalid, CalendarInvalid, ParadigmUnknown) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"competition": competition_info(competition.slug), "config_hash": meta["config_hash"]}
+
     @app.get("/api/environments")
     def list_environments(user: UserDep):
         """โจทย์ชนิดไหนที่ deployment นี้สร้าง competition ได้ พร้อมหน้าตาของ config
@@ -591,18 +689,7 @@ def create_app(
                 403, f"เฉพาะผู้สอนของวิชา {competition.course_id} เท่านั้นที่แก้ปฏิทินได้"
             )
 
-        try:
-            raw = json.loads(phases)
-        except json.JSONDecodeError as exc:
-            raise HTTPException(400, f"phases ไม่ใช่ JSON ที่อ่านได้: {exc}") from exc
-        if not isinstance(raw, dict):
-            raise HTTPException(400, "phases ต้องเป็น object ของ ชื่อ phase → [วันเริ่ม, วันจบ]")
-
-        ranges = {}
-        for name, pair in raw.items():
-            if not isinstance(pair, (list, tuple)) or len(pair) != 2:
-                raise HTTPException(400, f"{name}: ต้องเป็น [วันเริ่ม, วันจบ] — ได้ {pair!r}")
-            ranges[name] = (str(pair[0]), str(pair[1]))
+        ranges = _phase_ranges(phases)
 
         try:
             competition = arena.set_calendar(slug=slug, ranges=ranges, actor_id=user.id)
