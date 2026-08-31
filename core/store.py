@@ -56,11 +56,16 @@ class ArtifactStore:
             path.write_bytes(data)
         return str(path), digest
 
-    def extract(self, url: str, into: Path) -> Path:
+    def extract(self, url: str, into: Path, entry: str = "agent.py") -> Path:
         """แตก zip ไปยังโฟลเดอร์ที่จะ mount เข้า sandbox
 
         กัน path traversal ที่นี่อีกชั้น ถึงแม้ `validate.inspect_archive` จะตรวจไปแล้ว —
         ชั้นนี้เป็นตัวที่เขียนไฟล์ลงดิสก์จริง จึงเป็นด่านสุดท้ายที่ต้องปลอดภัยด้วยตัวเอง
+
+        `entry` คือชื่อไฟล์ทางเข้าของโจทย์ (`agent.py` · `predictor.py`) — **ต้องตรงกับ
+        ที่ตัวตรวจ zip ใช้เสมอ** เพราะสองฝั่งนี้เป็นกติกาเดียวกัน ถ้าที่นี่หาไม่เจอแต่
+        ตัวตรวจยอมรับ submission จะผ่านการตรวจ กินโควตา แล้วไปตายตอนรัน
+        (`runners/tests/test_validate.py` ผูกสองฝั่งไว้ด้วยกัน)
         """
         into.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(url) as zf:
@@ -69,12 +74,36 @@ class ArtifactStore:
                 if not str(target).startswith(str(into.resolve())):
                     raise ValueError(f"path ใน zip ออกนอกโฟลเดอร์: {info.filename}")
             zf.extractall(into)
+        self._make_readable_by_the_sandbox(into)
         # รองรับ zip ที่ห่อด้วยโฟลเดอร์ชั้นเดียว (นิสิต zip ทั้งโฟลเดอร์มา)
-        if not (into / "agent.py").exists():
-            nested = [p for p in into.iterdir() if p.is_dir() and (p / "agent.py").exists()]
+        if not (into / entry).exists():
+            nested = [p for p in into.iterdir() if p.is_dir() and (p / entry).exists()]
             if len(nested) == 1:
                 return nested[0]
         return into
+
+    @staticmethod
+    def _make_readable_by_the_sandbox(root: Path) -> None:
+        """เปิดสิทธิ์อ่านให้ **ผู้ใช้อื่น** เพราะ container รันด้วย uid คนละตัว (10001)
+
+        ⚠️ **ไม่ใช่การหย่อนความปลอดภัย** — โฟลเดอร์นี้เป็นที่ทำงานชั่วคราวที่มีแต่
+        โค้ดของนิสิตเอง ซึ่งกำลังจะถูก mount เข้า container ให้มันอ่านอยู่แล้ว
+
+        เดิมพึ่ง umask ของ process ที่รัน worker ล้วนๆ ซึ่งบังเอิญใช้ได้ (0002 → 0775)
+        แต่แปลว่าการตั้ง `UMask=0077` ใน systemd unit วันหนึ่งจะทำให้ submission
+        **ทุกอัน**ล้มพร้อมกันด้วย `PermissionError: '/submission'` โดยไม่มีใครแก้โค้ด
+        ตัวเอง · เจอตอนรันเทสต์ sandbox ของ CP462 บนเครื่องจริงครั้งแรก
+
+        โหมดของไฟล์ใน zip ก็เชื่อไม่ได้เหมือนกัน — zip เก็บ mode มาด้วยได้ และ
+        `extractall` เอามาใช้ ไฟล์ที่นิสิต zip มาแบบ 0600 จะอ่านไม่ได้ในกล่อง
+        """
+        for path in [root, *root.rglob("*")]:
+            try:
+                mode = path.stat().st_mode
+                # ให้สิทธิ์อ่านตามที่เจ้าของมี และให้สิทธิ์เข้าโฟลเดอร์ตามไปด้วย
+                path.chmod(mode | (0o755 if path.is_dir() else 0o444))
+            except OSError:
+                continue  # ไฟล์แปลกๆ ใน zip ไม่ควรทำให้ทั้ง run ล้ม
 
     def replay_path(self, run_id: str) -> Path:
         path = self.root / "replays" / run_id

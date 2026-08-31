@@ -51,9 +51,21 @@ requires_docker = pytest.mark.skipif(
 
 @pytest.fixture
 def predictor(tmp_path):
+    """เขียน submission ลง**โฟลเดอร์ย่อย** ไม่ใช่ `tmp_path` ตรงๆ
+
+    `tmp_path` ของ pytest เป็น `drwx------` — container รันด้วย uid 10001 จึง
+    `chdir` เข้าไปไม่ได้ แล้วทุกข้อในไฟล์นี้ล้มด้วย `PermissionError: '/submission'`
+    ซึ่งไม่ใช่บั๊กของ sandbox · ของจริงโฟลเดอร์นี้มาจาก `ArtifactStore.extract`
+    ที่เปิดสิทธิ์ให้ผู้ใช้อื่นอ่านได้เสมอ เทสต์จึงต้องจำลองสภาพเดียวกัน
+    """
+
     def build(body: str) -> Path:
-        (tmp_path / "predictor.py").write_text(textwrap.dedent(body), encoding="utf-8")
-        return tmp_path
+        directory = tmp_path / "submission"
+        directory.mkdir(exist_ok=True)
+        (directory / "predictor.py").write_text(textwrap.dedent(body), encoding="utf-8")
+        directory.chmod(0o755)
+        (directory / "predictor.py").chmod(0o644)
+        return directory
 
     return build
 

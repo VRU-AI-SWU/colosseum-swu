@@ -283,3 +283,80 @@ def test_validation_agrees_with_what_extract_resolves(tmp_path):
         for path in (tmp_path / "work",):
             if path.exists():
                 __import__("shutil").rmtree(path)
+
+
+# ── กติกาการหาไฟล์ทางเข้าต้องตรงกันทุกชนิดโจทย์ ────────────────────
+
+
+PREDICTOR_SRC = "class Predictor:\n    def __init__(self, config): pass\n    def predict(self, X): return []\n"
+
+
+def test_extract_and_the_validator_agree_for_prediction_too(tmp_path):
+    """บทเรียนเดียวกับ `agent.py` แต่สำหรับ `predictor.py`
+
+    `extract` เคยฝังชื่อ `agent.py` ไว้ตรงๆ · submission ของโจทย์ทำนายที่ห่อด้วย
+    โฟลเดอร์ชั้นเดียวจึงผ่านการตรวจ **กินโควตา** แล้วไปตายตอนรันด้วย
+    "ไม่พบ predictor.py" ทั้งที่บอกได้ตั้งแต่ตอนรับไฟล์
+    """
+    import shutil
+
+    from core.store import ArtifactStore
+    from runners.prediction.validate import ENTRY, inspect_archive as inspect_prediction
+
+    for entries in (
+        {"predictor.py": PREDICTOR_SRC},
+        {"my-model/predictor.py": PREDICTOR_SRC},
+        {"a/predictor.py": PREDICTOR_SRC, "b/predictor.py": PREDICTOR_SRC},
+        {"a/b/predictor.py": PREDICTOR_SRC},
+    ):
+        archive = _zip(tmp_path, entries)
+        report = inspect_prediction(archive)
+        resolved = ArtifactStore(tmp_path / "store").extract(
+            str(archive), tmp_path / "work", entry=ENTRY
+        )
+        runnable = (resolved / ENTRY).is_file()
+        assert report.ok is runnable, f"{sorted(entries)} — ตรวจว่า {report.ok} แต่รันได้ {runnable}"
+        shutil.rmtree(tmp_path / "work", ignore_errors=True)
+
+
+def test_extracted_files_can_be_read_by_the_sandbox_user(tmp_path):
+    """container รันด้วย uid คนละตัว — โฟลเดอร์ที่ mount ต้องให้ผู้ใช้อื่นเข้าได้
+
+    เดิมพึ่ง umask ของ process ที่รัน worker ล้วนๆ · ตั้ง `UMask=0077` ใน systemd
+    เมื่อไร submission **ทุกอัน**จะล้มพร้อมกันด้วย `PermissionError: '/submission'`
+    โดยไม่มีใครแก้โค้ดตัวเอง — เจอตอนรันเทสต์ sandbox บนเครื่องจริงครั้งแรก
+    """
+    import os
+    import stat
+
+    from core.store import ArtifactStore
+
+    archive = _zip(tmp_path, {"my-agent/agent.py": AGENT_SRC})
+    work = tmp_path / "work"
+    work.mkdir()
+    os.chmod(work, 0o700)  # จำลอง umask ที่รัดกุม
+
+    resolved = ArtifactStore(tmp_path / "store").extract(str(archive), work)
+    for path in (work, resolved, resolved / "agent.py"):
+        mode = stat.S_IMODE(path.stat().st_mode)
+        assert mode & 0o004, f"{path} ผู้ใช้อื่นอ่านไม่ได้ (mode {mode:o})"
+        if path.is_dir():
+            assert mode & 0o001, f"{path} ผู้ใช้อื่นเข้าไม่ได้ (mode {mode:o})"
+
+
+def test_a_locked_down_file_inside_the_zip_is_opened_up(tmp_path):
+    """zip เก็บ mode มาด้วยได้ — ไฟล์ที่นิสิต zip มาแบบ 0600 ต้องยังอ่านได้ในกล่อง"""
+    import stat
+    import zipfile
+
+    from core.store import ArtifactStore
+
+    archive = tmp_path / "locked.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        info = zipfile.ZipInfo("agent.py")
+        info.external_attr = 0o600 << 16
+        zf.writestr(info, AGENT_SRC)
+
+    resolved = ArtifactStore(tmp_path / "store").extract(str(archive), tmp_path / "work")
+    mode = stat.S_IMODE((resolved / "agent.py").stat().st_mode)
+    assert mode & 0o004, f"agent.py ยังอ่านไม่ได้ (mode {mode:o})"

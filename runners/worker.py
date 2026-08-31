@@ -23,8 +23,9 @@ from core.queue import JobQueue, LeaseExpired
 from core.store import ArtifactStore, Store
 from runners.agent_env.runner import RunResult, run_submission
 from runners.agent_env.sandbox import SANDBOX as AGENT_ENV_SANDBOX
-from runners.agent_env.validate import smoke_test
+from runners.agent_env.validate import ENTRY as AGENT_ENV_ENTRY, smoke_test
 from runners.prediction.sandbox import SANDBOX as PREDICTION_SANDBOX
+from runners.prediction.validate import ENTRY as PREDICTION_ENTRY
 from runners.sandbox.launcher import Launcher
 from runners.seeds import SecretsUnavailable, expected_config_hash, load_seeds
 
@@ -38,6 +39,14 @@ HEARTBEAT_EVERY = 20.0
 SANDBOXES = {
     "agent_env": AGENT_ENV_SANDBOX,
     "prediction": PREDICTION_SANDBOX,
+}
+
+#: ชื่อไฟล์ทางเข้าของแต่ละชนิดโจทย์ — **ต้องตรงกับ `ENTRY` ในตัวตรวจ zip ของชนิดนั้น**
+#: `ArtifactStore.extract` ใช้ค่านี้หาโฟลเดอร์ที่จะ mount · ถ้าไม่ตรงกับตัวตรวจ
+#: submission ที่ห่อด้วยโฟลเดอร์ชั้นเดียวจะผ่านการตรวจแล้วไปตายตอนรัน
+ENTRY_FILES = {
+    "agent_env": AGENT_ENV_ENTRY,
+    "prediction": PREDICTION_ENTRY,
 }
 
 #: run ที่ต้องผ่าน smoke test ก่อน — **ไม่รวม private กับ rejudge** โดยตั้งใจ
@@ -149,7 +158,9 @@ class Worker:
         kind = "private" if run.kind is RunKind.PRIVATE else "public"
         workdir = self.workdir / run.id
         try:
-            submission_dir = self.artifacts.extract(submission.artifact_url, workdir)
+            submission_dir = self.artifacts.extract(
+                submission.artifact_url, workdir, entry=ENTRY_FILES["prediction"]
+            )
 
             if run.kind in SMOKE_TESTED_KINDS:
                 smoke = prediction_smoke(
@@ -223,7 +234,9 @@ class Worker:
 
         workdir = self.workdir / run.id
         try:
-            submission_dir = self.artifacts.extract(submission.artifact_url, workdir)
+            submission_dir = self.artifacts.extract(
+                submission.artifact_url, workdir, entry=ENTRY_FILES["agent_env"]
+            )
 
             if run.kind in SMOKE_TESTED_KINDS:
                 smoke = smoke_test(
