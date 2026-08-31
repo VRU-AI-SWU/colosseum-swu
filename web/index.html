@@ -787,6 +787,10 @@ const esc = (v) => escapeHtml(String(v == null ? "" : v));
 function fieldHtml(f) {
   const id = "cfg-" + f.key.replace(/\./g, "-");
   const tip = f.help ? `<span class="tip">${esc(f.help)}</span>` : "";
+  // ใช้ชื่อที่คนอ่านได้ ไม่ใช่ชื่อคีย์ — ฟอร์มที่โชว์ `n_rows` `data_seed` เรียงกัน
+  // อ่านเหมือน dump ของไฟล์ config ไม่ใช่แบบฟอร์ม · และคีย์ซ้ำกันข้ามระดับได้
+  // (`slug` ของ competition กับของโจทย์ ซึ่งเป็นคนละอย่างกัน)
+  const label = esc(f.label || f.key);
   const req = f.required ? " required" : "";
   let input;
   if (f.type === "enum") {
@@ -797,6 +801,13 @@ function fieldHtml(f) {
     input = `<select id="${id}" data-key="${esc(f.key)}" data-type="bool">` +
       `<option value="true"${f.default ? " selected" : ""}>ใช่</option>` +
       `<option value="false"${f.default ? "" : " selected"}>ไม่</option></select>`;
+  } else if (f.type === "list") {
+    // list เขียนเป็นข้อความคั่นจุลภาค — โครงของ config ลึกแค่ชั้นเดียวและรายการ
+    // ที่ใช้จริงสั้นมาก (`0, 1` · `0.6, 0.15, 0.25`) การมีตัวแก้ไขรายการเต็มรูปแบบ
+    // จะซับซ้อนกว่าที่โจทย์ต้องการ
+    const val = Array.isArray(f.default) ? f.default.join(", ") : "";
+    input = `<input id="${id}" data-key="${esc(f.key)}" data-type="list"` +
+      ` type="text" value="${esc(val)}"${req}>`;
   } else {
     const numeric = f.type === "int" || f.type === "float";
     const step = f.type === "float" ? ' step="any"' : "";
@@ -806,7 +817,7 @@ function fieldHtml(f) {
     input = `<input id="${id}" data-key="${esc(f.key)}" data-type="${esc(f.type)}"` +
       ` type="${numeric ? "number" : "text"}"${step}${min}${max} value="${val}"${req}>`;
   }
-  return `<div class="f"><label for="${id}">${esc(f.key)}</label>${input}${tip}</div>`;
+  return `<div class="f"><label for="${id}">${label}</label>${input}${tip}</div>`;
 }
 
 function configFormHtml(env, offer) {
@@ -848,6 +859,10 @@ function readConfigForm(root, extra) {
     if (type === "int") v = parseInt(v, 10);
     else if (type === "float") v = parseFloat(v);
     else if (type === "bool") v = v === "true";
+    else if (type === "list") {
+      v = v.split(",").map((x) => x.trim()).filter((x) => x !== "")
+           .map((x) => (x !== "" && !isNaN(Number(x)) ? Number(x) : x));
+    }
     flat[el.dataset.key] = v;
   });
 
@@ -857,7 +872,8 @@ function readConfigForm(root, extra) {
     if (b === undefined) tree[a] = value;
     else (tree[a] = tree[a] || {})[b] = value;
   }
-  const line = (k, v) => `${k}: ${typeof v === "string" ? JSON.stringify(v) : v}`;
+  const one = (v) => (typeof v === "string" ? JSON.stringify(v) : v);
+  const line = (k, v) => `${k}: ${Array.isArray(v) ? "[" + v.map(one).join(", ") + "]" : one(v)}`;
   return Object.entries(tree).map(([k, v]) =>
     (v && typeof v === "object")
       ? `${k}:\n` + Object.entries(v).map(([k2, v2]) => "  " + line(k2, v2)).join("\n")
@@ -968,6 +984,19 @@ async function createCourse() {
     ENVS = null;
     await refresh();
   } catch (e) { msg.className = "msg warn"; msg.textContent = e.message || "สร้างไม่สำเร็จ"; }
+}
+
+/** ตรวจช่วงตัวเลขเอง — `min`/`max` ของ HTML บังคับเฉพาะตอน submit ของ `<form>`
+    ซึ่งฟอร์มนี้ไม่ได้ใช้ · ปล่อยไปเซิร์ฟเวอร์ก็ปฏิเสธอยู่ดี แต่บอกตรงนี้เร็วกว่า */
+function outOfRange(root) {
+  for (const el of root.querySelectorAll("input[type=number]")) {
+    if (el.value === "") continue;
+    const v = Number(el.value);
+    const label = el.closest(".f").querySelector("label").textContent;
+    if (el.min !== "" && v < Number(el.min)) return `${label} ต้องไม่น้อยกว่า ${el.min}`;
+    if (el.max !== "" && v > Number(el.max)) return `${label} ต้องไม่เกิน ${el.max}`;
+  }
+  return "";
 }
 
 async function createCompetition() {

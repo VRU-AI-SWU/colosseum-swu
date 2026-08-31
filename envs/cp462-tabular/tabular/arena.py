@@ -15,6 +15,7 @@ from typing import Any
 from runners.sandbox.schema import Limit, Offer, as_dicts, derive
 from tabular import __version__
 from tabular.config import KINDS, PRIMARY_BY_KIND, ConfigError, TaskSpec, load_config
+from tabular.generator import TASKS
 from tabular.dataset import grading_data
 from tabular.metrics import score
 from tabular.secrets import load_grading_seed
@@ -37,26 +38,45 @@ ALLOW_FALLBACK_ENV = "ARENA_CP462_ALLOW_SEED_FALLBACK"
 #: loader ปฏิเสธ · `test_schema.py` ยิงค่านอกขอบเขตเข้า loader จริงเพื่อยืนยัน
 # ⚠️ ประกาศเฉพาะขอบเขตที่ `__post_init__` บังคับจริง — ดูเหตุผลที่ vacuum/arena.py
 CONFIG_LIMITS = {
-    "slug": Limit(help="ชื่อสั้นของโจทย์ — ใช้อ้างในคำสั่งและใน URL"),
-    "task": Limit(help="ชื่อชุดข้อมูลใน `generator.TASKS` — จุดที่จะสลับเป็นข้อมูลจริง"),
-    "title": Limit(help="ชื่อที่นิสิตเห็น — แก้ได้ตลอด ไม่กระทบคะแนนเก่า"),
-    "kind": Limit(choices=KINDS, help="clustering ยังไม่รองรับโดยตั้งใจ"),
-    "primary": Limit(
-        choices=tuple(sorted({m for ms in PRIMARY_BY_KIND.values() for m in ms})),
-        help="คะแนนหลัก — ต้องเข้าคู่กับชนิดโจทย์ และ 'มากกว่าดีกว่า' เสมอ",
+    "slug": Limit(
+        label="รหัสชุดโจทย์",
+        help="ผูกกับเมล็ดของชุดที่ใช้ตัดสิน — ต้องมีไฟล์ชื่อนี้ใน ARENA_SECRETS ก่อน "
+             "· คนละอันกับรหัส competition ข้างบน",
     ),
-    "n_rows": Limit(minimum=100, help="จำนวนแถวของชุดที่แจกนิสิต"),
-    "data_seed": Limit(help="เมล็ดของชุดที่แจก — สาธารณะ นิสิตใช้สร้างข้อมูลเดียวกัน"),
-    "split_seed": Limit(help="เมล็ดการแบ่ง train/val/test"),
-    "bootstrap_seed": Limit(help="เมล็ดของช่วงความเชื่อมั่น — ตรึงให้ทุกทีมเทียบกันได้"),
-    "ratios": Limit(fixed=True, help="สัดส่วน train/val/test — แก้ผ่านฟอร์มยังไม่รองรับ"),
-    "labels": Limit(fixed=True, help="ลำดับคลาสที่ตรึงไว้ — classification เท่านั้น"),
-    "grading_rows": Limit(minimum=100, help="จำนวนแถวของชุดที่ใช้ตัดสิน"),
+    "task": Limit(
+        label="ชุดข้อมูล",
+        choices=tuple(sorted(TASKS)),
+        help="ชุดข้อมูลที่ระบบสร้างให้ได้ — ยังอัปโหลดไฟล์ของตัวเองไม่ได้",
+    ),
+    "title": Limit(label="ชื่อโจทย์ที่นิสิตเห็น", help="แก้ได้ตลอด ไม่กระทบคะแนนเก่า"),
+    "kind": Limit(label="ชนิด", choices=KINDS),
+    "primary": Limit(
+        label="คะแนนหลัก",
+        choices=tuple(sorted({m for ms in PRIMARY_BY_KIND.values() for m in ms})),
+        help="ใช้จัดอันดับบนกระดาน — ทุกตัว 'มากกว่าดีกว่า'",
+    ),
+    "n_rows": Limit(label="จำนวนแถวที่แจกนิสิต", minimum=100),
+    "ratios": Limit(
+        label="สัดส่วน train / val / test",
+        help="ของนิสิตล้วน · คั่นด้วยจุลภาค รวมกันต้องได้ 1.0",
+    ),
+    "labels": Limit(
+        label="คลาสทั้งหมด",
+        help="คั่นด้วยจุลภาค · ลำดับตรึงไว้ทั้งเทอม เพราะ confusion matrix อ้างลำดับนี้",
+    ),
+    "data_seed": Limit(label="เมล็ดของชุดที่แจก", help="สาธารณะ — นิสิตใช้สร้างข้อมูลชุดเดียวกัน"),
+    "split_seed": Limit(label="เมล็ดการแบ่ง train/val/test"),
+    "bootstrap_seed": Limit(
+        label="เมล็ดของช่วงความเชื่อมั่น", help="ตรึงไว้ให้ทุกทีมเทียบกันได้และรันซ้ำได้ค่าเดิม"
+    ),
+    "grading_rows": Limit(label="จำนวนแถวของชุดที่ใช้ตัดสิน", minimum=100),
     "grading_public_ratio": Limit(
-        minimum=0.01, maximum=0.99, help="สัดส่วนที่เป็น test_public ที่เหลือเป็น private"
+        label="สัดส่วนที่เป็นชุดสาธารณะ", minimum=0.01, maximum=0.99,
+        help="ที่เหลือเป็นชุดลับที่ใช้ตัดสินตอนปิดรับ",
     ),
     "grading_seed": Limit(
-        fixed=True, help="🔒 เมล็ดของชุดลับ — อยู่ใน ARENA_SECRETS ไม่ใช่ในฟอร์ม"
+        fixed=True, label="เมล็ดของชุดลับ",
+        help="🔒 อยู่ใน ARENA_SECRETS ไม่ใช่ในฟอร์ม",
     ),
 }
 
@@ -123,7 +143,11 @@ class TabularPlugin:
                 id="classification",
                 label="Classification",
                 blurb="ทำนาย label ของแต่ละแถว — ผู้ป่วยกลุ่มไหน · อีเมลนี้สแปมไหม",
-                defaults={"kind": "classification", "primary": "macro_f1"},
+                # `labels` **ไม่ได้ซ่อน** — classification ต้องประกาศคลาสเอง และค่านี้
+                # ต่างกันทุกโจทย์ · เดิมซ่อนไว้แล้วไม่มีใครเติมให้ ผลคือสร้าง
+                # classification ไม่ได้เลยสักครั้ง
+                defaults={"kind": "classification", "primary": "macro_f1",
+                          "labels": [0, 1], "ratios": [0.6, 0.15, 0.25]},
                 hide=("kind",),
                 narrow={"primary": PRIMARY_BY_KIND["classification"]},
             ),
@@ -131,8 +155,10 @@ class TabularPlugin:
                 id="regression",
                 label="Regression",
                 blurb="ทำนายตัวเลขของแต่ละแถว — ราคาบ้าน · ปริมาณการใช้ไฟ",
-                defaults={"kind": "regression", "primary": "r2", "labels": []},
-                hide=("kind",),
+                # regression **ต้องไม่มี** labels — ซ่อนช่องนั้นและเติมค่าว่างให้
+                defaults={"kind": "regression", "primary": "r2", "labels": [],
+                          "ratios": [0.6, 0.15, 0.25]},
+                hide=("kind", "labels"),
                 narrow={"primary": PRIMARY_BY_KIND["regression"]},
             ),
         ])

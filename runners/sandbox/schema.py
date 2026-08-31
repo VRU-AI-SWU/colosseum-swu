@@ -25,6 +25,10 @@ class Limit:
     choices: tuple[Any, ...] | None = None
     minimum: float | None = None
     maximum: float | None = None
+    #: ชื่อที่คนอ่าน — ว่างไว้จะใช้ชื่อคีย์ · **ชื่อคีย์อ่านเข้าใจยากเกือบทุกตัว**
+    #: ฟอร์มที่โชว์ `n_rows` `data_seed` เรียงกันอ่านเหมือน dump ของไฟล์ config
+    #: ไม่ใช่แบบฟอร์ม · และคีย์ซ้ำกันข้ามระดับได้ (`slug` ของ competition กับของโจทย์)
+    label: str = ""
     #: คำอธิบายสั้นๆ ที่ขึ้นใต้ช่องกรอก
     help: str = ""
     #: แก้ไม่ได้ผ่านฟอร์ม — ค่าที่เปลี่ยนแล้วต้อง generate seed ใหม่ทั้งชุด
@@ -37,8 +41,9 @@ class Field:
     """ช่องกรอกหนึ่งช่องบนฟอร์ม"""
 
     key: str            # dotted เช่น "room.width" — ตรงกับที่ `Config.replace` รับ
-    type: str           # int | float | bool | str | enum
+    type: str           # int | float | bool | str | enum | list
     default: Any
+    label: str = ""
     #: ไม่มีค่าเริ่มต้นใน dataclass = **ช่องที่ต้องกรอก** ไม่ใช่ข้อผิดพลาด
     #: (`TaskSpec` ของ CP462 บังคับให้ประกาศ slug/kind/primary เอง ส่วน `Config`
     #: ของ CP463 มีค่าเริ่มต้นครบทุกช่อง — ทั้งสองแบบต้องอธิบายเป็นฟอร์มได้)
@@ -53,6 +58,7 @@ class Field:
     def as_dict(self) -> dict[str, Any]:
         out = {
             "key": self.key,
+            "label": self.label or self.key,
             "type": self.type,
             "default": self.default,
             "required": self.required,
@@ -107,12 +113,24 @@ _PYTHON_TO_FORM = {int: "int", float: "float", bool: "bool", str: "str"}
 
 
 def _form_type(value: Any, annotation: Any) -> str:
+    """ชนิดของช่องกรอก — ดูจากค่าเริ่มต้นก่อน แล้วค่อยถอยไปดู annotation"""
+    if isinstance(value, (list, tuple)):
+        return "list"
+    return _scalar_form_type(value, annotation)
+
+
+def _scalar_form_type(value: Any, annotation: Any) -> str:
     """ชนิดของช่องกรอก — ดูจากค่าเริ่มต้นก่อน แล้วค่อยถอยไปดู annotation
 
     ดูจากค่าจริงก่อนเพราะ annotation ของ config มักเป็น `int | None` ซึ่งบอก
     ชนิดที่ฟอร์มต้องใช้ไม่ได้ตรงๆ · `bool` ต้องเช็คก่อน `int` เพราะใน Python
     `isinstance(True, int)` เป็นจริง แล้วช่องกาถูกจะกลายเป็นช่องตัวเลข
     """
+    # annotation อาจเป็นสตริง (`from __future__ import annotations`) หรือเป็นชนิดจริง
+    # แล้วแต่ว่าโมดูลของ config เปิด postponed evaluation ไว้ไหม — รับทั้งสองแบบ
+    text = getattr(annotation, "__name__", None) or str(annotation)
+    if text.startswith(("list", "tuple")):
+        return "list"
     for python_type, form_type in _PYTHON_TO_FORM.items():
         if type(value) is python_type:  # noqa: E721 — ต้องเป็นชนิดนั้นเป๊ะ ไม่ใช่ subclass
             return form_type
@@ -168,7 +186,8 @@ def _field(
     return Field(
         key=key,
         type="enum" if limit.choices else _form_type(default, annotation),
-        default=default,
+        label=limit.label,
+        default=list(default) if isinstance(default, tuple) else default,
         required=required,
         section=section,
         choices=limit.choices,

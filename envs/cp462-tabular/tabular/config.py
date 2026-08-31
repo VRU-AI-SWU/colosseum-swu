@@ -72,6 +72,17 @@ class TaskSpec:
     grading_seed: int | None = None
 
     def __post_init__(self) -> None:
+        # ชื่อชุดข้อมูลต้องมีอยู่จริง — **ตรวจตอนโหลด ไม่ใช่ตอนให้คะแนน**
+        # เดิมไม่ได้ตรวจเลย ชื่อที่พิมพ์ผิดจึงผ่านทุกด่าน ไปพังตอน `generator.make()`
+        # ซึ่งเป็นตอนที่นิสิตส่งงานเข้ามาแล้ว · import ในเมธอดเพื่อไม่ให้ `config`
+        # ต้องพึ่ง pandas/numpy ตอน import ซึ่ง `selfcheck` และเครื่องมืออื่นไม่ต้องใช้
+        from tabular.generator import TASKS
+
+        if self.task not in TASKS:
+            raise ConfigError(
+                f"ไม่รู้จักชุดข้อมูล {self.task!r} — ที่มีคือ {sorted(TASKS)}\n"
+                "  ชื่อนี้คือ*ชุดข้อมูล* ไม่ใช่ชนิดของโจทย์ (ชนิดอยู่ที่ `kind`)"
+            )
         if self.kind not in KINDS:
             raise ConfigError(f"kind ต้องเป็น {KINDS} — ได้ {self.kind!r}")
         allowed = PRIMARY_BY_KIND[self.kind]
