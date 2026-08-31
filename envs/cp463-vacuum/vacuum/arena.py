@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from runners.sandbox.schema import Limit, as_dicts, derive
+from runners.sandbox.schema import Limit, Offer, as_dicts, derive
 from vacuum import __version__, load_config
 from vacuum.config import (
     DIRT_DISTRIBUTIONS,
@@ -72,6 +72,16 @@ class VacuumPlugin:
         blob = encode_replay(header_from_env(env), env.events)
         Path(path).write_bytes(blob)
         return len(blob)
+
+    def offers(self) -> list[dict[str, Any]]:
+        """env นี้เสิร์ฟโจทย์แบบเดียว — agent เดินในสภาพแวดล้อม"""
+        return as_dicts([
+            Offer(
+                id="reinforcement-learning",
+                label="Reinforcement Learning",
+                blurb="agent ตัดสินใจเป็นลำดับในสภาพแวดล้อมที่ตอบกลับ — วัดที่ผลของทั้งเส้นทาง",
+            )
+        ])
 
     def config_schema(self) -> list[dict[str, Any]]:
         """หน้าตาของ config สำหรับสร้างฟอร์ม — **อนุมานจาก dataclass ไม่ได้เขียนมือ**

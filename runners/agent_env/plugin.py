@@ -65,6 +65,7 @@ def resolve(spec: str) -> EnvPlugin:
         for m in (
             "load_config", "config_hash", "apply_overrides", "make_env", "agent_config",
             "episode_score", "zero_score", "aggregate", "write_replay", "step_timeout_ms",
+            "config_schema", "offers",
         )
         if not hasattr(plugin, m)
     ]

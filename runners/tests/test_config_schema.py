@@ -303,3 +303,91 @@ def test_every_declared_limit_in_tabular_is_enforced_by_the_loader(tabular_schem
     assert not unenforced, (
         "ขอบเขตที่ประกาศแต่ loader ไม่ได้บังคับ:\n  " + "\n  ".join(unenforced)
     )
+
+
+# ── โจทย์ที่แต่ละ env ประกาศว่าเสิร์ฟได้ ───────────────────────────
+
+
+def offers_of(plugin) -> dict:
+    return {o["id"]: o for o in plugin.offers()}
+
+
+def test_the_three_choices_the_instructor_sees_are_exactly_these():
+    """ผู้สอนเลือกจากสามแบบ ไม่ใช่จากสองแกน (`task_type` กับ `kind`)
+
+    ถ้ามีใครเพิ่ม offer ใหม่ เทสต์นี้จะเตือนให้ไปคิดว่าหน้าเว็บกับเอกสารต้องแก้ตามไหม
+    """
+    from core.wiring import environments
+
+    ids = [o["id"] for e in environments() for o in e["offers"]]
+    assert ids == ["reinforcement-learning", "classification", "regression"]
+
+
+def test_every_offer_hides_the_field_it_already_answers():
+    """ผู้สอนที่เลือก Classification ต้องไม่ต้องมากรอก `kind: classification` ซ้ำ"""
+    from tabular.arena import PLUGIN
+
+    for oid, offer in offers_of(PLUGIN).items():
+        assert offer["defaults"]["kind"] == oid
+        assert "kind" in offer["hide"], f"{oid}: ตอบ kind ให้แล้วแต่ยังโชว์ช่องให้กรอก"
+
+
+def test_narrowed_choices_are_a_subset_of_what_the_field_really_allows():
+    """จำกัดตัวเลือกได้ แต่ห้ามเสนอค่าที่ฟิลด์นั้นไม่รองรับตั้งแต่แรก"""
+    from tabular.arena import PLUGIN
+
+    fields = {f["key"]: f for f in PLUGIN.config_schema()}
+    for oid, offer in offers_of(PLUGIN).items():
+        for key, allowed in offer["narrow"].items():
+            full = set(fields[key].get("choices") or ())
+            assert set(allowed) <= full, f"{oid}.{key}: เสนอค่าที่ไม่มีในฟิลด์จริง"
+
+
+@pytest.mark.parametrize("oid", ["classification", "regression"])
+def test_an_offers_defaults_really_load(oid):
+    """**ข้อสำคัญที่สุด** — ค่าที่ตัวเลือกกำหนดให้ ต้องประกอบเป็น config ที่ใช้ได้จริง
+
+    ถ้าไม่ตรง ผู้สอนจะเลือกชนิดโจทย์ กรอกครบ กดบันทึก แล้วโดนปฏิเสธด้วยเหตุผล
+    ที่พูดถึงฟิลด์ที่ฟอร์มไม่ได้แสดงให้เห็นด้วยซ้ำ
+    """
+    from tabular.arena import PLUGIN
+    from tabular.config import CONFIG_DIR, load_config
+
+    base = load_config(CONFIG_DIR / "churn.yaml")
+    base.replace(**offers_of(PLUGIN)[oid]["defaults"])   # ต้องไม่โยน
+
+
+@pytest.mark.parametrize("oid", ["classification", "regression"])
+def test_every_narrowed_metric_actually_works_with_that_kind(oid):
+    """ทุกคะแนนหลักที่เสนอ ต้องเข้าคู่กับ kind นั้นได้จริง — ไล่จากที่ประกาศเอง"""
+    from tabular.arena import PLUGIN
+    from tabular.config import CONFIG_DIR, load_config
+
+    base = load_config(CONFIG_DIR / "churn.yaml")
+    offer = offers_of(PLUGIN)[oid]
+    for metric in offer["narrow"]["primary"]:
+        base.replace(**{**offer["defaults"], "primary": metric})   # ต้องไม่โยน
+
+
+@pytest.mark.parametrize("oid", ["classification", "regression"])
+def test_a_metric_from_the_other_kind_is_still_rejected(oid):
+    """พิสูจน์ว่าการจำกัดมีความหมาย — ไม่ใช่ว่าอะไรก็ผ่านอยู่แล้ว"""
+    from tabular.arena import PLUGIN
+    from tabular.config import CONFIG_DIR, ConfigError, load_config
+
+    offers = offers_of(PLUGIN)
+    other = "regression" if oid == "classification" else "classification"
+    base = load_config(CONFIG_DIR / "churn.yaml")
+    with pytest.raises(ConfigError):
+        base.replace(**{**offers[oid]["defaults"], "primary": offers[other]["narrow"]["primary"][0]})
+
+
+def test_the_web_page_builds_its_choices_from_offers_not_from_hardcoded_names():
+    """หน้าเว็บต้องไม่รู้จักชื่อโจทย์เอง — เพิ่ม env ที่สามต้องไม่ต้องแก้หน้าเว็บ"""
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parent.parent.parent
+    index = (repo / "web" / "index.html").read_text(encoding="utf-8")
+    assert "e.offers" in index, "หน้าเว็บไม่ได้อ่านรายการ offer จาก API"
+    for hardcoded in ('"classification"', '"regression"', '"agent_env"'):
+        assert hardcoded not in index, f"หน้าเว็บฝังชื่อ {hardcoded} ไว้ตรงๆ"

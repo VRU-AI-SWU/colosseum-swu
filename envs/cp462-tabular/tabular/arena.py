@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from runners.sandbox.schema import Limit, as_dicts, derive
+from runners.sandbox.schema import Limit, Offer, as_dicts, derive
 from tabular import __version__
 from tabular.config import KINDS, PRIMARY_BY_KIND, ConfigError, TaskSpec, load_config
 from tabular.dataset import grading_data
@@ -107,6 +107,35 @@ class TabularPlugin:
             kind=spec.kind, primary=spec.primary,
             seed=spec.bootstrap_seed, labels=spec.labels or None,
         )
+
+    def offers(self) -> list[dict[str, Any]]:
+        """โจทย์สองแบบที่ env นี้เสิร์ฟได้ — **ผู้สอนเลือกจากตรงนี้**
+
+        `kind` ถูกซ่อนเพราะตัวเลือกตอบให้แล้ว และ `primary` ถูกจำกัดให้เหลือเฉพาะ
+        ที่เข้าคู่กับ kind นั้น — เดิมฟอร์มโชว์คะแนนหลักทั้ง 5 ตัวรวมกัน แล้วผู้สอน
+        ที่เลือก classification คู่กับ `r2` จะโดน loader ปฏิเสธหลังกดบันทึก
+        ทั้งที่ฟอร์มเสนอให้เลือกเอง
+
+        **clustering ไม่อยู่ในรายการโดยตั้งใจ** — ดู template §6
+        """
+        return as_dicts([
+            Offer(
+                id="classification",
+                label="Classification",
+                blurb="ทำนาย label ของแต่ละแถว — ผู้ป่วยกลุ่มไหน · อีเมลนี้สแปมไหม",
+                defaults={"kind": "classification", "primary": "macro_f1"},
+                hide=("kind",),
+                narrow={"primary": PRIMARY_BY_KIND["classification"]},
+            ),
+            Offer(
+                id="regression",
+                label="Regression",
+                blurb="ทำนายตัวเลขของแต่ละแถว — ราคาบ้าน · ปริมาณการใช้ไฟ",
+                defaults={"kind": "regression", "primary": "r2", "labels": []},
+                hide=("kind",),
+                narrow={"primary": PRIMARY_BY_KIND["regression"]},
+            ),
+        ])
 
     def config_schema(self) -> list[dict[str, Any]]:
         """หน้าตาของ config สำหรับสร้างฟอร์ม — **อนุมานจาก dataclass ไม่ได้เขียนมือ**"""

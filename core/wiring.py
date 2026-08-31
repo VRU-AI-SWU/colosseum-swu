@@ -78,6 +78,9 @@ def environments() -> list[dict]:
                     "name": getattr(plugin, "name", spec),
                     "version": getattr(plugin, "version", ""),
                     "fields": plugin.config_schema(),
+                    # **env เป็นคนบอกว่าตัวเองเสิร์ฟโจทย์แบบไหนได้** ไม่ใช่หน้าเว็บ
+                    # รู้จักชื่อโจทย์เอง — เพิ่ม env ที่สามจึงไม่ต้องแก้หน้าเว็บ
+                    "offers": plugin.offers(),
                 }
             )
             break

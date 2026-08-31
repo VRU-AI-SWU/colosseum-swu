@@ -87,6 +87,15 @@ class FakePlugin:
     def predict_timeout_s(self, spec: dict) -> float:
         return 30.0
 
+    # สองอันนี้มีไว้ให้หน้าเว็บสร้างฟอร์ม — runner ไม่ได้ใช้ แต่อยู่ในสัญญา
+    # จึงต้องมี ไม่งั้น `resolve()` ปฏิเสธ plugin ตัวนี้
+    def offers(self) -> list[dict]:
+        return [{"id": "fake", "label": "Fake", "blurb": "",
+                 "defaults": {}, "hide": [], "narrow": {}}]
+
+    def config_schema(self) -> list[dict]:
+        return []
+
 
 PLUGIN = FakePlugin()
 

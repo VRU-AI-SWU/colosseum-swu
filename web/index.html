@@ -785,10 +785,24 @@ function fieldHtml(f) {
   return `<div class="f"><label for="${id}">${esc(f.key)}</label>${input}${tip}</div>`;
 }
 
-function configFormHtml(env) {
-  // ข้ามช่องที่ `fixed` — มันคือค่าที่แก้ผ่านฟอร์มไม่ได้ (เช่น เมล็ดของชุดที่ใช้
-  // ตัดสิน ซึ่งอยู่ใน ARENA_SECRETS) การแสดงช่องที่กรอกแล้วไม่มีผลคือการโกหก
-  const shown = env.fields.filter((f) => !f.fixed);
+function configFormHtml(env, offer) {
+  /* ข้ามช่องที่ `fixed` — มันคือค่าที่แก้ผ่านฟอร์มไม่ได้ (เช่น เมล็ดของชุดที่ใช้
+     ตัดสิน ซึ่งอยู่ใน ARENA_SECRETS) การแสดงช่องที่กรอกแล้วไม่มีผลคือการโกหก
+
+     และข้ามช่องที่ **ตัวเลือกโจทย์ตอบให้แล้ว** (`offer.hide`) — ผู้สอนที่เลือก
+     Classification ไม่ต้องมากรอก `kind: classification` ซ้ำอีก · ส่วน `offer.narrow`
+     ตัดตัวเลือกที่เข้าคู่กันไม่ได้ทิ้ง เดิมฟอร์มโชว์คะแนนหลักทั้ง 5 ตัวรวมกัน
+     แล้วคนที่เลือก classification คู่กับ `r2` จะโดนปฏิเสธหลังกดบันทึก */
+  const hide = new Set(offer ? offer.hide : []);
+  const narrow = (offer && offer.narrow) || {};
+  const defaults = (offer && offer.defaults) || {};
+  const shown = env.fields
+    .filter((f) => !f.fixed && !hide.has(f.key))
+    .map((f) => ({
+      ...f,
+      choices: narrow[f.key] || f.choices,
+      default: f.key in defaults ? defaults[f.key] : f.default,
+    }));
   const sections = [...new Set(shown.map((f) => f.section))];
   return sections.map((name) => {
     const group = shown.filter((f) => f.section === name);
@@ -798,11 +812,11 @@ function configFormHtml(env) {
   }).join("");
 }
 
-function readConfigForm(root) {
+function readConfigForm(root, extra) {
   /* อ่านค่าจากฟอร์มแล้วเขียนเป็น YAML — โครงของ config ลึกแค่ชั้นเดียวเสมอ
      (`room.width`) การเขียนเองจึงพอ และเซิร์ฟเวอร์ตรวจด้วย loader จริงอยู่แล้ว
      ถ้าเขียนผิดจะถูกปฏิเสธพร้อมข้อความของ env ไม่ใช่ผ่านไปเงียบๆ */
-  const flat = {};
+  const flat = { ...(extra || {}) };
   root.querySelectorAll("[data-key]").forEach((el) => {
     const type = el.dataset.type;
     let v = el.value;
@@ -860,8 +874,12 @@ async function renderAuthoring() {
   }
 
   const courseOpts = managed.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
-  const envOpts = ENVS.map((e, i) =>
-    `<option value="${i}">${esc(e.name)} · ${esc(e.task_type)}</option>`).join("");
+  /* แบนรายการ env × offer ให้เป็นตัวเลือกเดียว — ผู้สอนเลือก "โจทย์แบบไหน"
+     ไม่ใช่ "environment ไหน" ซึ่งเป็นชื่อภายในระบบที่เขาไม่ควรต้องรู้ */
+  const CHOICES = ENVS.flatMap((e, ei) =>
+    (e.offers || []).map((o) => ({ env: e, envIndex: ei, offer: o })));
+  const choiceOpts = CHOICES.map((c, i) =>
+    `<option value="${i}">${esc(c.offer.label)}</option>`).join("");
 
   el.innerHTML =
     `<div class="sec-head"><h2>สร้างของใหม่</h2>` +
@@ -885,7 +903,8 @@ async function renderAuthoring() {
         <div class="f"><label for="nk-course">วิชา</label>
           <select id="nk-course">${courseOpts}</select></div>
         <div class="f"><label for="nk-env">ชนิดโจทย์</label>
-          <select id="nk-env">${envOpts}</select></div>
+          <select id="nk-env">${choiceOpts}</select>
+          <span class="tip" id="nk-blurb"></span></div>
         <div class="f"><label for="nk-slug">slug</label>
           <input id="nk-slug" placeholder="cp461-titanic-1-2026"></div>
         <div class="f"><label for="nk-title">ชื่อโจทย์</label>
@@ -896,13 +915,16 @@ async function renderAuthoring() {
           <span class="msg" id="nk-msg"></span></div>
       </div></details>`;
 
+  const chosen = () => CHOICES[parseInt($("nk-env").value, 10)];
   const drawConfig = () => {
-    const env = ENVS[parseInt($("nk-env").value, 10)];
-    $("nk-cfg").innerHTML = env
-      ? `<h3>config ของ ${esc(env.name)}</h3>` + configFormHtml(env)
+    const c = chosen();
+    $("nk-blurb").textContent = c ? c.offer.blurb : "";
+    $("nk-cfg").innerHTML = c
+      ? `<h3>รายละเอียดของโจทย์</h3>` + configFormHtml(c.env, c.offer)
       : `<span class="tip">ยังไม่มี environment ติดตั้งบนเครื่องนี้</span>`;
   };
-  if (ENVS.length) { $("nk-env").onchange = drawConfig; drawConfig(); }
+  if (CHOICES.length) { $("nk-env").onchange = drawConfig; drawConfig(); }
+  window.__chosen = chosen;   // ให้ createCompetition หยิบไปใช้
 
   if (me.is_staff) $("nc-go").onclick = () => createCourse();
   $("nk-go").onclick = () => createCompetition();
@@ -927,16 +949,18 @@ async function createCourse() {
 async function createCompetition() {
   const msg = $("nk-msg");
   msg.className = "msg";
-  const env = ENVS[parseInt($("nk-env").value, 10)];
-  if (!env) { msg.className = "msg warn"; msg.textContent = "ไม่มี environment ให้เลือก"; return; }
+  const c = window.__chosen && window.__chosen();
+  if (!c) { msg.className = "msg warn"; msg.textContent = "ไม่มีชนิดโจทย์ให้เลือก"; return; }
   msg.textContent = "กำลังสร้าง…";
   try {
     const body = new URLSearchParams({
       course_id: $("nk-course").value,
       slug: $("nk-slug").value,
       title: $("nk-title").value,
-      env_plugin: env.env_plugin,
-      config: readConfigForm($("nk-cfg")),
+      env_plugin: c.env.env_plugin,
+      // ค่าที่ตัวเลือกโจทย์กำหนดให้ ไม่ได้อยู่ในฟอร์ม จึงต้องเติมกลับเข้า config
+      // ก่อนส่ง — ไม่งั้น `kind` จะหายไปแล้ว loader ปฏิเสธ
+      config: readConfigForm($("nk-cfg"), c.offer.defaults),
       phases: JSON.stringify(readCalendar("nk")),
     });
     const res = await api("/api/competitions", { method: "POST", body });

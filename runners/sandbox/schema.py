@@ -69,6 +69,40 @@ class Field:
         return out
 
 
+@dataclass(frozen=True)
+class Offer:
+    """โจทย์**หนึ่งแบบ**ที่ environment นี้เสิร์ฟได้ — สิ่งที่ผู้สอนเลือกจริงๆ
+
+    ผู้สอนไม่ควรต้องรู้ว่าระบบเรียกมันว่า `task_type` อะไร หรือมีฟิลด์ชื่อ `kind`
+    อยู่ใน config · เขารู้แค่ว่ากำลังจะสร้างโจทย์ **classification** หรือ
+    **regression** หรือ **reinforcement learning** · ที่เหลือเป็นเรื่องของระบบ
+
+    **environment เป็นคนประกาศว่าตัวเองเสิร์ฟอะไรได้** ไม่ใช่หน้าเว็บรู้จักชื่อโจทย์
+    เอง — เพิ่ม environment ที่สามจึงไม่ต้องแก้หน้าเว็บ
+    """
+
+    id: str
+    label: str
+    blurb: str = ""
+    #: ค่าที่ตัวเลือกนี้กำหนดให้เลย — ผู้สอนไม่ต้องกรอก
+    defaults: dict[str, Any] = field(default_factory=dict)
+    #: ฟิลด์ที่ไม่ต้องแสดง เพราะตัวเลือกนี้ตอบให้แล้ว
+    hide: tuple[str, ...] = ()
+    #: จำกัดตัวเลือกของบางฟิลด์ให้แคบลงตามที่ตัวเลือกนี้รองรับ
+    #: เช่น classification ใช้ `primary` ได้แค่ macro_f1 กับ accuracy
+    narrow: dict[str, tuple[Any, ...]] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "label": self.label,
+            "blurb": self.blurb,
+            "defaults": dict(self.defaults),
+            "hide": list(self.hide),
+            "narrow": {k: list(v) for k, v in self.narrow.items()},
+        }
+
+
 _PYTHON_TO_FORM = {int: "int", float: "float", bool: "bool", str: "str"}
 
 
@@ -145,5 +179,5 @@ def _field(
     )
 
 
-def as_dicts(schema: list[Field]) -> list[dict[str, Any]]:
-    return [f.as_dict() for f in schema]
+def as_dicts(items) -> list[dict[str, Any]]:
+    return [item.as_dict() for item in items]

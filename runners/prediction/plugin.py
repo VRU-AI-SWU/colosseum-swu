@@ -18,6 +18,8 @@ import importlib
 from typing import Any, Protocol, runtime_checkable
 
 REQUIRED = (
+    "offers",
+    "config_schema",
     "load_spec",
     "apply_overrides",
     "config_hash",
@@ -62,6 +64,16 @@ class PredictionPlugin(Protocol):
 
     def predict_timeout_s(self, spec: Any) -> float:
         """เพดานเวลาต่อการเรียก `predict` หนึ่งครั้ง — **ตัวกันงานค้าง ไม่มีผลต่อคะแนน**"""
+
+    def offers(self) -> list[dict[str, Any]]:
+        """โจทย์แต่ละแบบที่ env นี้เสิร์ฟได้ — สิ่งที่ผู้สอนเลือกบนหน้าเว็บ
+
+        ผู้สอนไม่ควรต้องรู้ว่าระบบเรียกมันว่า `task_type` อะไร หรือมีฟิลด์ `kind`
+        อยู่ใน config · ดู `runners/sandbox/schema.py:Offer`
+        """
+
+    def config_schema(self) -> list[dict[str, Any]]:
+        """หน้าตาของ config สำหรับสร้างฟอร์ม — **อนุมานจาก dataclass ไม่เขียนมือ**"""
 
 
 def resolve(spec: str) -> PredictionPlugin:
