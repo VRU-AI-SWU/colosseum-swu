@@ -190,3 +190,41 @@ def test_the_api_sends_the_task_type_the_page_needs():
         client = TestClient(create_app(arena))
         body = client.get("/api/competitions/cp463-vacuum-1-2026").json()
     assert body["task_type"] == "agent_env"
+
+
+# ── JS ต้องไม่อ้าง element ที่ไม่มีอยู่จริง ─────────────────────────
+
+
+def test_every_element_the_script_looks_up_exists():
+    """**บั๊กที่เคยเกิดจริง** — `$("cal-edit")` คืน null เพราะลืมใส่ element ลง HTML
+
+    ผลไม่ใช่แค่ "แผงไม่โผล่" แต่เป็น TypeError ที่โยนกลางทาง แล้วลาก**ปฏิทินทั้งแถบ**
+    หายไปสำหรับทุกคนรวมทั้งนิสิต · ไม่มี console error ให้เห็นด้วยเพราะหน้าตอนยัง
+    ไม่ล็อกอินไม่เดินมาถึงบรรทัดนั้น
+
+    ตรวจแบบ static: ทุก `$("ชื่อ")` ที่เป็นข้อความตรงๆ ต้องมี `id="ชื่อ"` อยู่ในไฟล์
+    (นับทั้ง element ที่เขียนไว้ใน HTML และที่ JS สร้างด้วย innerHTML)
+    """
+    html = INDEX.read_text()
+    declared = set(re.findall(r'id="([\w-]+)"', html))
+    looked_up = set(re.findall(r'\$\("([\w-]+)"\)', html))
+
+    missing = sorted(looked_up - declared)
+    assert not missing, (
+        f"JS หา element ที่ไม่มี id นี้อยู่ที่ไหนเลย: {missing}\n"
+        "  `$()` จะคืน null แล้วบรรทัดถัดไปโยน TypeError ซึ่งลากส่วนอื่นพังไปด้วย"
+    )
+
+
+def test_the_instructor_panel_cannot_break_the_student_calendar():
+    """แผงของผู้สอนต้องวาด**ท้ายสุด**และถูกห่อ try — นิสิตต้องเห็นปฏิทินเสมอ
+
+    หลักเดียวกับที่ `loadCalendar` ห่อ fetch ไว้แล้ว ("ออฟไลน์ — leaderboard สำคัญกว่า")
+    """
+    html = INDEX.read_text()
+    unhide = html.index('$("cal").hidden = false;')
+    call = html.index("renderCalendarEditor(cal);")
+    assert call > unhide, "วาดแผงผู้สอนก่อนปฏิทินจะโผล่ — ถ้ามันโยน ปฏิทินจะหายทั้งแถบ"
+
+    after = html[unhide:call]
+    assert "try {" in after, "การเรียก renderCalendarEditor ไม่ได้ถูกห่อด้วย try"

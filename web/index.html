@@ -289,6 +289,7 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
       <span class="cal-now" id="cal-now"></span>
     </div>
     <div class="cal-strip" id="cal-strip"></div>
+    <div class="team staff cal-edit" id="cal-edit" hidden></div>
   </section>
 
 
@@ -945,8 +946,6 @@ async function loadCalendar() {
   // ใช้เวลาของ *เซิร์ฟเวอร์* ไม่ใช่นาฬิกาเครื่องนิสิต ซึ่งตั้งผิดกันบ่อยกว่าที่คิด
   const now = new Date(cal.now).getTime();
 
-  renderCalendarEditor(cal);
-
   $("cal-strip").innerHTML = cal.phases.map((p) => {
     const start = new Date(p.starts_at).getTime();
     const end = new Date(p.ends_at).getTime();
@@ -983,6 +982,15 @@ async function loadCalendar() {
   const lastDay = new Date(closes - 1000).toISOString();
   $("cal-now").innerHTML = `${note} · วันสุดท้าย <b>${thaiDate(lastDay)}</b> (อีก ${daysLeft} วัน)`;
   $("cal").hidden = false;
+
+  // **ท้ายสุดและห่อ try เสมอ** — แผงของผู้สอนต้องไม่มีทางลากปฏิทินของนิสิตหายไปด้วย
+  // เคยเกิดจริง: element `#cal-edit` ไม่ได้ถูกใส่เข้า HTML ตัว render โยน TypeError
+  // ตั้งแต่บรรทัดแรกของ loadCalendar แล้วทั้งแถบปฏิทินไม่โผล่เลยสำหรับทุกคน
+  try {
+    renderCalendarEditor(cal);
+  } catch (e) {
+    console.error("วาดแผงแก้ปฏิทินไม่ได้ — ปฏิทินยังแสดงปกติ", e);
+  }
 }
 
 $("join-go").addEventListener("click", joinCourse);
