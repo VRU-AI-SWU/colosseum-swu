@@ -166,7 +166,17 @@ class User:
     #: ว่าคนนี้เป็นผู้สอนไหม (เดิมต้องมีกฎ "ทั้งทีมต้องเป็นผู้สอน" เพราะใช้โทเคนร่วมกัน)
     #: · `actor_id` ใน audit รู้จริงว่าใครกด ไม่ใช่เดาจากสมาชิกคนแรก
     token: str = field(default_factory=new_token)
+    #: ชื่อที่เจ้าตัวอยากให้คนอื่นเรียก — ว่าง = ใช้ชื่อจาก Google
+    #:
+    #: **ไม่ได้ทับชื่อจริง แค่บังไว้จากเพื่อนร่วมชั้น** — `name` ที่มาจาก Google
+    #: ยังอยู่ครบและผู้สอนเห็นเสมอ · ถ้าให้ทับได้จริง นิสิตจะตั้งชื่อเป็นชื่อเพื่อน
+    #: แล้วผู้สอนแยกไม่ออกว่าใครส่งงาน ซึ่งเป็นเรื่องของการตัดเกรด ไม่ใช่ความเป็นส่วนตัว
+    preferred_name: str = ""
     created_at: datetime = field(default_factory=utcnow)
+
+    def shown_as(self, *, reveal: bool) -> str:
+        """`reveal=True` สำหรับผู้สอนของวิชานั้น — เห็นชื่อจาก Google เสมอ"""
+        return self.name if reveal or not self.preferred_name else self.preferred_name
 
 
 #: ขนาดทีมของวิชาที่เพิ่งสร้าง — ผู้สอนเปลี่ยนได้จากหน้าเว็บทีหลัง
@@ -241,6 +251,34 @@ def clean_team_name(raw: str) -> str:
             f"{cleaned!r} เป็นชื่อของหมุด baseline บนกระดาน — เลือกชื่ออื่นที่ไม่ทำให้คนอื่นสับสน"
         )
     return cleaned
+
+
+#: ชื่อที่คนตั้งเองให้ตัวเอง — สั้นกว่าชื่อทีมเพราะมันไปอยู่ในรายการสมาชิกที่เรียงต่อกัน
+MAX_PREFERRED_NAME_LENGTH = 30
+
+
+class PreferredNameInvalid(Exception):
+    """ชื่อที่ตั้งเองใช้ไม่ได้"""
+
+
+def clean_preferred_name(raw: str | None) -> str:
+    """ตรวจชื่อที่คนตั้งเอง — คืนค่าว่างแปลว่าขอกลับไปใช้ชื่อจาก Google
+
+    ตัดอักขระควบคุมด้วยเหตุผลเดียวกับ `clean_alias` — ชื่อเดินทางผ่าน JSON แล้ว
+    ไปวาดด้วย HTML · อักขระอย่าง zero-width space ทำให้สองคนมีชื่อที่ตาเห็น
+    เหมือนกันได้ ซึ่งในรายการสมาชิกทีมแปลว่าแยกไม่ออกว่าใครเป็นใคร
+    """
+    if raw is None:
+        return ""
+    text = "".join(ch for ch in raw if (ch.isprintable() and not ch.isspace()) or ch == " ")
+    text = " ".join(text.split())
+    if not text:
+        return ""
+    if len(text) > MAX_PREFERRED_NAME_LENGTH:
+        raise PreferredNameInvalid(
+            f"ชื่อยาวเกินไป — ไม่เกิน {MAX_PREFERRED_NAME_LENGTH} ตัวอักษร (ตอนนี้ {len(text)})"
+        )
+    return text
 
 
 class CourseIdInvalid(Exception):

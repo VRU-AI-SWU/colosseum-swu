@@ -46,7 +46,7 @@ from core.domain import (
     new_invite_code,
 )
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -82,7 +82,9 @@ CREATE TABLE IF NOT EXISTS users (
     -- รหัสถาวรจาก Google · ใช้จับคู่แทนอีเมลเพราะอีเมลเปลี่ยนได้ sub ไม่เปลี่ยน
     google_sub TEXT NOT NULL UNIQUE,
     created_at TEXT NOT NULL,
-    token      TEXT NOT NULL DEFAULT ''
+    token      TEXT NOT NULL DEFAULT '',
+    -- ชื่อที่เจ้าตัวตั้งเอง · ว่าง = ใช้ `name` จาก Google (ผู้สอนเห็น `name` เสมอ)
+    preferred_name TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_users_sub ON users(google_sub);
 
@@ -330,12 +332,29 @@ def _migrate_4_to_5(conn: sqlite3.Connection) -> None:
         )
 
 
+def _migrate_5_to_6(conn: sqlite3.Connection) -> None:
+    """v5 → v6 · ชื่อที่ผู้ใช้ตั้งเองให้ตัวเอง
+
+    เพิ่มคอลัมน์เปล่า — ค่าว่างแปลว่า "ใช้ชื่อจาก Google" ซึ่งเป็นพฤติกรรมเดิมเป๊ะ
+    ไม่มีใครถูกเปลี่ยนชื่อจากการ migrate นี้
+    """
+    present = {
+        r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if "users" not in present:
+        return
+    columns = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+    if "preferred_name" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN preferred_name TEXT NOT NULL DEFAULT ''")
+
+
 #: เวอร์ชันปลายทาง → ฟังก์ชันที่พาจากเวอร์ชันก่อนหน้ามาถึงมัน
 MIGRATIONS = {
     2: _migrate_1_to_2,
     3: _migrate_2_to_3,
     4: _migrate_3_to_4,
     5: _migrate_4_to_5,
+    6: _migrate_5_to_6,
 }
 
 
@@ -458,10 +477,10 @@ class Database:
 
     def save_user(self, user: User) -> None:
         self._write(
-            "INSERT OR REPLACE INTO users(id, email, name, google_sub, token, created_at)"
-            " VALUES(?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO users(id, email, name, google_sub, token,"
+            " preferred_name, created_at) VALUES(?,?,?,?,?,?,?)",
             (user.id, user.email, user.name, user.google_sub, user.token,
-             _dt(user.created_at)),
+             user.preferred_name, _dt(user.created_at)),
         )
 
     def save_competition(self, c: Competition) -> None:
@@ -571,6 +590,7 @@ class Database:
             r["id"]: User(
                 id=r["id"], email=r["email"], name=r["name"],
                 google_sub=r["google_sub"], token=r["token"],
+                preferred_name=r["preferred_name"],
                 created_at=_parse_dt(r["created_at"]),
             )
             for r in self._rows("users")

@@ -656,3 +656,73 @@ def test_the_rename_is_recorded_with_the_old_name(arena):
                 data={"course_id": COURSE, "name": "ชื่อใหม่"})
     events = [e for e in arena.store.audit if e.action == "team.renamed"]
     assert events and events[-1].payload["before"] == before
+
+
+# ── ชื่อที่ผู้ใช้ตั้งเอง ────────────────────────────────────────────
+
+
+def test_a_user_can_set_the_name_their_classmates_see(arena):
+    client = TestClient(create_app(arena))
+    user = sign_in(arena, STUDENT)
+    r = client.post("/api/users/display-name", headers=auth(user),
+                    data={"name": "  น้อง   ต้นไม้  "})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"preferred_name": "น้อง ต้นไม้", "shown_as": "น้อง ต้นไม้"}
+
+
+def test_an_empty_value_goes_back_to_the_google_name(arena):
+    client = TestClient(create_app(arena))
+    user = sign_in(arena, STUDENT)
+    client.post("/api/users/display-name", headers=auth(user), data={"name": "ชื่อเล่น"})
+    r = client.post("/api/users/display-name", headers=auth(user), data={"name": ""})
+    assert r.json()["preferred_name"] == ""
+    assert r.json()["shown_as"] == arena.store.users[user.id].name
+
+
+def test_the_instructor_of_the_course_still_sees_the_google_name(arena):
+    """**ด่านสำคัญ** — ชื่อที่ตั้งเองบังจากเพื่อน ไม่ได้ซ่อนจากผู้สอน
+
+    ถ้าซ่อนได้จริง นิสิตจะตั้งชื่อเป็นชื่อเพื่อนแล้วผู้สอนแยกไม่ออกว่าใครส่งงาน
+    ซึ่งกระทบการตัดเกรด ไม่ใช่แค่ความเป็นส่วนตัว
+    """
+    client = TestClient(create_app(arena))
+    student = sign_in(arena, STUDENT)
+    arena.enroll(user=student, join_code="AAAAAA")
+    client.post("/api/users/display-name", headers=auth(student), data={"name": "นิรนาม"})
+
+    def member_names(email):
+        user = sign_in(arena, email)
+        arena.enroll(user=user, join_code="AAAAAA")
+        body = client.get("/api/me", headers=auth(user)).json()
+        return [m["name"] for e in body["enrollments"] for m in e["team"]["members"]]
+
+    assert member_names(STUDENT) == ["นิรนาม"], "ตัวเองเห็นชื่อที่ตั้งไว้"
+
+    ta = sign_in(arena, TA)
+    arena.store.save_team(
+        __import__("core.domain", fromlist=["Team"]).Team(
+            id=arena.store.team_of(student.id, COURSE).id,
+            course_id=COURSE,
+            name="ทีมรวม",
+            member_ids=[student.id, ta.id],
+        )
+    )
+    body = client.get("/api/me", headers=auth(ta)).json()
+    seen = [m["name"] for e in body["enrollments"] for m in e["team"]["members"]]
+    assert student.name in seen, f"ผู้สอนต้องเห็นชื่อจาก Google — ได้ {seen}"
+    assert "นิรนาม" not in seen
+
+
+def test_a_too_long_name_is_refused(arena):
+    client = TestClient(create_app(arena))
+    r = client.post("/api/users/display-name", headers=auth(sign_in(arena, STUDENT)),
+                    data={"name": "ก" * 31})
+    assert r.status_code == 422
+
+
+def test_zero_width_characters_are_stripped(arena):
+    """สองคนที่ชื่อตาเห็นเหมือนกันในรายชื่อสมาชิก = แยกไม่ออกว่าใครเป็นใคร"""
+    client = TestClient(create_app(arena))
+    r = client.post("/api/users/display-name", headers=auth(sign_in(arena, STUDENT)),
+                    data={"name": "ต้น​ไม้"})
+    assert "​" not in r.json()["preferred_name"]

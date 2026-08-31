@@ -696,6 +696,30 @@ async function joinCourse() {
 // README §6.1 — ทีมเลือกเองได้ เพื่อลดแรงกดดันของทีมท้ายตาราง
 // **ผู้สอนยังเห็นชื่อจริงเสมอ** จึงไม่ใช่การซ่อนตัวจากการตรวจ และต้องบอกให้ชัด
 // ไม่งั้นจะมีคนเข้าใจว่าตั้งแล้วทำอะไรก็ได้โดยไม่มีใครรู้ว่าเป็นใคร
+/** ชื่อที่แสดงของเราเอง — ว่าง = ใช้ชื่อจาก Google */
+function myShownName() {
+  return (me && (me.preferred_name || (me.user && me.user.name))) || "—";
+}
+
+async function promptMyName() {
+  /* สามชื่อในระบบนี้ต่างกัน และนี่คือที่ที่คนสับสน — ข้อความจึงบอกให้ครบว่า
+     ชื่อนี้ใครเห็น และอะไรที่มันไม่ได้ทำ (ไม่ได้ซ่อนจากผู้สอน) */
+  const next = prompt(
+    "ชื่อที่เพื่อนร่วมชั้นเห็นในรายชื่อสมาชิกทีม\n" +
+    "ว่างไว้ = ใช้ชื่อจากบัญชี Google\n\n" +
+    "หมายเหตุ: ผู้สอนของวิชาเห็นชื่อจาก Google เสมอ",
+    (me && me.preferred_name) || ""
+  );
+  if (next === null) return;
+  try {
+    await api("/api/users/display-name",
+              { method: "POST", body: new URLSearchParams({ name: next }) });
+    await refresh();
+  } catch (e) {
+    alert(e.message || "เปลี่ยนชื่อไม่สำเร็จ");
+  }
+}
+
 async function promptTeamName(enrolment) {
   /* ชื่อทีมกับชื่อบนกระดานเป็นคนละอย่าง และนี่คือจุดที่คนสับสนบ่อยที่สุด
      — ชื่อทีมคือชื่อที่เพื่อนร่วมทีมและผู้สอนเห็น · ชื่อบนกระดานคือชื่อที่นิสิต
@@ -1088,6 +1112,8 @@ function renderTeam(enrolment) {
   el.innerHTML =
     `<div class="pair wide"><span class="who">ทีมของคุณ</span>` +
       `<span class="val"><b>${escapeHtml(team.name)}</b> — ${who}</span></div>` +
+    `<div class="pair"><span class="who">ชื่อของคุณ</span>` +
+      `<span class="chip" id="c-me">${escapeHtml(myShownName())}</span></div>` +
     `<div class="pair"><span class="who">รหัสเชิญทีม</span>` +
       `<span class="chip" id="c-invite">${team.invite_code}</span></div>` +
     `<div class="pair"><span class="who">โทเคนของคุณ</span>` +
@@ -1117,6 +1143,7 @@ function renderTeam(enrolment) {
 
   $("c-invite").onclick = (e) => copy(team.invite_code, e.target);
   $("c-token").onclick = (e) => copy(me.user.token, e.target);
+  $("c-me").onclick = () => promptMyName();
   $("name-edit").onclick = () => promptTeamName(enrolment);
   $("alias-edit").onclick = () => promptAlias(enrolment);
   $("join-open").onclick = () => promptJoin();

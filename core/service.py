@@ -20,6 +20,7 @@ from core.domain import (
     AliasInvalid,
     CourseIdInvalid,
     CourseNameInvalid,
+    PreferredNameInvalid,
     TeamNameInvalid,
     Competition,
     CompetitionClosed,
@@ -35,6 +36,7 @@ from core.domain import (
     new_id,
     clean_alias,
     clean_course_name,
+    clean_preferred_name,
     clean_team_name,
     new_invite_code,
     new_token,
@@ -211,6 +213,23 @@ class Arena:
                 "ใส่รหัสเข้าวิชาที่หน้าเว็บก่อน (ขอรหัสจากผู้สอน)"
             )
         return team
+
+    def set_preferred_name(self, *, user: User, raw: str | None, actor_id: str | None) -> User:
+        """ตั้งชื่อที่อยากให้เพื่อนร่วมชั้นเรียก — ส่งค่าว่างมาเพื่อกลับไปใช้ชื่อจาก Google
+
+        **ไม่ทับชื่อจริง แค่บังไว้จากเพื่อน** — `User.name` จาก Google ยังอยู่ครบ
+        และผู้สอนของวิชานั้นเห็นเสมอ · ถ้าให้ทับได้จริง นิสิตจะตั้งชื่อเป็นชื่อเพื่อน
+        แล้วผู้สอนแยกไม่ออกว่าใครส่งงาน ซึ่งกระทบการตัดเกรด ไม่ใช่แค่ความเป็นส่วนตัว
+        """
+        name = clean_preferred_name(raw)
+        before, user.preferred_name = user.preferred_name, name
+        if before == name:
+            return user
+        self.store.save_user(user)
+        self.store.record(
+            "user.renamed", "user", user.id, actor_id=actor_id, before=before, after=name,
+        )
+        return user
 
     def rename_team(self, *, team: Team, raw: str, actor_id: str | None) -> Team:
         """ทีมเปลี่ยนชื่อตัวเอง

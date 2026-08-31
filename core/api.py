@@ -34,6 +34,7 @@ from core.domain import (
     CompetitionClosed,
     QuotaExceeded,
     ParadigmUnknown,
+    PreferredNameInvalid,
     RunKind,
     RunStatus,
     Team,
@@ -236,8 +237,15 @@ def create_app(
                     "invite_code": team.invite_code,
                     "alias": team.alias,
                     "shown_as": team.display_name(reveal=False),
+                    # ผู้สอน**ของวิชานี้**เห็นชื่อจาก Google เสมอ — เขาต้องรู้ว่า
+                    # ใครเป็นใครเพื่อตัดเกรด · เพื่อนร่วมชั้นเห็นชื่อที่เจ้าตัวตั้ง
                     "members": [
-                        {"name": u.name, "email": u.email}
+                        {
+                            "name": u.shown_as(
+                                reveal=arena.can_manage_course(user.email, course.id)
+                            ),
+                            "email": u.email,
+                        }
                         for uid in team.member_ids
                         if (u := arena.store.users.get(uid)) is not None
                     ],
@@ -263,6 +271,7 @@ def create_app(
             # หน้าเว็บใช้ตัวนี้ตัดสินว่าจะโชว์แผงของผู้สอนไหม — **ไม่ใช่ด่านความปลอดภัย**
             # ด่านจริงอยู่ที่ endpoint ซึ่งตรวจซ้ำเสมอ การซ่อนปุ่มเป็นแค่ความสะอาดของ UI
             "is_staff": arena.is_staff(user.email),
+            "preferred_name": user.preferred_name,
             # วิชาที่คนนี้จัดการได้ — หน้าเว็บใช้ตัดสินว่าจะแสดงแผงผู้สอนของวิชาไหน
             # ผู้สอนระดับทั้งระบบได้ทุกวิชา ส่วนคนอื่นได้เฉพาะที่ประกาศไว้ใน
             # ARENA_COURSE_STAFF_<COURSE_ID>
@@ -295,6 +304,22 @@ def create_app(
         before = user.token[:4]
         arena.rotate_user_token(user=user)
         return {"token": user.token, "previous_prefix": before}
+
+    @app.post("/api/users/display-name")
+    def set_display_name(user: UserDep, name: str = Form("")):
+        """ตั้งชื่อที่อยากให้เพื่อนร่วมชั้นเรียก — ส่งค่าว่างเพื่อกลับไปใช้ชื่อจาก Google
+
+        เป็นสิทธิ์ของเจ้าตัว ไม่ต้องมีสิทธิ์พิเศษ · ชื่อจาก Google ยังอยู่ครบและ
+        ผู้สอนของวิชานั้นเห็นเสมอ
+        """
+        try:
+            updated = arena.set_preferred_name(user=user, raw=name, actor_id=user.id)
+        except PreferredNameInvalid as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {
+            "preferred_name": updated.preferred_name,
+            "shown_as": updated.shown_as(reveal=False),
+        }
 
     @app.post("/api/teams/name")
     def rename_team(user: UserDep, course_id: str = Form(...), name: str = Form("")):
