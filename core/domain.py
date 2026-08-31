@@ -308,6 +308,7 @@ class Competition:
     title: str
     task_type: str  # เช่น "agent_env" — ตัวเลือก runner
     env_plugin: str  # เช่น "vacuum.arena:PLUGIN" — core ไม่รู้ว่ามันคืออะไร
+    #: path ของไฟล์ config บนเครื่อง runner — **ทางเก่า เหลือไว้สำหรับ record เดิม**
     config_path: str
     opens_at: datetime
     closes_at: datetime
@@ -320,6 +321,12 @@ class Competition:
     #: package ที่นิสิต import ได้ นอกเหนือจาก stdlib — ประกาศตอนเปิดเทอม (§13)
     #: ว่างไว้ = ใช้ค่าจาก `default_whitelist()`
     import_whitelist: frozenset[str] = frozenset()
+    #: เนื้อหาของ config ทั้งไฟล์ — **ทางที่ถูกต้องตั้งแต่ v5**
+    #:
+    #: competition ที่เก็บแค่ path ไม่ใช่ข้อมูลที่สมบูรณ์ในตัวเอง มันเป็นตัวชี้ไปยัง
+    #: ไฟล์บนเครื่องหนึ่งเครื่อง — สร้างจากหน้าเว็บไม่ได้ ย้ายเครื่องแล้วพัง และ
+    #: ไฟล์ถูกแก้ทีหลังโดยไม่มีใครรู้ได้ · เก็บเนื้อหาไว้เองแก้ทั้งสามข้อพร้อมกัน
+    config_text: str = ""
 
     def effective_whitelist(self) -> frozenset[str]:
         """whitelist ที่ใช้จริง
@@ -339,6 +346,20 @@ class Competition:
             return self.import_whitelist
         env_package = self.env_plugin.split(":", 1)[0].split(".", 1)[0]
         return frozenset({"numpy", "torch", env_package})
+
+    def config_source(self) -> tuple[str, str]:
+        """ที่มาของ config — คืน `("text", เนื้อหา)` หรือ `("path", path)`
+
+        **จุดเดียวที่ตัดสินว่าจะใช้อันไหน** ผู้เรียกทุกคนต้องผ่านที่นี่ ไม่ใช่ไป
+        เช็ค `config_text or config_path` เอง — สองที่ตัดสินคนละแบบเมื่อไร
+        คือ run ที่ให้คะแนนด้วย config คนละอันโดยไม่มีใครรู้
+
+        `config_text` ชนะเสมอเมื่อมีค่า · `config_path` เป็นทางถอยสำหรับ record
+        ที่สร้างก่อน v5 บนเครื่องที่ยังมีไฟล์นั้นอยู่
+        """
+        if self.config_text.strip():
+            return "text", self.config_text
+        return "path", self.config_path
 
     def phase_at(self, when: datetime) -> Phase | None:
         return next((p for p in self.phases if p.contains(when)), None)

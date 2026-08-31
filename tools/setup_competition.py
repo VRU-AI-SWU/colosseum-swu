@@ -324,6 +324,9 @@ def main() -> int:
                 task_type=task.task_type,
                 env_plugin=args.env_plugin,
                 config_path=str(base_path),
+                # เก็บ **เนื้อหา** ไว้ด้วยเสมอ — competition ต้องเป็นข้อมูลที่สมบูรณ์
+                # ในตัวเอง ไม่ใช่ตัวชี้ไปยังไฟล์บนเครื่องหนึ่งเครื่อง (schema v5)
+                config_text=base_path.read_text(encoding="utf-8"),
                 opens_at=opens_at,
                 closes_at=closes_at,
                 quota_per_day=args.quota_per_day or 5,
@@ -380,6 +383,9 @@ def main() -> int:
         competition.opens_at = opens_at
         competition.closes_at = closes_at
         competition.phases = build_phases(ranges, overrides=overrides)
+        # record ที่สร้างก่อน v5 ยังเก็บแค่ path — ตั้งปฏิทินทีก็ย้ายเนื้อหาเข้ามาที
+        if not competition.config_text.strip():
+            competition.config_text = base_path.read_text(encoding="utf-8")
         if args.quota_per_day:
             competition.quota_per_day = args.quota_per_day
         db.save_competition(competition)

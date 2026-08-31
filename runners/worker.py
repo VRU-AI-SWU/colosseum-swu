@@ -125,6 +125,28 @@ class Worker:
             except (LeaseExpired, KeyError):
                 return
 
+    def _config_file(self, competition: Competition, workdir: Path) -> str:
+        """path ของ config ที่จะส่งให้ runner
+
+        ตั้งแต่ schema v5 `Competition` เก็บ **เนื้อหา** ของ config ไม่ใช่ path —
+        competition จึงเป็นข้อมูลที่สมบูรณ์ในตัวเอง สร้างจากหน้าเว็บได้ ย้ายเครื่อง
+        แล้วไม่พัง และไม่มีใครแก้ไฟล์ทีหลังโดยที่ไม่มีร่องรอย
+
+        เขียนลงไฟล์ชั่วคราวใน workdir ของ run เพราะ **สัญญาของ plugin รับ path**
+        (`load_config(path)` / `load_spec(path)`) การเปลี่ยนสัญญาเพื่อรับเนื้อหา
+        จะกระทบทุก environment ที่มีอยู่และที่จะมี โดยไม่ได้อะไรเพิ่ม · ไฟล์นี้
+        ถูกลบพร้อม workdir ตอนจบ run
+
+        นามสกุล `.yaml` ตรงกับของเดิมเสมอ — loader บางตัวอ่านนามสกุลเพื่อเลือกวิธี parse
+        """
+        source, value = competition.config_source()
+        if source == "path":
+            return value  # record ที่สร้างก่อน v5 บนเครื่องที่ยังมีไฟล์นั้นอยู่
+        workdir.mkdir(parents=True, exist_ok=True)
+        path = workdir / "config.yaml"
+        path.write_text(value, encoding="utf-8")
+        return str(path)
+
     def _launcher_for(self, competition: Competition) -> Launcher:
         sandbox = SANDBOXES.get(competition.task_type)
         if sandbox is None:
@@ -158,6 +180,7 @@ class Worker:
         kind = "private" if run.kind is RunKind.PRIVATE else "public"
         workdir = self.workdir / run.id
         try:
+            config_path = self._config_file(competition, workdir)
             submission_dir = self.artifacts.extract(
                 submission.artifact_url, workdir, entry=ENTRY_FILES["prediction"]
             )
@@ -165,7 +188,7 @@ class Worker:
             if run.kind in SMOKE_TESTED_KINDS:
                 smoke = prediction_smoke(
                     env_plugin=competition.env_plugin,
-                    config_path=competition.config_path,
+                    config_path=config_path,
                     submission_dir=submission_dir,
                     launcher=launcher,
                 )
@@ -175,7 +198,7 @@ class Worker:
 
             result = run_prediction(
                 env_plugin=competition.env_plugin,
-                config_path=competition.config_path,
+                config_path=config_path,
                 submission_dir=submission_dir,
                 kind=kind,
                 config_overrides=self._overrides(competition, run),
@@ -234,6 +257,7 @@ class Worker:
 
         workdir = self.workdir / run.id
         try:
+            config_path = self._config_file(competition, workdir)
             submission_dir = self.artifacts.extract(
                 submission.artifact_url, workdir, entry=ENTRY_FILES["agent_env"]
             )
@@ -241,7 +265,7 @@ class Worker:
             if run.kind in SMOKE_TESTED_KINDS:
                 smoke = smoke_test(
                     env_plugin=competition.env_plugin,
-                    config_path=competition.config_path,
+                    config_path=config_path,
                     submission_dir=submission_dir,
                     launcher=launcher,
                 )
@@ -251,7 +275,7 @@ class Worker:
 
             result = run_submission(
                 env_plugin=competition.env_plugin,
-                config_path=competition.config_path,
+                config_path=config_path,
                 submission_dir=submission_dir,
                 seeds=seeds,
                 config_overrides=self._overrides(competition, run),

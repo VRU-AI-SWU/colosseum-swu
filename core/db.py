@@ -46,7 +46,7 @@ from core.domain import (
     new_invite_code,
 )
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS competitions (
     task_type              TEXT NOT NULL,
     env_plugin             TEXT NOT NULL,
     config_path            TEXT NOT NULL,
+    config_text            TEXT NOT NULL DEFAULT '',
     opens_at               TEXT NOT NULL,
     closes_at              TEXT NOT NULL,
     quota_per_day          INTEGER NOT NULL,
@@ -294,8 +295,48 @@ def _migrate_3_to_4(conn: sqlite3.Connection) -> None:
         )
 
 
+def _migrate_4_to_5(conn: sqlite3.Connection) -> None:
+    """v4 → v5 · config ของโจทย์ย้ายจาก *path บนเครื่อง* มาเป็น *เนื้อหาในฐานข้อมูล*
+
+    เดิม `Competition` เก็บแค่ path ซึ่งแปลว่า competition ไม่ใช่ข้อมูลที่สมบูรณ์
+    ในตัวเอง — มันเป็นตัวชี้ไปยังไฟล์บนเครื่องหนึ่งเครื่อง · ผลคือ
+
+      · สร้าง competition จากหน้าเว็บไม่ได้ ต้อง ssh ไปวางไฟล์ก่อน
+      · ย้ายเครื่อง/กู้จากสำรอง แล้ว competition พังถ้าลืมยกไฟล์ไปด้วย
+      · ไฟล์ถูกแก้ทีหลังโดยไม่มีใครรู้ แล้ว `config_hash` ของ run เก่ากับใหม่ต่างกัน
+
+    **ย้ายเนื้อหาเข้ามาเท่าที่อ่านไฟล์ได้** — แถวที่ไฟล์หายไปแล้วจะได้ค่าว่าง
+    แล้วถอยไปใช้ `config_path` เหมือนเดิม ซึ่งก็คือพฤติกรรมเดิมเป๊ะ ไม่ได้แย่ลง
+    · migration ต้องไม่ล้มเพราะไฟล์ของ deployment อื่นไม่มีอยู่บนเครื่องนี้
+    """
+    present = {
+        r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if "competitions" not in present:
+        return
+
+    columns = {r["name"] for r in conn.execute("PRAGMA table_info(competitions)")}
+    if "config_text" not in columns:
+        conn.execute("ALTER TABLE competitions ADD COLUMN config_text TEXT NOT NULL DEFAULT ''")
+
+    for row in conn.execute("SELECT id, config_path FROM competitions").fetchall():
+        path = Path(row["config_path"] or "")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue  # ไฟล์ไม่ได้อยู่บนเครื่องนี้ — ปล่อยว่างไว้ แล้วถอยไปใช้ path
+        conn.execute(
+            "UPDATE competitions SET config_text = ? WHERE id = ?", (text, row["id"])
+        )
+
+
 #: เวอร์ชันปลายทาง → ฟังก์ชันที่พาจากเวอร์ชันก่อนหน้ามาถึงมัน
-MIGRATIONS = {2: _migrate_1_to_2, 3: _migrate_2_to_3, 4: _migrate_3_to_4}
+MIGRATIONS = {
+    2: _migrate_1_to_2,
+    3: _migrate_2_to_3,
+    4: _migrate_3_to_4,
+    5: _migrate_4_to_5,
+}
 
 
 class Database:
@@ -436,11 +477,12 @@ class Database:
         ]
         self._write(
             "INSERT OR REPLACE INTO competitions(id, course_id, slug, title, task_type,"
-            " env_plugin, config_path, opens_at, closes_at, quota_per_day,"
+            " env_plugin, config_path, config_text, opens_at, closes_at, quota_per_day,"
             " max_final_submissions, phases, import_whitelist, paradigm)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 c.id, c.course_id, c.slug, c.title, c.task_type, c.env_plugin, c.config_path,
+                c.config_text,
                 _dt(c.opens_at), _dt(c.closes_at), c.quota_per_day, c.max_final_submissions,
                 json.dumps(phases, ensure_ascii=False),
                 json.dumps(sorted(c.import_whitelist)),
@@ -549,6 +591,7 @@ class Database:
                 id=r["id"], course_id=r["course_id"], slug=r["slug"], title=r["title"],
                 task_type=r["task_type"], env_plugin=r["env_plugin"],
                 config_path=r["config_path"],
+                config_text=r["config_text"],
                 opens_at=_parse_dt(r["opens_at"]), closes_at=_parse_dt(r["closes_at"]),
                 quota_per_day=r["quota_per_day"],
                 max_final_submissions=r["max_final_submissions"],
