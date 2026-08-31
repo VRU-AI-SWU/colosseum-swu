@@ -700,6 +700,22 @@ async function promptAlias(enrolment) {
 }
 
 
+/* ── กันการวาดทับสิ่งที่ผู้ใช้กำลังกรอกอยู่ ──────────────────────────
+   หน้านี้รีเฟรชเองทุก 30 วินาที (`setInterval(refresh, REFRESH_MS)`) และตัววาด
+   แต่ละแผงเขียน `innerHTML` ใหม่ทั้งก้อน · แปลว่าผู้สอนที่เปิดฟอร์มสร้างโจทย์
+   แล้วพิมพ์ไปครึ่งทาง จะโดนล้างทิ้งกลางคันโดยไม่มีอะไรบอก — `<details>` ปิดเอง
+   ตัวเลือกเด้งกลับอันแรก ค่าที่กรอกหายหมด
+
+   กติกา: **แผงที่กำลังถูกใช้อยู่ ห้ามวาดทับ** — ดูจากว่า focus อยู่ในนั้นไหม
+   หรือมีส่วนที่ถูกกางออกอยู่ไหม · ข้อมูลใหม่รอรอบหน้าได้ แต่สิ่งที่พิมพ์ไปแล้ว
+   เรียกคืนไม่ได้ */
+function isBusy(el) {
+  if (!el || el.hidden) return false;
+  const focused = document.activeElement;
+  if (focused && focused !== document.body && el.contains(focused)) return true;
+  return !!el.querySelector("details[open]");
+}
+
 // ── หน้าสร้างวิชาและโจทย์ ────────────────────────────────────────────
 // วาดฟอร์มจาก `GET /api/environments` **ไม่ใช่เขียนฟอร์มมือต่อ env** — ฟอร์มที่
 // เขียนมือจะเพี้ยนจาก config จริงในวันที่มีคนเพิ่มฟิลด์ แล้วผู้สอนกรอกครบแต่
@@ -800,6 +816,7 @@ async function renderAuthoring() {
   const el = $("authoring");
   const managed = (me && me.managed_courses) || [];
   if (!managed.length) { el.hidden = true; return; }
+  if (isBusy(el)) return;   // กำลังกรอกอยู่ — อย่าล้างทิ้ง
   el.hidden = false;
 
   if (ENVS === null) {
@@ -900,6 +917,7 @@ function renderCalendarEditor(cal) {
   const el = $("cal-edit");
   const managed = (me && me.managed_courses) || [];
   if (!courseId || managed.indexOf(courseId) < 0) { el.hidden = true; return; }
+  if (isBusy(el)) return;
   el.hidden = false;
 
   // เติมค่าจาก `first_day`/`last_day` ที่เซิร์ฟเวอร์ส่งมา **ไม่แปลงเอง** —
@@ -947,6 +965,7 @@ function renderCalendarEditor(cal) {
 // ก็อยู่ในมือนิสิตทุกคนอยู่แล้ว การซ่อนปุ่มเป็นแค่ความสะอาดของหน้าจอ
 function renderStaffPanel(course) {
   const el = $("staff");
+  if (isBusy(el)) return;
   el.hidden = false;
   el.innerHTML =
     `<div class="pair wide"><span class="who">แผงผู้สอน</span>` +
@@ -989,6 +1008,7 @@ function renderTeam(enrolment) {
   const course = enrolment.course;
   const maxSize = course.max_team_size || 6;
   const el = $("team");
+  if (isBusy(el)) return;
   el.hidden = false;
   const who = team.members.length
     ? team.members.map((m) => escapeHtml(m.name)).join(" · ")

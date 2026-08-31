@@ -228,3 +228,34 @@ def test_the_instructor_panel_cannot_break_the_student_calendar():
 
     after = html[unhide:call]
     assert "try {" in after, "การเรียก renderCalendarEditor ไม่ได้ถูกห่อด้วย try"
+
+
+# ── การรีเฟรชอัตโนมัติต้องไม่ล้างสิ่งที่กำลังกรอก ──────────────────
+
+
+def test_every_panel_guards_against_being_redrawn_while_in_use():
+    """**บั๊กที่เกิดจริง** — หน้ารีเฟรชเองทุก 30 วินาที แล้ววาด `innerHTML` ใหม่ทั้งก้อน
+
+    ผู้สอนที่เปิดฟอร์มสร้างโจทย์แล้วพิมพ์ไปครึ่งทาง จะโดนล้างทิ้งกลางคันโดยไม่มี
+    อะไรบอก — `<details>` ปิดเอง ตัวเลือกเด้งกลับอันแรก ค่าที่กรอกหายหมด
+    อาการที่ผู้ใช้เห็นคือ "เลือกโจทย์แล้วสักพักมันเด้งกลับหน้าสร้างโจทย์ใหม่"
+
+    ตรวจแบบ static: ตัววาดทุกแผงที่รับค่าจากผู้ใช้ ต้องเรียก `isBusy` ก่อนวาด
+    """
+    text = INDEX.read_text()
+    assert "function isBusy(" in text, "ไม่มีตัวตรวจว่าแผงกำลังถูกใช้อยู่"
+
+    for name in ("renderAuthoring", "renderStaffPanel", "renderCalendarEditor", "renderTeam"):
+        start = text.index(f"function {name}(")
+        body = text[start:text.index("innerHTML", start)]
+        assert "isBusy(" in body, f"{name} วาดทับได้โดยไม่เช็คว่าผู้ใช้กำลังกรอกอยู่"
+
+
+def test_the_guard_covers_both_focus_and_an_open_section():
+    """โฟกัสอย่างเดียวไม่พอ — ผู้สอนที่กางฟอร์มไว้แล้วเลื่อนไปอ่านอย่างอื่น
+    ยังไม่ได้พิมพ์ต่อ แต่ค่าที่กรอกไปแล้วต้องไม่หาย"""
+    text = INDEX.read_text()
+    guard = text[text.index("function isBusy("):]
+    guard = guard[:guard.index("\n}")]
+    assert "activeElement" in guard
+    assert "details[open]" in guard
