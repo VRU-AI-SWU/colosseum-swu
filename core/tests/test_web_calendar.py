@@ -222,11 +222,14 @@ def test_the_instructor_panel_cannot_break_the_student_calendar():
     หลักเดียวกับที่ `loadCalendar` ห่อ fetch ไว้แล้ว ("ออฟไลน์ — leaderboard สำคัญกว่า")
     """
     html = INDEX.read_text()
-    unhide = html.index('$("cal").hidden = false;')
-    call = html.index("renderCalendarEditor(cal);")
+    # ดูเฉพาะใน `loadCalendar` — ตัว `renderCalendarEditor` เองก็เรียกตัวเองตอนกด
+    # ปุ่มเปิด/ปิด ซึ่งอยู่ก่อนหน้าในไฟล์ · ถ้าค้นทั้งไฟล์จะไปเจอการเรียกอันนั้นแทน
+    loader = html[html.index("async function loadCalendar()"):]
+    unhide = loader.index('$("cal").hidden = false;')
+    call = loader.index("renderCalendarEditor(cal);")
     assert call > unhide, "วาดแผงผู้สอนก่อนปฏิทินจะโผล่ — ถ้ามันโยน ปฏิทินจะหายทั้งแถบ"
 
-    after = html[unhide:call]
+    after = loader[unhide:call]
     assert "try {" in after, "การเรียก renderCalendarEditor ไม่ได้ถูกห่อด้วย try"
 
 

@@ -309,7 +309,7 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
    ห้อง 10x10 ไม่มี noise ในช่วง Warm-up กลายเป็น 30x30 มี noise ในช่วง Final
    คนที่ไม่เห็นตารางนี้จะคิดว่าคะแนนที่ตกฮวบวันที่ 1 ต.ค. เป็นความผิดของตัวเอง */
 .cal { margin: 0 0 22px; }
-.cal-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+.cal-head { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap;
   margin-bottom: 8px; }
 .cal-head h2 { font-size: 13px; letter-spacing: .08em; text-transform: uppercase;
   color: var(--muted); margin: 0; font-weight: 600; }
@@ -381,6 +381,18 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
 .msg.warn { color: var(--accent); }
 .msg.ok { color: var(--ink); }
 
+/* ปุ่มไอคอน — ของที่ใช้นานๆ ครั้งไม่ควรกินที่ถาวรบนหน้าจอ
+   ปฏิทินถูกตั้งครั้งเดียวตอนเปิดเทอมแล้วแทบไม่แตะอีก */
+.icon-btn {
+  margin-left: auto; cursor: pointer; font: inherit; font-size: 15px;
+  width: 34px; height: 34px; line-height: 1; flex: 0 0 auto;
+  border: 1px solid var(--rule-strong); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--muted);
+}
+.icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+.icon-btn[aria-expanded="true"] {
+  background: var(--accent); border-color: var(--accent); color: #FFFFFF;
+}
 .cal-edit { margin-top: var(--s4); }
 .cal-edit input[type="date"] {
   width: 100%; padding: 7px 9px; font: inherit; font-size: 14px;
@@ -408,6 +420,10 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
     <div class="cal-head">
       <h2>ปฏิทินการแข่ง</h2>
       <span class="cal-now" id="cal-now"></span>
+      <!-- ปุ่มอยู่ตรงนี้ ไม่ได้อยู่ในแผงที่ถูกวาดใหม่ทุกรอบ — สถานะเปิด/ปิดจึงไม่หาย
+           ตอนรีเฟรช และปุ่มไม่กระพริบ -->
+      <button class="icon-btn" id="cal-toggle" hidden
+              aria-expanded="false" title="แก้ปฏิทิน">✎</button>
     </div>
     <div class="cal-strip" id="cal-strip"></div>
     <div class="team staff cal-edit" id="cal-edit" hidden></div>
@@ -680,6 +696,26 @@ async function joinCourse() {
 // README §6.1 — ทีมเลือกเองได้ เพื่อลดแรงกดดันของทีมท้ายตาราง
 // **ผู้สอนยังเห็นชื่อจริงเสมอ** จึงไม่ใช่การซ่อนตัวจากการตรวจ และต้องบอกให้ชัด
 // ไม่งั้นจะมีคนเข้าใจว่าตั้งแล้วทำอะไรก็ได้โดยไม่มีใครรู้ว่าเป็นใคร
+async function promptTeamName(enrolment) {
+  /* ชื่อทีมกับชื่อบนกระดานเป็นคนละอย่าง และนี่คือจุดที่คนสับสนบ่อยที่สุด
+     — ชื่อทีมคือชื่อที่เพื่อนร่วมทีมและผู้สอนเห็น · ชื่อบนกระดานคือชื่อที่นิสิต
+     ทีมอื่นเห็น · ข้อความจึงบอกความต่างตรงนั้นแทนที่จะบอกแค่ "ใส่ชื่อ" */
+  const team = enrolment.team;
+  const next = prompt(
+    "ชื่อทีม — เพื่อนร่วมทีมและผู้สอนเห็นชื่อนี้\n" +
+    "(ชื่อที่นิสิตทีมอื่นเห็นบนกระดาน ตั้งแยกที่ “เปลี่ยนชื่อบนกระดาน”)",
+    team.name
+  );
+  if (next === null) return;
+  try {
+    const body = new URLSearchParams({ course_id: enrolment.course.id, name: next });
+    await api("/api/teams/name", { method: "POST", body });
+    await refresh();
+  } catch (e) {
+    alert(e.message || "เปลี่ยนชื่อทีมไม่สำเร็จ");
+  }
+}
+
 async function promptAlias(enrolment) {
   const team = enrolment.team;
   const now = team.alias || "";
@@ -913,10 +949,21 @@ async function createCompetition() {
 // ── ผู้สอนเลื่อนปฏิทินเอง ──────────────────────────────────────────
 // **การซ่อนไม่ใช่ความปลอดภัย** — endpoint ตรวจสิทธิ์ซ้ำเสมอ และตรวจว่าเป็นผู้สอน
 // *ของวิชานี้* ไม่ใช่แค่ผู้สอนคนใดคนหนึ่ง
+//: ผู้สอนกางแผงแก้ปฏิทินไว้อยู่ไหม — เก็บไว้นอกตัววาด เพราะตัววาดถูกเรียกซ้ำ
+//: ทุกรอบรีเฟรช ถ้าเก็บสถานะไว้ใน DOM มันจะปิดเองทุก 30 วินาที
+let calEditOpen = false;
+
 function renderCalendarEditor(cal) {
   const el = $("cal-edit");
+  const toggle = $("cal-toggle");
   const managed = (me && me.managed_courses) || [];
-  if (!courseId || managed.indexOf(courseId) < 0) { el.hidden = true; return; }
+  if (!courseId || managed.indexOf(courseId) < 0) {
+    el.hidden = true; toggle.hidden = true; return;
+  }
+  toggle.hidden = false;
+  toggle.onclick = () => { calEditOpen = !calEditOpen; renderCalendarEditor(cal); };
+  toggle.setAttribute("aria-expanded", String(calEditOpen));
+  if (!calEditOpen) { el.hidden = true; return; }
   if (isBusy(el)) return;
   el.hidden = false;
 
@@ -1024,6 +1071,7 @@ function renderTeam(enrolment) {
     `<div class="pair"><span class="who">ชื่อบนกระดาน</span>` +
       `<span class="chip" id="c-alias">${escapeHtml(team.shown_as || team.name)}</span></div>` +
     `<div class="actions">` +
+    `<button class="linkish" id="name-edit">เปลี่ยนชื่อทีม</button>` +
     `<button class="linkish" id="alias-edit">เปลี่ยนชื่อบนกระดาน</button>` +
     `<button class="linkish" id="join-open">เข้าทีมเพื่อน</button>` +
     `<button class="linkish" id="help-open">สองรหัสนี้ใช้ยังไง</button>` +
@@ -1045,6 +1093,7 @@ function renderTeam(enrolment) {
 
   $("c-invite").onclick = (e) => copy(team.invite_code, e.target);
   $("c-token").onclick = (e) => copy(me.user.token, e.target);
+  $("name-edit").onclick = () => promptTeamName(enrolment);
   $("alias-edit").onclick = () => promptAlias(enrolment);
   $("join-open").onclick = () => promptJoin();
   $("rotate").onclick = () => rotateToken();

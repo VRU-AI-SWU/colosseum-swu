@@ -37,6 +37,7 @@ from core.domain import (
     RunKind,
     RunStatus,
     Team,
+    TeamNameInvalid,
     TeamSizeInvalid,
     User,
 )
@@ -294,6 +295,20 @@ def create_app(
         before = user.token[:4]
         arena.rotate_user_token(user=user)
         return {"token": user.token, "previous_prefix": before}
+
+    @app.post("/api/teams/name")
+    def rename_team(user: UserDep, course_id: str = Form(...), name: str = Form("")):
+        """ทีมเปลี่ยนชื่อตัวเอง — สิทธิ์ของทีม ไม่ต้องเป็นผู้สอน
+
+        ชื่อเริ่มต้นเป็นชื่อ-นามสกุลของคนที่เข้าวิชาคนแรก ซึ่งอ่านแปลกทันทีที่มี
+        เพื่อนเข้ามาร่วม · `team_in` เป็นตัวบังคับว่าเปลี่ยนได้เฉพาะทีมของตัวเอง
+        """
+        team = team_in(user, course_id)
+        try:
+            team = arena.rename_team(team=team, raw=name, actor_id=user.id)
+        except TeamNameInvalid as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {"name": team.name, "shown_as": team.display_name(reveal=False)}
 
     @app.post("/api/teams/alias")
     def set_alias(user: UserDep, course_id: str = Form(...), alias: str = Form("")):

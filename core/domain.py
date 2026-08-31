@@ -213,6 +213,36 @@ def clean_course_name(raw: str) -> str:
     return cleaned
 
 
+#: ชื่อทีมยาวได้กว่าชื่อบนกระดาน เพราะค่าเริ่มต้นของมันคือชื่อ-นามสกุลจริงของนิสิต
+#: ("Ratchainant Thammasudjarit" = 26 ตัว) ซึ่งเกินเพดานของ alias อยู่แล้ว
+MAX_TEAM_NAME_LENGTH = 40
+
+
+class TeamNameInvalid(Exception):
+    """ชื่อทีมที่ตั้งใหม่ใช้ไม่ได้"""
+
+
+def clean_team_name(raw: str) -> str:
+    """ตรวจชื่อทีม — **ใช้กติกาเดียวกับชื่อบนกระดานเรื่องคำที่จองไว้**
+
+    เพราะทีมที่ยังไม่ได้ตั้ง alias จะเอา*ชื่อทีม*ขึ้นกระดานแทน (`display_name`)
+    ทีมที่ตั้งชื่อว่า "Gold" จึงอ่านเหมือนหมุด baseline ของผู้สอนได้เหมือนกัน
+    ต่างกันแค่ความยาวที่ยอมได้ ซึ่งกว้างกว่าเพราะค่าเริ่มต้นคือชื่อจริงของคน
+    """
+    cleaned = " ".join(str(raw or "").split())
+    if not cleaned:
+        raise TeamNameInvalid("ชื่อทีมว่างไม่ได้")
+    if len(cleaned) > MAX_TEAM_NAME_LENGTH:
+        raise TeamNameInvalid(
+            f"ชื่อทีมยาวเกินไป — ไม่เกิน {MAX_TEAM_NAME_LENGTH} ตัวอักษร (ตอนนี้ {len(cleaned)})"
+        )
+    if cleaned.lower() in RESERVED_ALIASES:
+        raise TeamNameInvalid(
+            f"{cleaned!r} เป็นชื่อของหมุด baseline บนกระดาน — เลือกชื่ออื่นที่ไม่ทำให้คนอื่นสับสน"
+        )
+    return cleaned
+
+
 class CourseIdInvalid(Exception):
     """id ของวิชาใช้ไม่ได้"""
 

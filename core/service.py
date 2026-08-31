@@ -20,6 +20,7 @@ from core.domain import (
     AliasInvalid,
     CourseIdInvalid,
     CourseNameInvalid,
+    TeamNameInvalid,
     Competition,
     CompetitionClosed,
     Course,
@@ -34,6 +35,7 @@ from core.domain import (
     new_id,
     clean_alias,
     clean_course_name,
+    clean_team_name,
     new_invite_code,
     new_token,
     require_paradigm,
@@ -208,6 +210,35 @@ class Arena:
                 f"ยังไม่ได้เข้าวิชา {course.name if course else course_id} — "
                 "ใส่รหัสเข้าวิชาที่หน้าเว็บก่อน (ขอรหัสจากผู้สอน)"
             )
+        return team
+
+    def rename_team(self, *, team: Team, raw: str, actor_id: str | None) -> Team:
+        """ทีมเปลี่ยนชื่อตัวเอง
+
+        ชื่อทีมเริ่มต้นเป็นชื่อ-นามสกุลของคนที่เข้าวิชาคนแรก ซึ่งอ่านแปลกทันทีที่
+        มีเพื่อนเข้ามาร่วม — ทีมสามคนที่ชื่อว่าคนหนึ่งในสามคนนั้น
+
+        ใช้กติกาเรื่องชื่อซ้ำเดียวกับ `set_alias` เพราะชื่อทีมขึ้นกระดานได้เหมือนกัน
+        (ทีมที่ยังไม่ได้ตั้ง alias) — สองแถวที่ชื่อเหมือนกันทำให้คนอ่านผิดได้จริง
+        """
+        name = clean_team_name(raw)
+        taken = {
+            other_name.casefold()
+            for other in self.store.teams.values()
+            if other.is_active and other.course_id == team.course_id and other.id != team.id
+            for other_name in (other.name, other.alias)
+            if other_name
+        }
+        if name.casefold() in taken:
+            raise TeamNameInvalid(f"มีทีมอื่นใช้ชื่อ {name!r} อยู่แล้ว — เลือกชื่อที่ไม่ซ้ำ")
+
+        before, team.name = team.name, name
+        if before == name:
+            return team
+        self.store.save_team(team)
+        self.store.record(
+            "team.renamed", "team", team.id, actor_id=actor_id, before=before, after=name,
+        )
         return team
 
     def set_alias(self, *, team: Team, raw: str | None, actor_id: str | None) -> Team:

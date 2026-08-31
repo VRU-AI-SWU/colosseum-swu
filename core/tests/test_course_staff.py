@@ -597,3 +597,62 @@ def test_a_student_never_gets_the_join_code_back(arena):
 def test_an_instructor_of_another_course_does_not_get_this_courses_join_code(arena):
     arena.course_staff = {**arena.course_staff, "cp463-1-2026": frozenset({OTHER})}
     assert join_code_seen_by(arena, OTHER) is None
+
+
+# ── ทีมเปลี่ยนชื่อตัวเอง ───────────────────────────────────────────
+
+
+def a_team_in(arena, email):
+    user = sign_in(arena, email)
+    return user, arena.enroll(user=user, join_code="AAAAAA")
+
+
+def test_a_team_can_rename_itself(arena):
+    """ชื่อเริ่มต้นเป็นชื่อ-นามสกุลของคนที่เข้าวิชาคนแรก ซึ่งอ่านแปลกทันทีที่มีเพื่อนร่วม"""
+    client = TestClient(create_app(arena))
+    user, _ = a_team_in(arena, STUDENT)
+    r = client.post("/api/teams/name", headers=auth(user),
+                    data={"course_id": COURSE, "name": "  ทีม  หมีน้อย  "})
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "ทีม หมีน้อย", "ต้องยุบช่องว่างซ้ำเหมือนชื่ออื่นในระบบ"
+
+
+def test_renaming_needs_no_special_rights_but_only_your_own_team(arena):
+    """สิทธิ์ของทีม ไม่ต้องเป็นผู้สอน — แต่เปลี่ยนได้เฉพาะทีมของตัวเองในวิชานั้น"""
+    client = TestClient(create_app(arena))
+    user, _ = a_team_in(arena, STUDENT)
+    outsider = sign_in(arena, "no-team@g.swu.ac.th")
+    assert client.post("/api/teams/name", headers=auth(outsider),
+                       data={"course_id": COURSE, "name": "แอบเปลี่ยน"}).status_code >= 400
+
+
+def test_a_team_name_that_clashes_with_another_team_is_refused(arena):
+    """ชื่อทีมขึ้นกระดานได้เหมือน alias — สองแถวที่ชื่อเหมือนกันทำให้อ่านผิดได้จริง"""
+    from core.domain import Team
+
+    arena.store.save_team(Team(id=new_id(), course_id=COURSE, name="ทีมที่มีอยู่แล้ว",
+                               member_ids=[]))
+    client = TestClient(create_app(arena))
+    user, _ = a_team_in(arena, STUDENT)
+    r = client.post("/api/teams/name", headers=auth(user),
+                    data={"course_id": COURSE, "name": "ทีมที่มีอยู่แล้ว"})
+    assert r.status_code == 422 and "ซ้ำ" in r.json()["detail"]
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "Gold", "ก" * 41])
+def test_bad_team_names_are_refused(arena, bad):
+    """`Gold` เป็นชื่อหมุด baseline — ทีมที่ใช้ชื่อนั้นจะอ่านเหมือนหมุดของผู้สอน"""
+    client = TestClient(create_app(arena))
+    user, _ = a_team_in(arena, STUDENT)
+    assert client.post("/api/teams/name", headers=auth(user),
+                       data={"course_id": COURSE, "name": bad}).status_code == 422
+
+
+def test_the_rename_is_recorded_with_the_old_name(arena):
+    client = TestClient(create_app(arena))
+    user, team = a_team_in(arena, STUDENT)
+    before = team.name
+    client.post("/api/teams/name", headers=auth(user),
+                data={"course_id": COURSE, "name": "ชื่อใหม่"})
+    events = [e for e in arena.store.audit if e.action == "team.renamed"]
+    assert events and events[-1].payload["before"] == before
