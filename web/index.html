@@ -263,6 +263,9 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
   line-height: 1.45; }
 .ph.on .ph-name::after { content: " · ตอนนี้"; color: var(--gold); font-weight: 600; }
 @media (max-width: 620px) { .cal-strip { grid-template-columns: 1fr; } }
+.cal-edit { margin-top: 10px; flex-wrap: wrap; }
+.cal-edit input[type="date"] { width: 11em; }
+.cal-edit .grp { display: flex; align-items: center; gap: 4px; }
 </style>
 </head>
 <body>
@@ -561,6 +564,54 @@ async function promptAlias(enrolment) {
   }
 }
 
+// ── ผู้สอนเลื่อนปฏิทินเอง ──────────────────────────────────────────
+// **การซ่อนไม่ใช่ความปลอดภัย** — endpoint ตรวจสิทธิ์ซ้ำเสมอ และตรวจว่าเป็นผู้สอน
+// *ของวิชานี้* ไม่ใช่แค่ผู้สอนคนใดคนหนึ่ง
+function renderCalendarEditor(cal) {
+  const el = $("cal-edit");
+  const managed = (me && me.managed_courses) || [];
+  if (!courseId || managed.indexOf(courseId) < 0) { el.hidden = true; return; }
+  el.hidden = false;
+
+  // เติมค่าจาก `first_day`/`last_day` ที่เซิร์ฟเวอร์ส่งมา **ไม่แปลงเอง** —
+  // `ends_at` เป็นขอบบนแบบไม่รวม ถ้าหน้าเว็บแปลงเองแล้วพลาด ผู้สอนที่เปิดฟอร์ม
+  // แล้วกดบันทึกโดยไม่แก้อะไรจะเลื่อนปฏิทินไปหนึ่งวันทุกครั้ง
+  el.innerHTML =
+    `<span class="who">ปฏิทิน</span>` +
+    cal.phases.map((p) =>
+      `<span class="grp"><label for="d-${p.name}-a">${PHASE_LABEL[p.name] || p.name}</label>` +
+      `<input id="d-${p.name}-a" type="date" value="${p.first_day}">` +
+      `<span class="who">–</span>` +
+      `<input id="d-${p.name}-b" type="date" value="${p.last_day}"></span>`
+    ).join("") +
+    `<button class="linkish" id="cal-save">บันทึกปฏิทิน</button>` +
+    `<span class="who" id="cal-msg"></span>`;
+
+  $("cal-save").onclick = async () => {
+    const msg = $("cal-msg");
+    msg.className = "who";
+    const phases = {};
+    for (const p of cal.phases) {
+      const a = $(`d-${p.name}-a`).value, b = $(`d-${p.name}-b`).value;
+      if (!a || !b) { msg.className = "who warn"; msg.textContent = "กรอกวันให้ครบทุกช่วง"; return; }
+      phases[p.name] = [a, b];
+    }
+    msg.textContent = "กำลังบันทึก…";
+    try {
+      const body = new URLSearchParams({ phases: JSON.stringify(phases) });
+      await api(`/api/competitions/${encodeURIComponent(slug)}/calendar`,
+                { method: "POST", body });
+      // วาดใหม่**ก่อน** แล้วค่อยเขียนข้อความ — การวาดใหม่สร้าง #cal-msg ตัวใหม่
+      // ถ้าเขียนก่อน ข้อความยืนยันจะถูกลบทิ้งทันทีแล้วผู้สอนจะไม่รู้ว่าสำเร็จไหม
+      await loadCalendar();
+      $("cal-msg").textContent = "บันทึกแล้ว";
+    } catch (e) {
+      msg.className = "who warn";
+      msg.textContent = e.message || "บันทึกไม่สำเร็จ";
+    }
+  };
+}
+
 // ── แผงของผู้สอน ───────────────────────────────────────────────────
 // โผล่เฉพาะเมื่อ `/api/me` บอกว่าเป็นผู้สอน · **การซ่อนไม่ใช่ความปลอดภัย** —
 // endpoint ตรวจสิทธิ์ซ้ำเสมอ เพราะใครก็ยิงตรงด้วย curl ได้ และโทเคนของทีม
@@ -765,7 +816,9 @@ async function refresh() {
 
   renderCourseBar();
   renderTeam(enrolment);
-  if (me.is_staff) renderStaffPanel(enrolment.course);
+  if ((me.managed_courses || []).indexOf(enrolment.course.id) >= 0) {
+    renderStaffPanel(enrolment.course);
+  }
 
   if (!slug) {
     // วิชาที่ยังไม่มีโจทย์ — ไม่ใช่ข้อผิดพลาด แค่ยังไม่ถึงเวลา
@@ -861,6 +914,18 @@ const PHASE_BLURB = {
   main:   "ห้อง 20×20 · เห็นแค่รอบตัว 5×5 · มี noise และช่องเหนียว · 1,500 step",
   final:  "ห้อง 30×30 · เห็นแค่รอบตัว 3×3 · ฝุ่นกระจุกตัว · 3,000 step",
 };
+// โจทย์ทำนาย (CP462) **ไม่เปลี่ยนกติกาเลยระหว่าง phase** — สเปคเดียวตรึงทั้งเทอม
+// เพราะการเปลี่ยนกลางเทอมทำให้คะแนนก่อนกับหลังเทียบกันไม่ได้ (`PredictionTask`
+// ใน tools/setup_competition.py คืน override ว่างเสมอ) · ข้อความจึงต้องไม่อ้างว่า
+// โจทย์ยากขึ้น ไม่งั้นนิสิตจะรอความเปลี่ยนแปลงที่ไม่มีวันมา
+const PREDICTION_BLURB = {
+  warmup: "ช่วงลองระบบ · โจทย์และวิธีให้คะแนนเหมือนกันทุกช่วง",
+  main:   "ช่วงแข่งหลัก · คะแนนบนกระดานมาจากชุดทดสอบสาธารณะ",
+  final:  "ช่วงสุดท้าย · ปิดรับแล้วตัดสินด้วยชุดลับที่ไม่เคยให้ผลกลับ",
+};
+
+const BLURBS = { agent_env: PHASE_BLURB, prediction: PREDICTION_BLURB };
+
 const PHASE_LABEL = { warmup: "Warm-up", main: "Main", final: "Final" };
 
 const thaiDate = (iso) =>
@@ -880,6 +945,8 @@ async function loadCalendar() {
   // ใช้เวลาของ *เซิร์ฟเวอร์* ไม่ใช่นาฬิกาเครื่องนิสิต ซึ่งตั้งผิดกันบ่อยกว่าที่คิด
   const now = new Date(cal.now).getTime();
 
+  renderCalendarEditor(cal);
+
   $("cal-strip").innerHTML = cal.phases.map((p) => {
     const start = new Date(p.starts_at).getTime();
     const end = new Date(p.ends_at).getTime();
@@ -889,7 +956,7 @@ async function loadCalendar() {
     return `<div class="ph ${state}">
       <div class="ph-name">${PHASE_LABEL[p.name] || p.name}</div>
       <div class="ph-when">${thaiDate(p.starts_at)} – ${thaiDate(last)}</div>
-      <div class="ph-what">${PHASE_BLURB[p.name] || ""}</div>
+      <div class="ph-what">${(BLURBS[cal.task_type] || PHASE_BLURB)[p.name] || ""}</div>
     </div>`;
   }).join("");
 

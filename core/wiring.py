@@ -124,6 +124,43 @@ def staff_emails_from_env() -> frozenset[str]:
     return frozenset(e.strip().lower() for e in raw.split(",") if e.strip())
 
 
+#: คำนำหน้าของตัวแปรที่ระบุผู้สอน "ของวิชานั้น"
+COURSE_STAFF_PREFIX = "ARENA_COURSE_STAFF_"
+
+
+def env_key_for_course(course_id: str) -> str:
+    """`cp462-1-2026` → `ARENA_COURSE_STAFF_CP462_1_2026`
+
+    id ของวิชาใช้ `-` ได้แต่ชื่อตัวแปรแวดล้อมใช้ไม่ได้ จึงแปลงเป็น `_` และตัวพิมพ์ใหญ่
+    """
+    return COURSE_STAFF_PREFIX + course_id.upper().replace("-", "_")
+
+
+def course_staff_from_env() -> dict[str, frozenset[str]]:
+    """ผู้สอน**ของแต่ละวิชา** — คั่นด้วยจุลภาค เหมือน `ARENA_STAFF_EMAILS`
+
+        ARENA_COURSE_STAFF_CP462_1_2026=aj2@g.swu.ac.th,ta@g.swu.ac.th
+
+    อยู่ใน environment ด้วยเหตุผลเดียวกับ `ARENA_STAFF_EMAILS` — ถ้าเก็บในฐานข้อมูล
+    แล้วแก้ผ่านหน้าเว็บได้ คนที่ยึดสิทธิ์ผู้สอนได้ครั้งเดียวจะแต่งตั้งตัวเองถาวร
+
+    **คีย์ที่คืนเป็น id ของวิชาตามที่สะกดในตัวแปร** (แปลง `_` กลับเป็น `-` และเป็น
+    ตัวพิมพ์เล็ก) · ถ้าไม่ตรงกับวิชาที่มีจริง ตัวแปรนั้นจะไม่มีผลกับใครเลย —
+    `arena serve` จึงพิมพ์รายการที่อ่านได้ออกมาให้เห็นตอนเริ่ม
+    """
+    import os
+
+    out: dict[str, frozenset[str]] = {}
+    for key, raw in os.environ.items():
+        if not key.startswith(COURSE_STAFF_PREFIX):
+            continue
+        course_id = key[len(COURSE_STAFF_PREFIX):].lower().replace("_", "-")
+        emails = frozenset(e.strip().lower() for e in raw.split(",") if e.strip())
+        if emails:
+            out[course_id] = emails
+    return out
+
+
 def demo_arena(
     root: Path, *, teams: int = 3, db_path: Path | str | None = None
 ) -> tuple[Arena, list[Team]]:

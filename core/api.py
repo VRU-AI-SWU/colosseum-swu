@@ -19,6 +19,7 @@
 # ไม่เจอ → ตีเป็น query parameter แทน dependency แล้วทุก endpoint จะตอบ 422
 # อาการที่เห็นคือ "Field required: team" ซึ่งไม่ได้ชี้ไปที่สาเหตุเลย
 
+import json
 from datetime import datetime, timezone
 from typing import Annotated, Optional
 
@@ -41,6 +42,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
 from core.auth import AuthError, GoogleAuth
+from core.calendar import CalendarInvalid, as_days
 from core.leaderboard import BaselineMark, build, insert_baselines, next_target
 from core.service import (
     Arena,
@@ -229,6 +231,10 @@ def create_app(
             # หน้าเว็บใช้ตัวนี้ตัดสินว่าจะโชว์แผงของผู้สอนไหม — **ไม่ใช่ด่านความปลอดภัย**
             # ด่านจริงอยู่ที่ endpoint ซึ่งตรวจซ้ำเสมอ การซ่อนปุ่มเป็นแค่ความสะอาดของ UI
             "is_staff": arena.is_staff(user.email),
+            # วิชาที่คนนี้จัดการได้ — หน้าเว็บใช้ตัดสินว่าจะแสดงแผงผู้สอนของวิชาไหน
+            # ผู้สอนระดับทั้งระบบได้ทุกวิชา ส่วนคนอื่นได้เฉพาะที่ประกาศไว้ใน
+            # ARENA_COURSE_STAFF_<COURSE_ID>
+            "managed_courses": arena.managed_courses(user.email),
             "enrollments": [
                 team_view(arena.store.team_of(user.id, cid))
                 for cid in arena.store.courses_of(user.id)
@@ -287,10 +293,10 @@ def create_app(
 
         ตรวจสิทธิ์ที่นี่เสมอ ไม่พึ่งว่าหน้าเว็บซ่อนปุ่มให้แล้ว — endpoint ยิงตรงได้ด้วย curl
         """
-        if not arena.is_staff(user.email):
-            raise HTTPException(403, "เฉพาะผู้สอนเท่านั้นที่แก้ค่าของวิชาได้")
         if course_id not in arena.store.courses:
             raise HTTPException(404, f"ไม่รู้จักวิชา {course_id!r}")
+        if not arena.can_manage_course(user.email, course_id):
+            raise HTTPException(403, "เฉพาะผู้สอนของวิชานี้เท่านั้นที่แก้ค่าได้")
         try:
             course = arena.update_course(
                 course_id=course_id, size=size, name=name, actor_id=user.id
@@ -521,6 +527,9 @@ def create_app(
         return {
             "slug": competition.slug,
             "title": competition.title,
+            # หน้าเว็บใช้เลือกคำอธิบายของแต่ละ phase — โจทย์ RL เปลี่ยนกติกาทุก phase
+            # ส่วนโจทย์ทำนายไม่เปลี่ยนเลย การใช้ข้อความชุดเดียวกันจะโกหกฝั่งหนึ่งเสมอ
+            "task_type": competition.task_type,
             "now": now.isoformat(),
             "opens_at": competition.opens_at.isoformat(),
             "closes_at": competition.closes_at.isoformat(),
@@ -533,10 +542,53 @@ def create_app(
                     "name": p.name,
                     "starts_at": p.starts_at.isoformat(),
                     "ends_at": p.ends_at.isoformat(),
+                    # วันแบบที่คนกรอก (วันจบรวมทั้งวัน) — ฟอร์มของผู้สอนเติมค่าเดิม
+                    # จากตรงนี้ · ถ้าให้หน้าเว็บแปลงเอง มันจะเลื่อนไปหนึ่งวันทุกครั้ง
+                    # ที่เปิดฟอร์มแล้วกดบันทึกโดยไม่แก้อะไร
+                    "first_day": as_days(p)[0],
+                    "last_day": as_days(p)[1],
                 }
                 for p in competition.phases
             ],
         }
+
+    @app.post("/api/competitions/{slug}/calendar")
+    def set_calendar(slug: str, user: UserDep, phases: str = Form(...)):
+        """ผู้สอนเลื่อนปฏิทินจากหน้าเว็บ
+
+        `phases` เป็น JSON — `{"warmup": ["2026-09-15", "2026-09-30"], ...}`
+        วันจบ **รวมทั้งวัน** เหมือนที่ `tools/setup_competition.py` ทำ
+
+        ตรวจสิทธิ์ที่นี่เสมอ ไม่พึ่งว่าหน้าเว็บซ่อนปุ่มให้แล้ว — endpoint ยิงตรงได้ด้วย curl
+        **สิทธิ์ผูกกับวิชาของ competition นี้** ไม่ใช่แค่ "เป็นผู้สอนคนใดคนหนึ่ง"
+        """
+        competition = arena.store.competition_by_slug(slug)
+        if competition is None:
+            raise HTTPException(404, f"ไม่รู้จัก competition {slug!r}")
+        if not arena.can_manage_course(user.email, competition.course_id):
+            raise HTTPException(
+                403, f"เฉพาะผู้สอนของวิชา {competition.course_id} เท่านั้นที่แก้ปฏิทินได้"
+            )
+
+        try:
+            raw = json.loads(phases)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(400, f"phases ไม่ใช่ JSON ที่อ่านได้: {exc}") from exc
+        if not isinstance(raw, dict):
+            raise HTTPException(400, "phases ต้องเป็น object ของ ชื่อ phase → [วันเริ่ม, วันจบ]")
+
+        ranges = {}
+        for name, pair in raw.items():
+            if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                raise HTTPException(400, f"{name}: ต้องเป็น [วันเริ่ม, วันจบ] — ได้ {pair!r}")
+            ranges[name] = (str(pair[0]), str(pair[1]))
+
+        try:
+            competition = arena.set_calendar(slug=slug, ranges=ranges, actor_id=user.id)
+        except CalendarInvalid as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+        return competition_info(slug)
 
     # ── สถานะระบบ ───────────────────────────────────────────────────
 

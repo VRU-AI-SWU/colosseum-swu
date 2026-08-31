@@ -444,6 +444,7 @@ def cmd_serve(args) -> int:
         CP463_VACUUM_LADDER,
         demo_arena,
         google_auth_from_env,
+        course_staff_from_env,
         staff_emails_from_env,
     )
     from runners.worker import SANDBOXES, Worker
@@ -481,8 +482,12 @@ def cmd_serve(args) -> int:
     print(f"โทเคนของนิสิตตัวอย่าง: {', '.join(t.id for t in teams)}")
     print(f"sandbox    : {sandbox_note}")
     arena.staff_emails = staff_emails_from_env()
+    arena.course_staff = course_staff_from_env()
     if arena.staff_emails:
         print(f"ผู้สอน     : {', '.join(sorted(arena.staff_emails))}")
+    for course_id, emails in sorted(arena.course_staff.items()):
+        known = "" if course_id in arena.store.courses else "  ⚠️ ไม่มีวิชานี้ — ตัวแปรนี้ไม่มีผล"
+        print(f"ผู้สอนวิชา : {course_id} → {', '.join(sorted(emails))}{known}")
     else:
         print("ผู้สอน     : ⚠️ ยังไม่ได้ตั้ง ARENA_STAFF_EMAILS — ไม่มีใครเปลี่ยนขนาดทีมได้")
     google = google_auth_from_env()

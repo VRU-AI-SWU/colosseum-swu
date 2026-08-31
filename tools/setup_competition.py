@@ -54,13 +54,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
+from core.calendar import ICT, PHASES, CalendarInvalid, build_phases  # noqa: E402
+from core.calendar import parse_range as _parse_range  # noqa: E402
 from core.db import Database  # noqa: E402
-from core.domain import Competition, Phase, new_id  # noqa: E402
-
-#: เวลาไทย — นิสิตอ่าน deadline เป็นวันตามปฏิทินของตัวเอง ไม่ใช่ UTC
-ICT = timezone(timedelta(hours=7))
-
-PHASES = ("warmup", "main", "final")
+from core.domain import Competition, new_id  # noqa: E402
 
 
 # ── สิ่งที่ต่างกันตามชนิดโจทย์ ──────────────────────────────────────
@@ -195,20 +192,14 @@ def summary_lines(task, base_path: Path) -> list[str]:
 def parse_range(text: str) -> tuple[datetime, datetime]:
     """`2026-09-15..2026-09-30` → ครึ่งเปิดตามเวลาไทย
 
-    วันจบ **รวมทั้งวัน** — คืนเที่ยงคืนของวันถัดไป เพราะ `Phase.contains` ใช้
-    `starts_at <= when < ends_at` ถ้าคืนเที่ยงคืนของวันจบเอง นิสิตจะเสียวันสุดท้ายไปทั้งวัน
+    กติกาเรื่องวันอยู่ที่ `core/calendar.py` ที่เดียว — ใช้ร่วมกับ endpoint ที่ผู้สอน
+    กดจากหน้าเว็บ · ถ้าเขียนแยกกัน deadline ที่หน้าเว็บบอกกับที่ระบบใช้จะเพี้ยนกัน
+    ห่อเป็น `ArgumentTypeError` เพื่อให้ argparse พิมพ์ข้อความสวยๆ ให้
     """
     try:
-        lo, hi = text.split("..")
-        start = datetime.strptime(lo.strip(), "%Y-%m-%d").replace(tzinfo=ICT)
-        end = datetime.strptime(hi.strip(), "%Y-%m-%d").replace(tzinfo=ICT)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            f"รูปแบบต้องเป็น YYYY-MM-DD..YYYY-MM-DD (ได้ {text!r})"
-        ) from exc
-    if end < start:
-        raise argparse.ArgumentTypeError(f"วันจบมาก่อนวันเริ่ม: {text!r}")
-    return start, end + timedelta(days=1)
+        return _parse_range(text)
+    except CalendarInvalid as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _confirmed() -> bool:
@@ -388,16 +379,7 @@ def main() -> int:
 
         competition.opens_at = opens_at
         competition.closes_at = closes_at
-        competition.phases = [
-            Phase(
-                id=new_id(),
-                name=phase,
-                starts_at=ranges[phase][0],
-                ends_at=ranges[phase][1],
-                config_override=overrides[phase],
-            )
-            for phase in PHASES
-        ]
+        competition.phases = build_phases(ranges, overrides=overrides)
         if args.quota_per_day:
             competition.quota_per_day = args.quota_per_day
         db.save_competition(competition)

@@ -421,7 +421,12 @@ def test_calendar_hides_server_paths(system):
     assert "config_path" not in blob
     assert arena.store.competition_by_slug(SLUG).config_path not in blob
     for phase in body["phases"]:
-        assert set(phase) == {"name", "starts_at", "ends_at"}, phase
+        # ล็อกรายการคีย์แบบเป๊ะ ไม่ใช่ blacklist — ฟิลด์ใหม่ที่รั่วต้องผ่านการแก้เทสต์นี้
+        # ก่อนเสมอ · `first_day`/`last_day` เป็นวันเดียวกับ `starts_at`/`ends_at`
+        # แค่รูปที่คนกรอก (วันจบรวมทั้งวัน) จึงไม่ได้เปิดเผยอะไรเพิ่ม
+        assert set(phase) == {
+            "name", "starts_at", "ends_at", "first_day", "last_day"
+        }, phase
 
 
 def test_calendar_404s_for_an_unknown_competition(system):

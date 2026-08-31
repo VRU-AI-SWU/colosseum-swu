@@ -136,3 +136,57 @@ def test_blurbs_are_valid_json_strings(blurbs):
     for phase, text in blurbs.items():
         json.dumps(text)
         assert '"' not in text, f"{phase}: มีเครื่องหมายคำพูดซ้อนในข้อความ"
+
+
+# ── คำอธิบายของโจทย์ทำนาย ──────────────────────────────────────────
+
+
+def prediction_blurbs() -> dict[str, str]:
+    block = re.search(r"const PREDICTION_BLURB = \{(.*?)\};", INDEX.read_text(), re.S)
+    assert block, "ไม่พบ PREDICTION_BLURB ในหน้าเว็บ"
+    found = dict(re.findall(r'(\w+):\s*"([^"]*)"', block.group(1)))
+    assert set(found) == set(PHASES), f"PREDICTION_BLURB ไม่ครบทุก phase: {sorted(found)}"
+    return found
+
+
+def test_prediction_blurbs_do_not_promise_a_harder_task_later():
+    """โจทย์ทำนาย **ไม่เปลี่ยนกติกาเลยระหว่าง phase** — ข้อความต้องไม่อ้างว่าเปลี่ยน
+
+    ผูกกับสิ่งที่เครื่องมือรับประกันจริง (`PredictionTask.overrides` คืน `{}` เสมอ)
+    ไม่ใช่กับความจำของคนเขียน · ถ้าวันหนึ่งมีคนทำให้ config ต่างกันต่อ phase
+    เทสต์นี้จะเตือนว่าข้อความบนหน้าเว็บต้องแก้ตามด้วย
+    """
+    from tools.setup_competition import TASK_TYPES
+
+    task = TASK_TYPES["prediction"]
+    churn = REPO / "envs" / "cp462-tabular" / "tabular" / "configs" / "churn.yaml"
+    assert all(task.overrides(p, churn) == {} for p in PHASES), (
+        "โจทย์ทำนายเริ่มมี config ต่างกันต่อ phase แล้ว — ต้องแก้ PREDICTION_BLURB ด้วย"
+    )
+
+    for phase, text in prediction_blurbs().items():
+        for claim in ("ยากขึ้น", "ห้อง ", "step", "noise"):
+            assert claim not in text, f"{phase}: อ้างถึง {claim!r} ทั้งที่โจทย์ไม่เปลี่ยน"
+
+
+def test_the_page_picks_blurbs_by_task_type():
+    """ถ้าเลือกไม่ถูกชนิด CP462 จะเห็นข้อความเรื่องห้อง 10×10 ของ CP463"""
+    text = INDEX.read_text()
+    assert re.search(r"const BLURBS = \{[^}]*agent_env[^}]*prediction[^}]*\}", text), \
+        "ไม่พบตารางเลือกคำอธิบายตามชนิดโจทย์"
+    assert "BLURBS[cal.task_type]" in text, "ตอนวาดไม่ได้เลือกตามชนิดโจทย์"
+
+
+def test_the_api_sends_the_task_type_the_page_needs():
+    """ผูกสองฝั่ง — หน้าเว็บอ่าน `cal.task_type` ถ้า API ไม่ส่ง ทุกโจทย์จะได้ข้อความของ CP463"""
+    from core.api import create_app
+    from core.wiring import demo_arena
+    from fastapi.testclient import TestClient
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        arena, _ = demo_arena(Path(tmp))
+        client = TestClient(create_app(arena))
+        body = client.get("/api/competitions/cp463-vacuum-1-2026").json()
+    assert body["task_type"] == "agent_env"

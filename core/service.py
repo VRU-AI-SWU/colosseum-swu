@@ -98,9 +98,32 @@ class Arena:
     #: จะแต่งตั้งตัวเองถาวรและถอดคนอื่นออกได้ · ว่างไว้ = ไม่มีใครเป็นผู้สอน
     #: ซึ่งเป็นค่าเริ่มต้นที่ถูกต้อง (ปลอดภัยโดยปริยาย)
     staff_emails: frozenset[str] = frozenset()
+    #: `course_id` → อีเมลของผู้สอนเฉพาะวิชานั้น · มาจาก `ARENA_COURSE_STAFF_<COURSE_ID>`
+    #:
+    #: อยู่ใน environment ด้วยเหตุผลเดียวกับ `staff_emails` — ถ้าเก็บในฐานข้อมูล
+    #: แล้วแก้ผ่านหน้าเว็บได้ คนที่ยึดสิทธิ์ได้ครั้งเดียวจะแต่งตั้งตัวเองถาวร
+    #:
+    #: **คนใน `staff_emails` จัดการได้ทุกวิชาเสมอ** ไม่ต้องใส่ซ้ำที่นี่ — ไม่งั้น
+    #: ผู้ดูแลระบบจะล็อกตัวเองออกจากวิชาที่ตัวเองไม่ได้สอนแต่ต้องเข้าไปแก้ตอนมีปัญหา
+    course_staff: dict[str, frozenset[str]] = field(default_factory=dict)
 
     def is_staff(self, email: str) -> bool:
+        """ผู้สอนระดับทั้งระบบ — จัดการได้ทุกวิชา"""
         return bool(email) and email.strip().lower() in self.staff_emails
+
+    def can_manage_course(self, email: str, course_id: str) -> bool:
+        """แก้ค่าของวิชานี้ได้ไหม — ผู้สอนของวิชานั้น หรือผู้สอนระดับทั้งระบบ"""
+        if self.is_staff(email):
+            return True
+        if not email:
+            return False
+        return email.strip().lower() in self.course_staff.get(course_id, frozenset())
+
+    def managed_courses(self, email: str) -> list[str]:
+        """วิชาที่คนนี้จัดการได้ — หน้าเว็บใช้ตัดสินว่าจะแสดงแผงผู้สอนของวิชาไหน"""
+        if self.is_staff(email):
+            return sorted(self.store.courses)
+        return sorted(c for c in self.store.courses if self.can_manage_course(email, c))
 
     def rotate_user_token(self, *, user: User) -> User:
         """ออกโทเคนใหม่ให้คนคนเดียว
@@ -243,6 +266,41 @@ class Arena:
         if size is not None:
             self.set_max_team_size(course_id=course_id, size=size, actor_id=actor_id)
         return self.store.course(course_id)
+
+    def set_calendar(
+        self,
+        *,
+        slug: str,
+        ranges: dict[str, tuple[str, str]],
+        actor_id: str | None,
+    ) -> Competition:
+        """ตั้งปฏิทินของ competition ใหม่ — กติกาเรื่องวันมาจาก `core/calendar.py`
+
+        **คง `id` ของ competition ไว้เสมอ** — สร้างใหม่จะทำให้ run ที่ส่งไปแล้วกำพร้า
+
+        ⚠️ **ไม่ตรวจว่า run เก่ายังอยู่ในช่วงไหม** — ปล่อยให้ผู้เรียกเป็นคนเตือน
+        เพราะการเลื่อนปฏิทินหลังมีคนส่งงานแล้วเป็นการตัดสินใจของผู้สอน ไม่ใช่ข้อผิดพลาด
+        (งานที่หลุดออกนอกทุกช่วงจะถูก `phase_at` มองว่าไม่มี phase แล้วถอยไปใช้ 'main')
+        """
+        from core.calendar import PHASES, build_phases, day_range
+
+        competition = self._competition(slug)
+        parsed = {name: day_range(*ranges[name]) for name in PHASES if name in ranges}
+        # เก็บ `config_override` เดิมของแต่ละ phase ไว้ — ปฏิทินกับ config เป็นคนละเรื่อง
+        # ผู้สอนที่แค่เลื่อนวันต้องไม่เผลอล้างค่าที่ทำให้แต่ละ phase ยากต่างกัน
+        keep = {p.name: dict(p.config_override) for p in competition.phases}
+        phases = build_phases(parsed, overrides=keep)
+
+        competition.phases = phases
+        competition.opens_at = min(competition.opens_at, phases[0].starts_at)
+        competition.closes_at = phases[-1].ends_at
+        self.store.save_competition(competition)
+        self.store.record(
+            "competition.calendar_changed", "competition", competition.id,
+            actor_id=actor_id,
+            phases={name: list(ranges[name]) for name in PHASES if name in ranges},
+        )
+        return competition
 
     def set_max_team_size(self, *, course_id: str, size: int, actor_id: str | None) -> Course:
         """ผู้สอนเปลี่ยนขนาดทีมของวิชา — **ผู้เรียกต้องตรวจสิทธิ์มาก่อนแล้ว**
@@ -527,6 +585,8 @@ def build_arena(
     validators: dict[str, Callable] | None = None,
     *,
     db_path: Path | str | None = None,
+    staff_emails: frozenset[str] = frozenset(),
+    course_staff: dict[str, frozenset[str]] | None = None,
 ) -> Arena:
     """ประกอบ Arena — ถ้าให้ `db_path` มา สถานะจะอยู่รอดข้ามการรีสตาร์ท
 
@@ -550,4 +610,6 @@ def build_arena(
         queue=queue,
         artifacts=ArtifactStore(Path(root)),
         validators=dict(validators or {}),
+        staff_emails=staff_emails,
+        course_staff=dict(course_staff or {}),
     )
