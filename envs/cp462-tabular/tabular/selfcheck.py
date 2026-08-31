@@ -1,17 +1,32 @@
 """ตรวจว่าเครื่องนี้ให้ผลตรงกับตัวที่ใช้ตัดสินคะแนน
 
     python -m tabular.selfcheck
+    python -m tabular.selfcheck --data data.csv    # ตรวจไฟล์ที่ดาวน์โหลดมาด้วย
 
 **นี่คือสิ่งที่รับประกันว่าคะแนนที่วัดเองเทียบกับ leaderboard ได้ ไม่ใช่เลขเวอร์ชัน**
 บทเรียนตรงกับ `cp463-vacuum` — การตรึงเวอร์ชัน numpy ไม่ได้รับประกันอะไร เพราะ
-stream ของตัวสุ่มเปลี่ยนได้ภายใน minor version · ตัวที่จับได้จริงคือการเทียบ
-ลายนิ้วมือของข้อมูลและคะแนน baseline กับค่าที่ตรึงไว้
+stream ของตัวสุ่มเปลี่ยนได้ภายใน minor version · ตัวที่จับได้จริงคือการเทียบผล
+ที่คำนวณจริงกับค่าที่ตรึงไว้
+
+---
+
+⚠️ **สิ่งที่ตรวจเปลี่ยนไปแล้ว** — เดิมตรวจว่า "ข้อมูลที่เครื่องนี้ *สร้าง* ตรงกับ
+ของ grader ไหม" ซึ่งใช้ได้ตอนที่นิสิตสร้างข้อมูลเองจากเมล็ดที่แจก · ตอนนี้ข้อมูล
+เป็นไฟล์ที่ดาวน์โหลด ไม่มีอะไรให้สร้าง คำถามจึงเปลี่ยนเป็น
+
+    "เครื่องนี้ *คิดเลข* เหมือน grader ไหม"
+
+ซึ่งตรวจด้วย **ชุดตรวจคงที่** (probe) ที่ฝังมากับแพ็กเกจ ไม่ใช่ข้อมูลของโจทย์ใด
+โจทย์หนึ่ง · ดีกว่าเดิมสองอย่าง: ใช้ได้กับทุก competition ไม่ต้องแก้ตามโจทย์ และ
+มันตรวจ *เครื่องจักร* (การแบ่ง · การนับ · bootstrap) ซึ่งเป็นสิ่งที่พังจริงเวลา
+เวอร์ชันไม่ตรง ไม่ใช่ตรวจตัวเลขชุดเดียวที่บังเอิญตรงกันได้
 
 ไม่ต้องใช้ pytest — นิสิตรันคำสั่งเดียวแล้วอ่านผลได้ทันที
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -22,12 +37,37 @@ GOLDEN_PATH = Path(__file__).resolve().parent / "golden.json"
 #: คนละตัว · แต่ **ลายนิ้วมือของข้อมูลต้องตรงเป๊ะ** ไม่มีการยอมให้ต่าง
 SCORE_TOLERANCE = 1e-4
 
+#: ชุดตรวจคงที่ — ตัวเลขพวกนี้เป็นแค่ "ข้อมูลตัวอย่างที่ทำซ้ำได้" ไม่ใช่ข้อมูลของโจทย์
+#: **ห้ามเปลี่ยนโดยไม่ pin golden ใหม่** เพราะทุกค่าใน golden.json ผูกกับมัน
+PROBE = {"task": "churn", "seed": 20260101, "n": 3000,
+         "split_seed": 7, "student_ratio": 0.7, "grading_public_ratio": 0.5}
+
 GREEN, RED, YELLOW, DIM, OFF = "\033[32m", "\033[31m", "\033[33m", "\033[2m", "\033[0m"
 
 
 def _line(ok: bool | None, title: str, detail: str = "") -> None:
     mark = {True: f"{GREEN}✓{OFF}", False: f"{RED}✗{OFF}", None: f"{YELLOW}!{OFF}"}[ok]
     print(f"  {mark} {title}" + (f" {DIM}{detail}{OFF}" if detail else ""))
+
+
+def probe_dataset():
+    """ข้อมูลของชุดตรวจ — สร้างจากตัวสร้างที่ฝังมากับแพ็กเกจ"""
+    from tabular.generator import make
+
+    return make(PROBE["task"], seed=PROBE["seed"], n=PROBE["n"])
+
+
+def probe_split():
+    """สามกองของชุดตรวจ — เดินทางเดียวกับที่ grader ใช้แบ่งข้อมูลจริง"""
+    from tabular.splits import three_way
+
+    return three_way(
+        probe_dataset(),
+        kind="classification",
+        seed=PROBE["split_seed"],
+        student_ratio=PROBE["student_ratio"],
+        grading_public_ratio=PROBE["grading_public_ratio"],
+    )
 
 
 def check_versions() -> bool:
@@ -68,40 +108,32 @@ def check_pickle_runtime(golden: dict) -> bool:
     return True
 
 
-def check_data(golden: dict) -> bool:
-    """ข้อมูลที่เครื่องนี้สร้างได้ ต้องเหมือนของ grader ทุกบิต"""
-    from tabular.config import load
-    from tabular.dataset import all_parts
-    from tabular.generator import fingerprint
+def check_split(golden: dict) -> bool:
+    """การแบ่งข้อมูลบนเครื่องนี้ต้องเหมือนของ grader ทุกบิต
 
-    ok = True
-    for slug, want in golden["tasks"].items():
-        spec = load(slug)
-        if spec.config_hash != want["config_hash"]:
-            _line(False, f"config ของ {slug}",
-                  f"hash ไม่ตรง — ไฟล์ configs/{slug}.yaml ถูกแก้")
-            ok = False
-            continue
+    ข้อนี้จับ stream ของ `numpy.random.Generator` ที่เปลี่ยนข้ามเวอร์ชัน — ซึ่งเป็น
+    ความต่างที่มองไม่เห็นจากเลขเวอร์ชัน แต่ทำให้ทุกกองเลื่อนไปคนละแถว
+    """
+    from tabular.splits import PARTS, as_frame
+    from tabular.table import fingerprint
 
-        parts = all_parts(spec)
-        sizes = parts.sizes()
-        if sizes != want["sizes"]:
-            _line(False, f"ขนาดชุดข้อมูลของ {slug}", f"ได้ {sizes} ควรเป็น {want['sizes']}")
-            ok = False
-            continue
+    want = golden["probe"]
+    split = probe_split()
 
-        got = {name: fingerprint(getattr(parts, name)) for name in ("train", "val", "test")}
-        bad = [k for k in got if k in want and got[k] != want[k]]
-        if bad:
-            _line(False, f"ข้อมูลของ {slug}",
-                  f"{', '.join(bad)} ไม่ตรงกับ grader — ได้ {got} "
-                  f"ควรเป็น { {k: want[k] for k in got if k in want} }")
-            ok = False
-        else:
-            _line(True, f"ข้อมูลของ {slug}",
-                  f"train {sizes['train']} · val {sizes['val']} · test {sizes['test']} "
-                  "· ตรงกับ grader ทุกบิต")
-    return ok
+    sizes = split.sizes()
+    if sizes != want["sizes"]:
+        _line(False, "ขนาดของสามกองในชุดตรวจ", f"ได้ {sizes} ควรเป็น {want['sizes']}")
+        return False
+
+    got = {name: fingerprint(as_frame(getattr(split, name))) for name in PARTS}
+    bad = [k for k in got if got[k] != want["fingerprints"][k]]
+    if bad:
+        _line(False, "การแบ่งข้อมูลของชุดตรวจ",
+              f"{', '.join(bad)} ไม่ตรงกับ grader — ตัวสุ่มของ numpy บนเครื่องนี้ให้ผลคนละแบบ")
+        return False
+    _line(True, "การแบ่งข้อมูลของชุดตรวจ",
+          " · ".join(f"{k} {v}" for k, v in sizes.items()) + " · ตรงกับ grader ทุกบิต")
+    return True
 
 
 def _reference_pipeline(kind: str):
@@ -134,43 +166,65 @@ def _reference_pipeline(kind: str):
 def check_scores(golden: dict) -> bool:
     """**ตัวตัดสินจริง** — คะแนนที่วัดบนเครื่องนี้ต้องตรงกับที่ grader วัดไว้
 
-    วัดบน `test` ของนิสิตเอง ไม่ใช่ `test_public` — ชุดที่ใช้ตัดสินสร้างจากเมล็ดลับ
-    ที่ไม่ได้อยู่ในแพ็กเกจ · การเทียบต้องทำบนสิ่งที่ทั้งสองฝั่งคำนวณได้เหมือนกัน
-    ซึ่งก็เพียงพอ เพราะสิ่งที่ต้องพิสูจน์คือ "เครื่องนี้คิดเลขเหมือน grader ไหม"
-    ไม่ใช่ "เครื่องนี้เห็นชุดลับไหม"
+    ครอบทั้งการนับ (macro-F1 · R²) และ bootstrap ของช่วงความเชื่อมั่น ซึ่งเป็น
+    สองส่วนที่ผลต่างกันได้เงียบๆ เมื่อเวอร์ชันของ numpy/sklearn ไม่ตรง
     """
-    from tabular.config import load
-    from tabular.dataset import all_parts
     from tabular.metrics import score
 
-    ok = True
-    for slug, want in golden["tasks"].items():
-        spec = load(slug)
-        parts = all_parts(spec)
-        test = parts.test
-        trivial, strong = _reference_pipeline(spec.kind)
+    want = golden["probe"]["baselines"]
+    split = probe_split()
+    trivial, strong = _reference_pipeline("classification")
 
-        got = {}
-        for name, pipe in (("trivial", trivial), ("strong", strong)):
-            pipe.fit(parts.train.X, parts.train.y)
-            got[name] = score(
-                test.y, pipe.predict(test.X), kind=spec.kind, primary=spec.primary,
-                seed=spec.bootstrap_seed, labels=spec.labels or None,
-            ).primary
+    got = {}
+    for name, pipe in (("trivial", trivial), ("strong", strong)):
+        pipe.fit(split.student.X, split.student.y)
+        got[name] = score(
+            split.test_public.y, pipe.predict(split.test_public.X),
+            kind="classification", primary="macro_f1",
+            seed=PROBE["split_seed"], labels=[0, 1],
+        ).primary
 
-        off = {k: (got[k], v) for k, v in want["baselines"].items()
-               if abs(got[k] - v) > SCORE_TOLERANCE}
-        if off:
-            _line(False, f"คะแนน baseline ของ {slug}",
-                  " · ".join(f"{k}: ได้ {a:.6f} ควรเป็น {b:.6f}" for k, (a, b) in off.items()))
-            ok = False
-        else:
-            _line(True, f"คะแนน baseline ของ {slug}",
-                  " · ".join(f"{k} {v:+.4f}" for k, v in got.items()) + f" ({spec.primary})")
-    return ok
+    off = {k: (got[k], v) for k, v in want.items() if abs(got[k] - v) > SCORE_TOLERANCE}
+    if off:
+        _line(False, "คะแนน baseline ของชุดตรวจ",
+              " · ".join(f"{k}: ได้ {a:.6f} ควรเป็น {b:.6f}" for k, (a, b) in off.items()))
+        return False
+    _line(True, "คะแนน baseline ของชุดตรวจ",
+          " · ".join(f"{k} {v:+.4f}" for k, v in got.items()) + " (macro_f1)")
+    return True
 
 
-def main() -> int:
+def check_data_file(path: Path) -> bool:
+    """รายงานลายนิ้วมือของไฟล์ที่ดาวน์โหลดมา — **เทียบกับที่หน้าโจทย์บอกไว้เอง**
+
+    ระบบยืนยันให้ไม่ได้ว่าไฟล์นี้ใช่ของ competition ไหน เพราะแพ็กเกจนี้ไม่รู้จัก
+    competition · สิ่งที่ทำได้คือบอกค่าที่ตรวจสอบได้ แล้วให้เทียบกับหน้าโจทย์
+    """
+    import hashlib
+
+    import pandas as pd
+
+    if not path.is_file():
+        _line(False, "ไฟล์ข้อมูล", f"ไม่พบ {path}")
+        return False
+    blob = path.read_bytes()
+    digest = "sha256:" + hashlib.sha256(blob).hexdigest()
+    try:
+        frame = pd.read_csv(path)
+    except Exception as exc:
+        _line(False, "ไฟล์ข้อมูล", f"อ่านเป็น CSV ไม่ได้ — {exc}")
+        return False
+    _line(True, f"ไฟล์ {path.name}",
+          f"{len(frame)} แถว · {len(frame.columns)} คอลัมน์ · {digest[:23]}…")
+    print(f"    {DIM}เทียบเลขนี้กับที่หน้าโจทย์บอกไว้ — ถ้าไม่ตรง แปลว่าโหลดผิดไฟล์หรือไฟล์เสีย{OFF}")
+    return True
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="ตรวจว่าเครื่องนี้ให้ผลตรงกับตัวที่ใช้ตัดสิน")
+    ap.add_argument("--data", type=Path, help="ไฟล์ CSV ที่ดาวน์โหลดมาจากหน้าโจทย์")
+    args = ap.parse_args(argv)
+
     if not GOLDEN_PATH.is_file():
         print(f"{RED}✗ ไม่พบ {GOLDEN_PATH}{OFF} — แพ็กเกจติดตั้งไม่ครบ", file=sys.stderr)
         return 1
@@ -186,9 +240,11 @@ def main() -> int:
     results = [
         check_versions(),
         check_pickle_runtime(golden),
-        check_data(golden),
+        check_split(golden),
         check_scores(golden),
     ]
+    if args.data is not None:
+        results.append(check_data_file(args.data))
 
     if all(results):
         print(f"\n{GREEN}✓ ผ่านครบทุกข้อ{OFF} — คะแนนที่คุณวัดเองเทียบกับ leaderboard ได้ตรงๆ")

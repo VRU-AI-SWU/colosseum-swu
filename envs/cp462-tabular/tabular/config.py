@@ -5,9 +5,27 @@
 `cp463-vacuum` ทำ เพราะการเปลี่ยน config เงียบๆ กลางเทอมคือการเปลี่ยนกติกา
 โดยที่ leaderboard ยังดูเหมือนเทียบกันได้
 
-**ทุกเมล็ดแยกกันโดยตั้งใจ** — `data_seed` / `split_seed` / `bootstrap_seed`
-ถ้าใช้เมล็ดเดียวกัน การเปลี่ยนอย่างหนึ่งจะลากอย่างอื่นเปลี่ยนตามโดยไม่ตั้งใจ
-เช่นแก้จำนวน bootstrap แล้วข้อมูลเปลี่ยนทั้งชุด
+**`dataset` เป็นลายนิ้วมือของเนื้อไฟล์ ไม่ใช่ชื่อไฟล์** จึงอยู่ใน hash ด้วย —
+การสลับไฟล์ข้อมูลกลางเทอมเปลี่ยน hash เองโดยอัตโนมัติ ไม่มีทางทำเงียบๆ ได้
+
+---
+
+**ข้อมูลถูกแบ่งสามกอง ไม่ใช่สอง** — และผู้สอนคุมด้วยตัวเลขเดี่ยวสองตัวที่ซ้อนกัน
+ไม่ใช่สามตัวที่ต้องรวมกันได้ 1 (ซึ่งกรอกผิดได้และผิดบ่อย)
+
+    ทั้งไฟล์
+    ├── student_ratio ────────────► แจกนิสิต — เขาแบ่ง train/val เองตามใจ
+    └── ที่เหลือ = ชุดที่ใช้ตัดสิน
+        ├── grading_public_ratio ─► leaderboard ระหว่างเทอม
+        └── ที่เหลือ ─────────────► ตัดสินรอบสุดท้าย
+
+**ทำไมกองสุดท้ายต้องมี** — ถ้าชุดที่ใช้ตัดสินมีกองเดียว ทีมที่ส่งวันละหลายครั้ง
+ตลอดเทอมจะค่อยๆ จูนเข้าหากองนั้นจนคะแนนสูงเกินความสามารถจริง แล้วอันดับสุดท้าย
+จะวัด "ความสามารถในการเดา leaderboard" ไม่ใช่ความสามารถของโมเดล (template §1.1)
+
+**นิสิตแบ่ง train/val/test เอง** — ระบบไม่ยุ่ง · หน้าที่ของระบบคือรับ pipeline
+กับโมเดลเข้ามาแล้ววัดกับข้อมูลที่นิสิตไม่เคยเห็น · `split_seed` ในนี้คุมการแบ่ง
+*สามกองข้างบน* เท่านั้น ไม่เกี่ยวกับการแบ่งฝั่งนิสิตซึ่งเขาเลือกเมล็ดเอง
 """
 
 from __future__ import annotations
@@ -20,8 +38,6 @@ from typing import Any
 
 import yaml
 
-CONFIG_DIR = Path(__file__).resolve().parent / "configs"
-
 KINDS = ("classification", "regression")
 
 #: คะแนนหลักที่ใช้ได้ต่อชนิดโจทย์ — ทุกตัว "มากกว่าดีกว่า"
@@ -29,6 +45,10 @@ PRIMARY_BY_KIND = {
     "classification": ("macro_f1", "accuracy"),
     "regression": ("r2", "neg_rmse", "neg_mae"),
 }
+
+#: ขอบเขตของสัดส่วนที่แจกนิสิต — กว้างพอให้เลือกได้ แต่ไม่ถึงขั้นที่กองใดกองหนึ่งว่าง
+MIN_STUDENT_RATIO = 0.2
+MAX_STUDENT_RATIO = 0.9
 
 
 class ConfigError(Exception):
@@ -39,50 +59,29 @@ class ConfigError(Exception):
 class TaskSpec:
     """โจทย์หนึ่งอัน — อ่านจาก YAML แล้วตรึงไว้ทั้งเทอม"""
 
-    slug: str
-    task: str          # ชื่อใน `generator.TASKS`
     title: str
     kind: str
     primary: str
-    #: จำนวนแถวของ **ชุดที่แจกนิสิต** — ชุดที่ใช้ตัดสินใช้ `grading_rows`
-    n_rows: int
-    data_seed: int
+    #: ลายนิ้วมือของไฟล์ข้อมูลในคลัง (`tabular.store`) — `sha256:...`
+    dataset: str
+    #: ชื่อคอลัมน์ที่เป็นเฉลย
+    target: str
+    #: เมล็ดของการแบ่งสามกอง — **ไม่ใช่เมล็ดที่นิสิตใช้แบ่ง train/val ของตัวเอง**
     split_seed: int
     bootstrap_seed: int
-    #: train / val / test ของนิสิต — **ทุกส่วนนิสิตมีอยู่แล้ว**
-    ratios: tuple[float, float, float]
-    #: ขนาดของชุดที่ใช้ตัดสิน · ประกาศต่อสาธารณะได้ — รู้ขนาดไม่ได้ช่วยให้เดาเฉลย
-    grading_rows: int = 0
-    #: สัดส่วนที่เป็น `test_public` ที่เหลือเป็น `test_private`
-    grading_public_ratio: float = 0.4
+    #: สัดส่วนของทั้งไฟล์ที่แจกนิสิต — ที่เหลือคือชุดที่ใช้ตัดสิน
+    student_ratio: float = 0.7
+    #: ในชุดที่ใช้ตัดสิน สัดส่วนที่โชว์บน leaderboard ระหว่างเทอม
+    #: ที่เหลือซ่อนไว้ตัดสินรอบสุดท้าย · **ไม่ใช่สัดส่วนของทั้งไฟล์**
+    grading_public_ratio: float = 0.5
+    #: คอลัมน์ที่ตัดทิ้งก่อนถึงมือนิสิต — id ของแถว ชื่อคน วันที่ดึงข้อมูล ฯลฯ
+    drop: list[str] = field(default_factory=list)
     #: ลำดับของคลาสที่ตรึงไว้ — classification เท่านั้น · **ต้องไม่เปลี่ยนกลางเทอม**
     #: เพราะ confusion matrix กับ per-class F1 อ้างลำดับนี้
+    #: หน้าเว็บเติมให้จากไฟล์ที่อัปโหลด ผู้สอนไม่ต้องพิมพ์เอง
     labels: list[Any] = field(default_factory=list)
 
-    #: 🔒 **เมล็ดของชุดที่ใช้ตัดสิน — ไม่มีในไฟล์ที่แจก และไม่เข้า `config_hash`**
-    #:
-    #: ฝั่ง trusted ฉีดค่านี้เข้ามาตอนโหลด (`tabular.arena.PLUGIN.load_spec`)
-    #: โดยอ่านจาก `ARENA_SECRETS` · ถ้าเป็น `None` แปลว่ากำลังอยู่ฝั่งนิสิต
-    #: แล้ว `grading_data()` จะปฏิเสธพร้อมบอกว่าทำไม
-    #:
-    #: **ไม่เข้า hash โดยตั้งใจ** — `config_hash` คือสัญญาเรื่อง *ข้อมูลของนิสิต
-    #: และวิธีให้คะแนน* ซึ่ง `selfcheck` บนเครื่องนิสิตต้องคำนวณให้ตรงกับของ grader ได้
-    #: ถ้าเมล็ดลับเข้า hash ด้วย ค่าสองฝั่งจะไม่มีทางตรงกันเลย · การกันเมล็ดลับ
-    #: เปลี่ยนกลางเทอมใช้วิธีเดียวกับ CP463: มันอยู่ใน repo ส่วนตัวที่มีประวัติการแก้
-    grading_seed: int | None = None
-
     def __post_init__(self) -> None:
-        # ชื่อชุดข้อมูลต้องมีอยู่จริง — **ตรวจตอนโหลด ไม่ใช่ตอนให้คะแนน**
-        # เดิมไม่ได้ตรวจเลย ชื่อที่พิมพ์ผิดจึงผ่านทุกด่าน ไปพังตอน `generator.make()`
-        # ซึ่งเป็นตอนที่นิสิตส่งงานเข้ามาแล้ว · import ในเมธอดเพื่อไม่ให้ `config`
-        # ต้องพึ่ง pandas/numpy ตอน import ซึ่ง `selfcheck` และเครื่องมืออื่นไม่ต้องใช้
-        from tabular.generator import TASKS
-
-        if self.task not in TASKS:
-            raise ConfigError(
-                f"ไม่รู้จักชุดข้อมูล {self.task!r} — ที่มีคือ {sorted(TASKS)}\n"
-                "  ชื่อนี้คือ*ชุดข้อมูล* ไม่ใช่ชนิดของโจทย์ (ชนิดอยู่ที่ `kind`)"
-            )
         if self.kind not in KINDS:
             raise ConfigError(f"kind ต้องเป็น {KINDS} — ได้ {self.kind!r}")
         allowed = PRIMARY_BY_KIND[self.kind]
@@ -91,36 +90,47 @@ class TaskSpec:
                 f"{self.kind} ใช้คะแนนหลัก {self.primary!r} ไม่ได้ — ที่ใช้ได้คือ {allowed}\n"
                 "  ทุกตัวเป็นแบบ 'มากกว่าดีกว่า' ตามที่ leaderboard ต้องการ"
             )
+        if not self.target:
+            raise ConfigError("ต้องบอกว่าคอลัมน์ไหนเป็นเฉลย (`target`)")
+        if self.target in self.drop:
+            raise ConfigError(
+                f"คอลัมน์เฉลย {self.target!r} อยู่ในรายการที่ตัดทิ้งด้วย — เลือกอย่างใดอย่างหนึ่ง"
+            )
         if self.kind == "classification" and not self.labels:
             raise ConfigError("classification ต้องประกาศ `labels` เพื่อตรึงลำดับของคลาส")
         if self.kind == "regression" and self.labels:
             raise ConfigError("regression ต้องไม่มี `labels`")
-        if len(self.ratios) != 3:
-            raise ConfigError(f"ratios ต้องมี 3 ค่า (train/val/test ของนิสิต) — ได้ {len(self.ratios)}")
-        if abs(sum(self.ratios) - 1.0) > 1e-9:
-            raise ConfigError(f"ratios ต้องรวมกันได้ 1.0 — ได้ {sum(self.ratios)}")
-        if self.n_rows < 100:
-            raise ConfigError(f"ข้อมูล {self.n_rows} แถวน้อยเกินไปสำหรับการแบ่งสามส่วน")
-        if self.grading_rows < 100:
+        if not MIN_STUDENT_RATIO <= self.student_ratio <= MAX_STUDENT_RATIO:
             raise ConfigError(
-                f"ชุดที่ใช้ตัดสิน {self.grading_rows} แถวน้อยเกินไป — "
-                "ช่วงความเชื่อมั่นจะกว้างจนอันดับไม่มีความหมาย"
+                f"สัดส่วนที่แจกนิสิตต้องอยู่ระหว่าง {MIN_STUDENT_RATIO} กับ "
+                f"{MAX_STUDENT_RATIO} — ได้ {self.student_ratio}"
             )
         if not 0.0 < self.grading_public_ratio < 1.0:
             raise ConfigError(
                 f"grading_public_ratio ต้องอยู่ระหว่าง 0 กับ 1 — ได้ {self.grading_public_ratio}"
             )
+        # `dataset` ตรวจแค่รูปแบบตรงนี้ — การมีอยู่จริงของไฟล์ตรวจที่ `store`
+        # เพราะโมดูลนี้ต้องโหลดได้บนเครื่องที่ไม่มีคลัง (เช่นตอนคำนวณ hash)
+        from tabular.store import DIGEST_RE
+
+        if not DIGEST_RE.match(self.dataset):
+            raise ConfigError(
+                f"`dataset` ต้องเป็นลายนิ้วมือของไฟล์ในคลัง (sha256:<64 หลัก>) — ได้ {self.dataset!r}"
+            )
+
+    @property
+    def grading_ratio(self) -> float:
+        """สัดส่วนของทั้งไฟล์ที่เป็นชุดที่ใช้ตัดสิน"""
+        return 1.0 - self.student_ratio
 
     def normalized(self) -> dict:
         """รูปแบบมาตรฐานสำหรับคำนวณ hash — เรียงคีย์และแปลง tuple เป็น list"""
         data = asdict(self)
-        data["ratios"] = list(self.ratios)
         data["labels"] = [str(label) for label in self.labels]
+        data["drop"] = sorted(str(name) for name in self.drop)
         # `title` เป็นข้อความให้คนอ่าน ไม่กระทบการให้คะแนน — แก้ได้โดยไม่ทำให้
         # คะแนนเก่าเทียบไม่ได้ จึงไม่นับเข้า hash
         data.pop("title")
-        # 🔒 เมล็ดลับต้องไม่เข้า hash — เหตุผลอยู่ที่ฟิลด์นั้น
-        data.pop("grading_seed")
         return data
 
     @property
@@ -139,31 +149,26 @@ class TaskSpec:
             if key not in data:
                 raise ConfigError(f"ไม่รู้จักฟิลด์ {key!r} ใน TaskSpec")
             data[key] = value
-        data["ratios"] = tuple(data["ratios"])
         return TaskSpec(**data)
 
 
 def load_config(path: str | Path) -> TaskSpec:
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    return from_mapping(raw, source=str(path))
+
+
+def from_mapping(raw: Any, *, source: str = "config") -> TaskSpec:
+    """สร้าง spec จาก mapping — ใช้กับทั้งไฟล์ YAML และ config ที่เก็บในฐานข้อมูล"""
     if not isinstance(raw, dict):
-        raise ConfigError(f"{path} ต้องเป็น mapping ที่ระดับบนสุด")
+        raise ConfigError(f"{source} ต้องเป็น mapping ที่ระดับบนสุด")
     unknown = sorted(set(raw) - set(TaskSpec.__dataclass_fields__))
     if unknown:
-        raise ConfigError(f"{path}: ไม่รู้จักฟิลด์ {unknown}")
-    raw["ratios"] = tuple(raw.get("ratios", ()))
+        raise ConfigError(
+            f"{source}: ไม่รู้จักฟิลด์ {unknown}\n"
+            "  ถ้ามาจากโจทย์ที่สร้างก่อนเดือน ส.ค. 2026 โครงของ config เปลี่ยนไปแล้ว —\n"
+            "  นิสิตแบ่ง train/val/test เอง ระบบจึงไม่มี `ratios` `n_rows` `data_seed` อีก"
+        )
     try:
         return TaskSpec(**raw)
     except TypeError as exc:
-        raise ConfigError(f"{path}: {exc}") from exc
-
-
-def spec_path(slug: str) -> Path:
-    path = CONFIG_DIR / f"{slug}.yaml"
-    if not path.is_file():
-        available = sorted(p.stem for p in CONFIG_DIR.glob("*.yaml"))
-        raise ConfigError(f"ไม่รู้จักโจทย์ {slug!r} — ที่มีคือ {available}")
-    return path
-
-
-def load(slug: str) -> TaskSpec:
-    return load_config(spec_path(slug))
+        raise ConfigError(f"{source}: {exc}") from exc

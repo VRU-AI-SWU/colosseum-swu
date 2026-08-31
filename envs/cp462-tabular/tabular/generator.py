@@ -1,8 +1,13 @@
-"""สร้างชุดข้อมูลสังเคราะห์ที่ทำซ้ำได้ทุกบิต — template §1
+"""สร้างไฟล์ CSV ตัวอย่างที่ทำซ้ำได้ทุกบิต — **เครื่องมือ ไม่ใช่แหล่งข้อมูลของการให้คะแนน**
 
-**ทำไมเป็นข้อมูลสังเคราะห์** — วิชายังไม่มีชุดข้อมูลจริง และการรอชุดจริงแปลว่า
-ทั้ง pipeline ทดสอบไม่ได้เลย · ข้อมูลสังเคราะห์ทำให้เขียน runner, metric และ
-starter kit ได้ครบก่อน แล้วค่อยสลับเป็นของจริงโดยไม่ต้องแก้อะไรนอกจาก loader
+⚠️ **บทบาทของไฟล์นี้เปลี่ยนไปแล้ว** — เดิมมันคือแหล่งข้อมูลจริงของโจทย์ นิสิต
+เรียก `make()` บนเครื่องตัวเองเพื่อสร้างชุดเดียวกับที่ grader ใช้ · ตอนนี้
+การให้คะแนนอ่านจาก **ไฟล์ในคลัง** (`tabular.store`) เสมอ และโมดูลนี้เหลือหน้าที่
+เดียวคือปั๊มไฟล์ตัวอย่างให้ผู้สอนอัปโหลด ตอนที่วิชายังไม่มีชุดข้อมูลจริง
+
+เหตุผลที่ต้องเปลี่ยน: ถ้าข้อมูลสร้างจากเมล็ดได้ ใครที่รู้เมล็ดก็สร้างเฉลยของ
+ชุดที่ใช้ตัดสินได้ทั้งชุด — เคยเกิดขึ้นจริงและทำคะแนนได้ 1.0000 · ความลับที่
+ตั้งอยู่บนไฟล์ที่ไม่เคยถูกส่งออกไปแข็งแรงกว่าความลับที่ตั้งอยู่บนตัวเลข
 
 **ข้อมูลถูกออกแบบให้บังคับทักษะที่วิชาอยากสอน** ไม่ใช่แค่สุ่มตัวเลขมั่วๆ
 
@@ -22,11 +27,10 @@ starter kit ได้ครบก่อน แล้วค่อยสลับ�
 
 from __future__ import annotations
 
-import hashlib
-from dataclasses import dataclass
-
 import numpy as np
 import pandas as pd
+
+from tabular.table import Dataset, fingerprint as _fingerprint
 
 #: หมวดหมู่ของแผน — ตัวสุดท้ายพบน้อยมากโดยตั้งใจ (ดูตารางในหัวไฟล์)
 PLANS = ("basic", "standard", "premium", "legacy")
@@ -36,31 +40,6 @@ REGIONS = ("north", "central", "south", "east", "west")
 
 #: สัดส่วนค่าว่างของแต่ละคอลัมน์ที่ยอมให้ว่างได้
 MISSING_RATE = {"tenure_months": 0.06, "monthly_spend": 0.04, "plan": 0.03}
-
-
-@dataclass(frozen=True)
-class Dataset:
-    """ข้อมูลหนึ่งชุดพร้อมเป้าหมาย — `X` กับ `y` แยกกันเสมอ
-
-    แยกเพราะ **`y` ของชุดที่ใช้ตัดสินไม่เคยเข้าไปใน sandbox** (template §5)
-    การเก็บรวมใน DataFrame เดียวทำให้เผลอส่งเข้าไปทั้งก้อนได้ง่ายเกินไป
-    """
-
-    X: pd.DataFrame
-    y: pd.Series
-
-    def __len__(self) -> int:
-        return len(self.X)
-
-
-def _fingerprint(frame: pd.DataFrame | pd.Series) -> str:
-    """ลายนิ้วมือของข้อมูล — ใช้ตรวจว่าเครื่องนิสิตได้ข้อมูลชุดเดียวกับ grader
-
-    ใช้ CSV เป็นตัวกลางเพราะมันเสถียรข้ามเวอร์ชัน pandas มากกว่า pickle/parquet
-    และตรึง `float_format` เพราะ repr ของ float เปลี่ยนได้ระหว่างเวอร์ชัน
-    """
-    blob = frame.to_csv(index=False, float_format="%.10g").encode("utf-8")
-    return "sha256:" + hashlib.sha256(blob).hexdigest()[:16]
 
 
 def _base_frame(rng: np.random.Generator, n: int, id_offset: int = 0) -> pd.DataFrame:
@@ -203,3 +182,14 @@ def make(task: str, seed: int, n: int, id_offset: int = 0) -> Dataset:
 def fingerprint(dataset: Dataset) -> str:
     """ลายนิ้วมือของทั้งชุด — `selfcheck` เอาไปเทียบกับค่า golden"""
     return _fingerprint(pd.concat([dataset.X, dataset.y], axis=1))
+
+
+def sample_csv(task: str, *, seed: int, n: int) -> bytes:
+    """ไฟล์ตัวอย่างพร้อมอัปโหลด — ฟีเจอร์กับเฉลยรวมเป็นตารางเดียว
+
+    นี่คือทางออกเดียวของโมดูลนี้ที่ระบบจริงใช้ · ผลลัพธ์ต้องเดินทางเดียวกับ
+    ไฟล์ที่ผู้สอนอัปโหลดเองทุกประการ — ถ้ามันพิเศษกว่า เส้นทางที่ทดสอบบ่อยที่สุด
+    จะไม่ใช่เส้นทางที่ผู้สอนใช้จริง
+    """
+    data = make(task, seed=seed, n=n)
+    return pd.concat([data.X, data.y], axis=1).to_csv(index=False).encode("utf-8")

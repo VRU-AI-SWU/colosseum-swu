@@ -1,244 +1,261 @@
-"""TaskSpec, การเข้าถึงข้อมูล และ starter kit ที่แจกจริง
+"""config · คลังชุดข้อมูล · เส้นแบ่งความไว้ใจ
 
-สองเรื่องที่ผิดแล้วเจ็บที่สุด
+**สองอย่างที่พังแล้วการแข่งจบทันที**
 
-  · **เฉลยหลุดเข้า sandbox** — ถ้า `open_data` คืนชุดที่ใช้ตัดสินมาด้วย
-    ทั้งการแข่งจบทันทีโดยไม่มีใครรู้
-  · **`config_hash` ไม่นิ่ง** — hash ที่เปลี่ยนเองแปลว่าคะแนนเก่าเทียบไม่ได้
-    ทั้งที่ไม่มีใครแก้อะไร
+  · **เฉลยหลุดไปกับไฟล์ที่แจก** — ถ้าไฟล์ที่นิสิตดาวน์โหลดมีแถวของชุดที่ใช้ตัดสิน
+  · **คลังอ่านได้จากเครื่องนิสิต** — ถ้า `store.read` ทำงานได้โดยไม่มีคลังจริง
+
+เคยพังมาแล้วในรูปแบบก่อนหน้า: ทั้งห้าส่วนมาจาก dataset ชุดเดียวที่สร้างจากเมล็ด
+ในไฟล์ที่แจกนิสิต ทำให้คำนวณเฉลยเองได้ครบทุกแถว (macro-F1 = 1.0000) · โครง
+เปลี่ยนไปแล้วแต่คำถามที่ต้องตอบให้ได้ทุกครั้งยังเป็นข้อเดิม
 """
 
 from __future__ import annotations
 
-import subprocess
-import sys
-from pathlib import Path
-
 import pytest
 
-from tabular.config import CONFIG_DIR, ConfigError, TaskSpec, load, load_config
-from tabular.dataset import all_parts, features_only, grading_data, open_data
-from tabular.secrets import FALLBACK_SEED, GradingSeedUnavailable
+from tabular import store
+from tabular.config import ConfigError, TaskSpec, from_mapping
+from tabular.dataset import grading_data, parts, student_csv, to_dataset
+from tabular.splits import as_frame
+from tabular.store import DatasetError
 
-SLUGS = sorted(p.stem for p in CONFIG_DIR.glob("*.yaml"))
-STARTER = Path(__file__).resolve().parent.parent / "tabular" / "starter"
 
-
-def base(**kw) -> TaskSpec:
-    args = dict(
-        slug="t", task="churn", title="ชื่อ", kind="classification", primary="macro_f1",
-        n_rows=1000, data_seed=1, split_seed=2, bootstrap_seed=3,
-        ratios=(0.6, 0.15, 0.25), labels=[0, 1],
-        grading_rows=500, grading_public_ratio=0.4,
+def _spec(**kw) -> TaskSpec:
+    base = dict(
+        title="ทดสอบ", kind="classification", primary="macro_f1",
+        dataset="sha256:" + "ab" * 32, target="churned",
+        split_seed=1, bootstrap_seed=2, labels=[0, 1],
     )
-    args.update(kw)
-    return TaskSpec(**args)
+    base.update(kw)
+    return TaskSpec(**base)
 
 
-# ── config ที่แจกจริง ───────────────────────────────────────────────
+# ── คลังชุดข้อมูล ─────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("slug", SLUGS)
-def test_shipped_configs_load(slug):
-    spec = load(slug)
-    assert spec.slug == slug
-    assert spec.config_hash.startswith("sha256:")
+def test_the_same_file_uploaded_twice_gets_the_same_id(sample_csv, datasets_root):
+    """อ้างด้วยลายนิ้วมือของเนื้อไฟล์ — อัปโหลดซ้ำจึงไม่เกิดของซ้ำในคลัง"""
+    first, second = store.put(sample_csv["churn"]), store.put(sample_csv["churn"])
+    assert first == second
+    assert len(list(datasets_root.glob(f"{first.split(':')[1]}.csv"))) == 1
 
 
-def test_both_kinds_are_covered():
-    """โจทย์ที่แจกต้องครอบทั้งสองชนิด — ไม่งั้นทางของ regression ไม่เคยถูกรัน"""
-    assert {load(s).kind for s in SLUGS} == {"classification", "regression"}
+def test_changing_one_byte_changes_the_id(sample_csv):
+    other = sample_csv["churn"].replace(b"churned", b"CHURNED", 1)
+    assert store.digest_of(other) != store.digest_of(sample_csv["churn"])
 
 
-# ── config_hash คือสัญญา ───────────────────────────────────────────
+@pytest.mark.parametrize("bad", [
+    "churn", "sha256:zz", "../../etc/passwd", "sha256:" + "g" * 64,
+    "sha256:" + "ab" * 32 + "/../../etc/passwd",
+])
+def test_a_malformed_id_never_reaches_the_filesystem(bad):
+    """`dataset` แก้ได้ผ่านหน้าเว็บ — ค่าที่มี `../` ต้องไม่พาไปอ่านไฟล์นอกคลัง"""
+    with pytest.raises(DatasetError, match="ผิดรูปแบบ"):
+        store.path_of(bad)
 
 
-def test_hash_is_stable_across_calls():
-    assert base().config_hash == base().config_hash
+def test_a_file_that_is_not_csv_is_refused():
+    with pytest.raises(DatasetError, match="CSV"):
+        store.inspect(b"\x00\x01\x02\xff\xfe not a csv at all")
 
 
-def test_title_does_not_change_the_hash():
-    """ชื่อเป็นข้อความให้คนอ่าน — แก้ได้โดยไม่ทำให้คะแนนเก่าเทียบไม่ได้"""
-    assert base().config_hash == base(title="ชื่อใหม่").config_hash
+def test_a_file_with_too_few_rows_is_refused():
+    blob = b"a,b,y\n" + b"1,2,0\n" * 50
+    with pytest.raises(DatasetError, match="น้อยกว่าขั้นต่ำ"):
+        store.inspect(blob)
 
 
-@pytest.mark.parametrize(
-    "field,value",
-    [
-        ("ratios", (0.5, 0.2, 0.3)),
-        ("grading_rows", 800),
-        ("grading_public_ratio", 0.5),
-        ("data_seed", 999),
-        ("split_seed", 999),
-        ("bootstrap_seed", 999),
-        ("n_rows", 2000),
-        ("primary", "accuracy"),
-        ("labels", [1, 0]),          # ลำดับคลาสมีผลต่อ confusion matrix
-    ],
-)
-def test_anything_that_affects_scoring_changes_the_hash(field, value):
-    assert base().config_hash != base(**{field: value}).config_hash
+def test_duplicate_column_names_are_refused():
+    blob = b"a,a,y\n" + b"1,2,0\n" * 400
+    with pytest.raises(DatasetError, match="ซ้ำ"):
+        store.inspect(blob)
 
 
-# ── config ที่ผิดต้องล้มตั้งแต่โหลด ────────────────────────────────
+def test_a_stray_index_column_is_named_and_refused():
+    """ไฟล์ที่ export มาโดยติด index — บอกวิธีแก้ ไม่ใช่แค่บอกว่าผิด"""
+    blob = b",a,y\n" + b"0,1,0\n" * 400
+    with pytest.raises(DatasetError, match="index=False"):
+        store.inspect(blob)
 
 
-@pytest.mark.parametrize(
-    "kw,match",
-    [
-        ({"kind": "clustering"}, "kind"),
-        ({"primary": "roc_auc"}, "ที่ใช้ได้คือ"),
-        ({"kind": "regression", "primary": "macro_f1"}, "ที่ใช้ได้คือ"),
-        ({"labels": []}, "labels"),
-        ({"kind": "regression", "primary": "r2", "labels": [0, 1]}, "ต้องไม่มี"),
-        ({"ratios": (0.6, 0.4)}, "3 ค่า"),
-        ({"ratios": (0.6, 0.2, 0.1)}, "1.0"),
-        ({"n_rows": 50}, "น้อยเกินไป"),
-        ({"grading_rows": 50}, "น้อยเกินไป"),
-        ({"grading_public_ratio": 1.0}, "ระหว่าง 0 กับ 1"),
-    ],
-)
-def test_bad_config_fails_at_load_not_at_scoring(kw, match):
-    with pytest.raises(ConfigError, match=match):
-        base(**kw)
+def test_the_profile_lists_the_values_of_columns_that_could_be_classes(sample_csv):
+    """หน้าเว็บใช้ค่านี้เติม `labels` ให้ — ผู้สอนจึงไม่ต้องพิมพ์เอง"""
+    _, profile = store.inspect(sample_csv["churn"])
+
+    assert profile.column("churned").values == [0, 1]
+    assert profile.column("plan").values == ["basic", "legacy", "premium", "standard"]
+    # `account_id` ไม่ซ้ำเลย — ไม่ใช่คลาส และต้องไม่ถูกเสนอเป็นคลาส
+    assert profile.column("account_id").values is None
+    assert profile.column("monthly_spend").dtype == "numeric"
 
 
-def test_unknown_field_in_yaml_is_rejected(tmp_path):
-    """พิมพ์ชื่อฟิลด์ผิดต้องรู้ทันที ไม่ใช่ถูกเมินแล้วใช้ค่าเริ่มต้นเงียบๆ"""
-    path = tmp_path / "bad.yaml"
-    path.write_text("slug: x\ntyop: 1\n", encoding="utf-8")
-    with pytest.raises(ConfigError, match="typo|tyop"):
-        load_config(path)
+def test_the_profile_values_are_plain_python_types(sample_csv):
+    """ค่าจาก numpy เขียนลง YAML ไม่ได้ — `labels` ที่เก็บไปจะอ่านกลับไม่ได้"""
+    _, profile = store.inspect(sample_csv["churn"])
+    for value in profile.column("churned").values:
+        assert type(value) in (int, float, str, bool), type(value)
 
 
-def test_unknown_slug_lists_what_exists():
-    with pytest.raises(ConfigError, match="ที่มีคือ"):
-        load("ไม่มีจริง")
+# ── TaskSpec ──────────────────────────────────────────────────────────────
 
 
-def test_replace_rejects_unknown_fields():
-    with pytest.raises(ConfigError, match="ไม่รู้จักฟิลด์"):
-        base().replace(nope=1)
+@pytest.mark.parametrize("field, value, message", [
+    ("kind", "clustering", "kind ต้องเป็น"),
+    ("primary", "r2", "ใช้คะแนนหลัก"),
+    ("dataset", "churn", "ลายนิ้วมือ"),
+    ("target", "", "คอลัมน์ไหนเป็นเฉลย"),
+    ("labels", [], "ต้องประกาศ `labels`"),
+    ("student_ratio", 0.05, "แจกนิสิต"),
+    ("student_ratio", 0.98, "แจกนิสิต"),
+    ("grading_public_ratio", 0.0, "grading_public_ratio"),
+    ("grading_public_ratio", 1.0, "grading_public_ratio"),
+])
+def test_a_bad_field_is_refused_at_load_time(field, value, message):
+    """ทุกข้อต้องล้มตอนโหลด ไม่ใช่ไปพังตอนนิสิตส่งงานเข้ามาแล้ว"""
+    with pytest.raises(ConfigError, match=message):
+        _spec(**{field: value})
 
 
-# ── เฉลยต้องไม่หลุด ────────────────────────────────────────────────
+def test_the_target_cannot_also_be_dropped():
+    with pytest.raises(ConfigError, match="อย่างใดอย่างหนึ่ง"):
+        _spec(drop=["churned", "account_id"])
 
 
-@pytest.mark.parametrize("slug", SLUGS)
-def test_open_data_gives_the_three_student_parts(slug):
-    assert set(open_data(load(slug))) == {"train", "val", "test"}
+def test_regression_must_not_declare_classes():
+    with pytest.raises(ConfigError, match="ต้องไม่มี"):
+        _spec(kind="regression", primary="r2", labels=[0, 1])
 
 
-# ── ชุดที่ใช้ตัดสินต้องเข้าถึงไม่ได้จากฝั่งนิสิต ────────────────────
+def test_a_config_from_the_old_shape_explains_what_changed():
+    """โจทย์ที่สร้างก่อนเดือน ส.ค. 2026 มีฟิลด์ที่ไม่มีแล้ว — ต้องบอกว่าทำไม"""
+    with pytest.raises(ConfigError, match="นิสิตแบ่ง train/val/test เอง"):
+        from_mapping({
+            "slug": "churn", "task": "churn", "title": "x", "kind": "classification",
+            "primary": "macro_f1", "n_rows": 12000, "data_seed": 1, "split_seed": 2,
+            "bootstrap_seed": 3, "ratios": [0.6, 0.15, 0.25], "grading_rows": 3000,
+        })
 
 
-@pytest.mark.parametrize("slug", SLUGS)
-def test_students_cannot_compute_the_grading_answers(slug):
-    """**ด่านสำคัญที่สุดของทั้งวิชา**
+# ── config_hash คือสัญญา ──────────────────────────────────────────────────
 
-    เดิมทุกส่วนมาจาก dataset ชุดเดียวที่สร้างจากเมล็ดในไฟล์ config ที่แจก แปลว่า
-    นิสิตรัน `grading_data(load('churn'), 'private')` แล้วได้เฉลยครบทุกแถว
-    วัดแล้วทำ macro-F1 ได้ 1.0000 ด้วยการจำเฉลยแล้วจับคู่ด้วย `account_id`
 
-    ตอนนี้เมล็ดของชุดที่ใช้ตัดสินไม่ได้อยู่ในไฟล์ config และไม่ได้อยู่ในแพ็กเกจ
-    `load(slug)` จึงคืนสเปคที่ไม่มีมัน และ `grading_data` ต้องปฏิเสธ
+@pytest.mark.parametrize("field, value", [
+    ("dataset", "sha256:" + "cd" * 32),
+    ("target", "region"),
+    ("drop", ["account_id"]),
+    ("split_seed", 999),
+    ("bootstrap_seed", 999),
+    ("student_ratio", 0.6),
+    ("grading_public_ratio", 0.3),
+    ("labels", [1, 0]),
+    ("kind", "regression"),
+])
+def test_anything_that_changes_the_score_changes_the_hash(field, value):
+    base = _spec()
+    if field == "kind":
+        changed = _spec(kind="regression", primary="r2", labels=[])
+    else:
+        changed = _spec(**{field: value})
+    assert base.config_hash != changed.config_hash, f"{field} ไม่ได้เข้า hash"
+
+
+def test_renaming_the_task_does_not_break_old_scores():
+    """`title` เป็นข้อความให้คนอ่าน — แก้แล้วคะแนนเก่าต้องยังเทียบได้"""
+    assert _spec().config_hash == _spec(title="ชื่อใหม่").config_hash
+
+
+def test_swapping_the_data_file_can_never_be_silent():
+    """**เหตุผลที่อ้างไฟล์ด้วยลายนิ้วมือ ไม่ใช่ชื่อ**
+
+    ถ้าอ้างด้วยชื่อ การเปลี่ยนไฟล์ใต้ชื่อเดิมกลางเทอมจะไม่ขยับอะไรเลย และ
+    leaderboard จะยังดูเหมือนเทียบกันได้ทั้งที่คะแนนก่อนกับหลังมาจากคนละข้อมูล
     """
-    spec = load(slug)
-    assert spec.grading_seed is None, "สเปคที่โหลดจากไฟล์ที่แจกต้องไม่มีเมล็ดลับ"
+    before = _spec(dataset="sha256:" + "11" * 32)
+    after = _spec(dataset="sha256:" + "22" * 32)
+    assert before.config_hash != after.config_hash
+
+
+# ── ข้อมูลที่ออกจากเซิร์ฟเวอร์ ────────────────────────────────────────────
+
+
+def test_the_answer_column_never_reaches_the_sandbox(any_spec):
     for kind in ("public", "private"):
-        with pytest.raises(GradingSeedUnavailable):
-            grading_data(spec, kind)
+        assert any_spec.target not in grading_data(any_spec, kind).X.columns
 
 
-@pytest.mark.parametrize("slug", SLUGS)
-def test_the_secret_seed_is_not_in_the_shipped_config(slug):
-    """อ่านไฟล์ตรงๆ ด้วย — เผื่อวันหนึ่งมีคนใส่กลับเข้าไปแล้ว loader เมินมันเงียบๆ"""
-    text = (CONFIG_DIR / f"{slug}.yaml").read_text(encoding="utf-8")
-    for line in text.splitlines():
-        assert not line.strip().startswith("grading_seed:"), (
-            f"configs/{slug}.yaml มี grading_seed — นั่นคือการแจกเฉลยให้นิสิต"
+def test_dropped_columns_never_reach_the_sandbox(churn_spec):
+    """`account_id` ถูกตัด — ถ้ามันไปถึงกล่อง โมเดลจะจำเฉลยด้วย id ได้"""
+    assert "account_id" not in grading_data(churn_spec, "private").X.columns
+    assert "account_id" not in student_csv(churn_spec).decode().splitlines()[0]
+
+
+def test_the_downloaded_file_holds_only_the_student_part(churn_spec):
+    """**ข้อที่พังแล้วการแข่งจบ** — ไฟล์ที่แจกต้องไม่มีแถวของชุดที่ใช้ตัดสินเลย"""
+    split = parts(churn_spec)
+    handed_out = set(map(tuple, as_frame(split.student).itertuples(index=False)))
+
+    for name in ("test_public", "test_private"):
+        secret = set(map(tuple, as_frame(getattr(split, name)).itertuples(index=False)))
+        assert not (handed_out & secret), (
+            f"{len(handed_out & secret)} แถวของ {name} อยู่ในไฟล์ที่แจกนิสิต"
         )
 
 
-@pytest.mark.parametrize("slug", SLUGS)
-def test_grading_sets_do_not_overlap_what_students_get(slug):
-    spec = load(slug).replace(grading_seed=FALLBACK_SEED)
-    student_ids = set()
-    for part in all_parts(spec).open_parts().values():
-        student_ids |= set(part.X["account_id"])
-
-    for kind in ("public", "private"):
-        graded = set(grading_data(spec, kind).X["account_id"])
-        assert not (graded & student_ids), f"{kind}: มีแถวซ้ำกับที่นิสิตได้รับ"
+def test_the_downloaded_file_has_the_answer_for_its_own_rows(churn_spec):
+    """นิสิตต้องเทรนได้ — ไฟล์ที่แจกมีเฉลยของกองตัวเอง"""
+    header = student_csv(churn_spec).decode().splitlines()[0]
+    assert "churned" in header.split(",")
 
 
-def test_a_different_grading_seed_gives_different_answers():
-    """ชุดที่ใช้ตัดสินต้องขึ้นกับเมล็ดลับจริงๆ — ไม่ใช่มีฟิลด์ไว้เฉยๆ"""
-    spec = load(SLUGS[0])
-    a = grading_data(spec.replace(grading_seed=FALLBACK_SEED), "private")
-    b = grading_data(spec.replace(grading_seed=FALLBACK_SEED + 1), "private")
-    assert not a.X.equals(b.X)
+def test_a_missing_answer_in_the_source_file_is_refused():
+    """แถวที่ไม่มีเฉลยให้คะแนนไม่ได้ — ต้องบอกตอนอัปโหลด ไม่ใช่ตอนตัดสิน"""
+    import pandas as pd
+
+    frame = pd.DataFrame({"a": range(400), "y": [1, 0, None] * 133 + [1]})
+    with pytest.raises(DatasetError, match="ค่าว่าง"):
+        to_dataset(frame, target="y", drop=[])
 
 
-def test_grading_data_rejects_a_bad_kind():
-    spec = load(SLUGS[0]).replace(grading_seed=FALLBACK_SEED)
-    with pytest.raises(ValueError, match="public"):
-        grading_data(spec, "ไม่มีจริง")
+def test_dropping_every_feature_is_refused():
+    import pandas as pd
+
+    frame = pd.DataFrame({"id": range(400), "y": [0, 1] * 200})
+    with pytest.raises(DatasetError, match="ฟีเจอร์"):
+        to_dataset(frame, target="y", drop=["id"])
 
 
-@pytest.mark.parametrize("slug", SLUGS)
-def test_features_only_drops_the_answer(slug):
-    spec = load(slug).replace(grading_seed=FALLBACK_SEED)
-    test = grading_data(spec, "public")
-    X = features_only(test)
-    assert test.y.name not in X.columns
-    assert len(X) == len(test)
+# ── 🔒 เครื่องนิสิตต้องเข้าไม่ถึงคลัง ─────────────────────────────────────
 
 
-@pytest.mark.parametrize("slug", SLUGS)
-def test_the_same_spec_always_gives_the_same_split(slug):
-    spec = load(slug)
-    assert all_parts(spec).train.X.equals(all_parts(spec).train.X)
+def test_without_the_store_nothing_can_read_the_grading_answers(churn_spec, monkeypatch):
+    """เครื่องนิสิตไม่มี `ARENA_DATASETS` — ต้องล้มพร้อมบอกว่านี่คือความตั้งใจ
 
-
-# ── starter kit ที่แจกจริงต้องใช้งานได้ ────────────────────────────
-
-
-def test_starter_predictor_satisfies_the_contract(tmp_path):
-    """เทรนด้วย `train.py` ที่แจก แล้วโหลดด้วย `predictor.py` ที่แจก
-
-    ถ้าสองไฟล์นี้ไม่เข้ากัน นิสิตทุกคนจะติดตั้งแต่ก้าวแรกโดยไม่ใช่ความผิดของเขา
+    นี่คือข้อที่แทนที่ข้อเดิมเรื่องเมล็ดลับ · เดิมความลับคือตัวเลขที่ใช้สร้าง
+    ข้อมูล ตอนนี้คือตัวข้อมูลเอง — ซึ่งไม่มีทางย้อนกลับไปได้จากอะไรที่นิสิตมี
     """
-    for name in ("predictor.py", "train.py"):
-        (tmp_path / name).write_text((STARTER / name).read_text(encoding="utf-8"),
-                                     encoding="utf-8")
+    monkeypatch.delenv(store.DATASETS_ENV, raising=False)
 
-    run = subprocess.run(
-        [sys.executable, "train.py", "--task", "housing"],
-        cwd=tmp_path, capture_output=True, text=True, timeout=300,
-    )
-    assert run.returncode == 0, run.stderr
-    assert (tmp_path / "pipeline.pkl").is_file(), "train.py ต้องบันทึก pipeline.pkl"
-    assert "r2 บน val" in run.stdout
-
-    check = subprocess.run(
-        [sys.executable, "-c",
-         "from predictor import Predictor\n"
-         "from tabular.config import load\n"
-         "from tabular.dataset import open_data\n"
-         "spec = load('housing')\n"
-         "test = open_data(spec)['test']\n"
-         "y = Predictor({}).predict(test.X)\n"
-         "assert len(y) == len(test), (len(y), len(test))\n"
-         "print('OK', len(y))"],
-        cwd=tmp_path, capture_output=True, text=True, timeout=300,
-    )
-    assert check.returncode == 0, check.stderr
-    assert "OK 3000" in check.stdout
+    with pytest.raises(DatasetError, match="ถ้าคุณเป็นนิสิต"):
+        grading_data(churn_spec, "private")
+    with pytest.raises(DatasetError, match="ถ้าคุณเป็นนิสิต"):
+        student_csv(churn_spec)
 
 
-def test_starter_predictor_does_not_import_the_answers():
-    """`predictor.py` รันใน sandbox — ห้ามแตะโมดูลที่เห็นเฉลย"""
-    source = (STARTER / "predictor.py").read_text(encoding="utf-8")
-    for forbidden in ("tabular.dataset", "tabular.metrics", "grading_data"):
-        assert forbidden not in source, f"predictor.py อ้างถึง {forbidden}"
+def test_a_dataset_id_that_is_not_in_the_store_says_which_machine_to_look_at(churn_spec):
+    """worker ที่ชี้คลังคนละที่กับ API — ข้อความต้องพาไปหาสาเหตุนั้น"""
+    with pytest.raises(DatasetError, match="ARENA_DATASETS"):
+        grading_data(churn_spec.replace(dataset="sha256:" + "ff" * 32), "private")
+
+
+def test_the_package_ships_no_dataset_and_no_seed():
+    """แพ็กเกจที่นิสิตติดตั้งต้องไม่มีข้อมูลหรือของลับติดไปด้วย"""
+    from pathlib import Path
+
+    import tabular
+
+    root = Path(tabular.__file__).resolve().parent
+    assert not (root / "secrets.py").exists(), "โมดูลเมล็ดลับต้องถูกลบไปแล้ว"
+    assert not (root / "configs").exists(), "config ของโจทย์อยู่ในฐานข้อมูล ไม่ใช่ในแพ็กเกจ"
+    assert not list(root.rglob("*.csv")), "ไม่มีไฟล์ข้อมูลใดถูกแพ็กไปกับแพ็กเกจ"

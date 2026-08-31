@@ -17,6 +17,7 @@ from __future__ import annotations
 import importlib
 from typing import Any, Protocol, runtime_checkable
 
+#: สิ่งที่ **runner** เรียกตอนให้คะแนน — ขาดตัวใดตัวหนึ่งแปลว่าให้คะแนนไม่ได้
 REQUIRED = (
     "offers",
     "config_schema",
@@ -28,6 +29,18 @@ REQUIRED = (
     "predictor_config",
     "score",
     "predict_timeout_s",
+)
+
+#: สิ่งที่ **หน้าเว็บของผู้สอน** เรียกตอนสร้างโจทย์ — runner ไม่เคยเรียกเลย
+#:
+#: แยกจาก `REQUIRED` โดยตั้งใจ · การรวมกันทำให้ runner ปฏิเสธ plugin ที่มันรันได้
+#: จริง เพียงเพราะ plugin นั้นยังไม่รองรับการสร้างโจทย์ผ่านหน้าเว็บ — เส้นสองเส้นนี้
+#: มีผู้เรียกคนละคนและพังคนละเวลา
+AUTHORING = (
+    "inspect_dataset",
+    "save_dataset",
+    "preview",
+    "student_bytes",
 )
 
 
@@ -75,14 +88,46 @@ class PredictionPlugin(Protocol):
     def config_schema(self) -> list[dict[str, Any]]:
         """หน้าตาของ config สำหรับสร้างฟอร์ม — **อนุมานจาก dataclass ไม่เขียนมือ**"""
 
+    # ── สิ่งที่ผู้สอนใช้ตอนสร้างโจทย์ ────────────────────────────────────────
+    #
+    # โจทย์ทำนายต่างจาก agent env ตรงที่ **ข้อมูลมาจากผู้สอน ไม่ได้มาจากโค้ด** ·
+    # env จึงต้องรับไฟล์ ตรวจไฟล์ และบอกได้ว่าไฟล์นั้นจะถูกแบ่งออกมาหน้าตายังไง
+    # ก่อนที่ใครจะกดสร้าง · ทั้งสี่เมธอดนี้อยู่ฝั่ง trusted ทั้งหมด
 
-def resolve(spec: str) -> PredictionPlugin:
-    """แปลง `"module:attr"` ให้เป็น plugin จริง"""
+    def inspect_dataset(self, blob: bytes) -> dict[str, Any]:
+        """ตรวจไฟล์ที่เพิ่งอัปโหลดแล้วสรุปคอลัมน์ให้หน้าเว็บ — **ยังไม่เก็บลงคลัง**"""
+
+    def save_dataset(self, blob: bytes) -> str:
+        """เก็บไฟล์ลงคลังแล้วคืนรหัสที่ใช้อ้างใน config"""
+
+    def preview(self, spec: Any) -> dict[str, Any]:
+        """🔒 ไฟล์จะถูกแบ่งเป็นกี่แถวต่อกอง และคลาสไหนจะบางเกินไป
+
+        ผู้สอนต้องเห็นตัวเลขนี้**ก่อน**กดสร้าง — สัดส่วน `0.15` ไม่ได้บอกอะไรเลย
+        ส่วน "คลาสที่พบน้อยจะเหลือ 3 แถวในกองที่ตัดสินรอบสุดท้าย" บอกได้ทันทีว่า
+        อันดับสุดท้ายจะมีความหมายหรือเป็นเรื่องของโชค
+        """
+
+    def student_bytes(self, spec: Any) -> bytes:
+        """ไฟล์ที่นิสิตดาวน์โหลด — **กองที่แจกเท่านั้น**
+
+        นี่คือทางออกทางเดียวของข้อมูลจากเซิร์ฟเวอร์ · ทุกไบต์ที่ผ่านฟังก์ชันนี้
+        ถือว่านิสิตเห็นแล้ว — ถ้าวันหนึ่งมันคืนกองอื่นมาด้วย การแข่งจบทันทีโดย
+        ไม่มีใครรู้ · คู่กับ `grading_data` ที่อยู่คนละฝั่งของเส้นเดียวกัน
+        """
+
+
+def resolve(spec: str, *, also: tuple[str, ...] = ()) -> PredictionPlugin:
+    """แปลง `"module:attr"` ให้เป็น plugin จริง
+
+    `also=AUTHORING` เมื่อผู้เรียกคือหน้าเว็บของผู้สอน ซึ่งต้องการเมธอดชุดที่
+    runner ไม่ต้องการ
+    """
     if ":" not in spec:
         raise ValueError(f"env_plugin ต้องอยู่ในรูป 'module:attr' — ได้ {spec!r}")
     module_name, attr = spec.split(":", 1)
     plugin = getattr(importlib.import_module(module_name), attr)
-    missing = [m for m in REQUIRED if not hasattr(plugin, m)]
+    missing = [m for m in (*REQUIRED, *also) if not hasattr(plugin, m)]
     if missing:
         raise TypeError(f"{spec} ขาด {missing} — ดูสัญญาที่ runners/prediction/plugin.py")
     return plugin

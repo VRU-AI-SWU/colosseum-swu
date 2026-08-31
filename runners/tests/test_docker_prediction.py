@@ -25,10 +25,7 @@ from runners.sandbox.launcher import DockerLauncher
 
 pytest.importorskip("tabular", reason="ต้องติดตั้ง envs/cp462-tabular ก่อน")
 
-from tabular.config import CONFIG_DIR  # noqa: E402
-
 IMAGE = "arena/tabular:cpu"
-CHURN = CONFIG_DIR / "churn.yaml"
 
 pytestmark = pytest.mark.docker
 
@@ -47,6 +44,12 @@ requires_docker = pytest.mark.skipif(
     not _docker_ready(),
     reason=f"ต้องมี Docker และ image {IMAGE} — build ด้วย Dockerfile.cpu ก่อน",
 )
+
+
+@pytest.fixture
+def churn(tabular_tasks):
+    """config ของโจทย์ churn ที่ชี้ไปหาไฟล์ในคลังชั่วคราว — นิยามที่ `conftest.py`"""
+    return tabular_tasks["churn"][0]
 
 
 @pytest.fixture
@@ -70,10 +73,10 @@ def predictor(tmp_path):
     return build
 
 
-def _run(submission, **kwargs):
+def _run(submission, churn, **kwargs):
     return run_submission(
         env_plugin="tabular.arena:PLUGIN",
-        config_path=CHURN,
+        config_path=churn,
         submission_dir=submission,
         launcher=DockerLauncher(image=IMAGE),
         **kwargs,
@@ -94,19 +97,18 @@ ZEROS = """
 
 
 @requires_docker
-def test_scoring_works_end_to_end(predictor):
+def test_scoring_works_end_to_end(predictor, churn):
     """ถ้าข้อนี้ล้ม ข้ออื่นในไฟล์นี้ไม่มีความหมาย — image ต้องรันได้ก่อน"""
-    result = _run(predictor(ZEROS))
+    result = _run(predictor(ZEROS), churn)
     assert result.ok, f"{result.status}: {result.detail}\n{result.log[-2000:]}"
     assert result.checks["determinism"] is True
     assert result.n_rows > 0
 
 
 @requires_docker
-def test_the_libraries_students_need_are_in_the_image(predictor):
+def test_the_libraries_students_need_are_in_the_image(predictor, churn):
     """นิสิตต้อง `joblib.load` โมเดล sklearn ได้ — ไม่มีเน็ตให้ติดตั้งเพิ่มตอนรัน"""
-    result = _run(
-        predictor(
+    result = _run(churn=churn, submission=predictor(
             """
             import numpy as np
 
@@ -125,14 +127,13 @@ def test_the_libraries_students_need_are_in_the_image(predictor):
 
 
 @requires_docker
-def test_the_answers_package_is_not_in_the_image(predictor):
+def test_the_answers_package_is_not_in_the_image(predictor, churn):
     """**ข้อสำคัญที่สุดของไฟล์นี้** — `tabular` เห็นเฉลย จึงต้องไม่อยู่ใน image
 
     ถ้ามันหลุดเข้าไป โค้ดนิสิตเรียก `tabular.dataset.grading_data(spec, "private")`
     ได้ตรงๆ แล้วการแข่งจบทันทีโดยไม่มีใครรู้
     """
-    result = _run(
-        predictor(
+    result = _run(churn=churn, submission=predictor(
             """
             import numpy as np
 
@@ -153,9 +154,8 @@ def test_the_answers_package_is_not_in_the_image(predictor):
 
 
 @requires_docker
-def test_the_trusted_runner_is_not_in_the_image(predictor):
-    result = _run(
-        predictor(
+def test_the_trusted_runner_is_not_in_the_image(predictor, churn):
+    result = _run(churn=churn, submission=predictor(
             """
             import numpy as np
 
@@ -177,9 +177,8 @@ def test_the_trusted_runner_is_not_in_the_image(predictor):
 
 
 @requires_docker
-def test_no_network(predictor):
-    result = _run(
-        predictor(
+def test_no_network(predictor, churn):
+    result = _run(churn=churn, submission=predictor(
             """
             import socket
             import numpy as np
@@ -201,9 +200,8 @@ def test_no_network(predictor):
 
 
 @requires_docker
-def test_not_root_and_rootfs_is_read_only(predictor):
-    result = _run(
-        predictor(
+def test_not_root_and_rootfs_is_read_only(predictor, churn):
+    result = _run(churn=churn, submission=predictor(
             """
             import os
             import numpy as np
@@ -226,10 +224,9 @@ def test_not_root_and_rootfs_is_read_only(predictor):
 
 
 @requires_docker
-def test_the_submission_mount_is_read_only(predictor):
+def test_the_submission_mount_is_read_only(predictor, churn):
     """แก้ไฟล์ตัวเองระหว่างรันไม่ได้ — ไม่งั้นการ rejudge จะไม่ตรงกับที่ส่งมา"""
-    result = _run(
-        predictor(
+    result = _run(churn=churn, submission=predictor(
             """
             import numpy as np
 
@@ -249,10 +246,9 @@ def test_the_submission_mount_is_read_only(predictor):
 
 
 @requires_docker
-def test_tmp_is_writable_because_sklearn_needs_it(predictor):
+def test_tmp_is_writable_because_sklearn_needs_it(predictor, churn):
     """ต้องมีที่เขียนบ้าง — joblib/sklearn เขียนไฟล์ชั่วคราว แต่ต้องไม่ลงดิสก์จริง"""
-    result = _run(
-        predictor(
+    result = _run(churn=churn, submission=predictor(
             """
             import tempfile
             import numpy as np

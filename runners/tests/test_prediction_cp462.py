@@ -6,6 +6,11 @@
 
 ถ้าไฟล์นี้ล้ม แปลว่านิสิตทำตาม starter kit ทุกอย่างแล้วยังส่งงานไม่ผ่าน —
 ซึ่งไม่ใช่ความผิดของเขา
+
+**เทสต์เดินเส้นทางเดียวกับของจริงทุกขั้น** — ผู้สอนอัปโหลด CSV เข้าคลัง · ระบบ
+แบ่งสามกอง · นิสิตดาวน์โหลดกองของตัวเองเป็นไฟล์ · เทรนจากไฟล์นั้น · ส่งเข้ามา
+วัดกับกองที่เขาไม่เคยเห็น · เดิมเทสต์ลัดด้วยการให้ทั้งสองฝั่งสร้างข้อมูลจากเมล็ด
+ซึ่งเป็นเส้นทางที่ไม่มีใครใช้จริงอีกแล้ว
 """
 
 from __future__ import annotations
@@ -21,16 +26,16 @@ import pytest
 
 pytest.importorskip("tabular", reason="ต้องติดตั้ง envs/cp462-tabular ก่อน")
 
-from runners.prediction.plugin import REQUIRED, resolve
+from runners.prediction.plugin import AUTHORING, REQUIRED, resolve
 from runners.prediction.runner import run_submission
 from runners.sandbox.launcher import SubprocessLauncher
 from tabular.arena import PLUGIN
-from tabular.config import CONFIG_DIR, load
 
 PLUGIN_SPEC = "tabular.arena:PLUGIN"
 REPO = Path(__file__).resolve().parent.parent.parent
 STARTER = REPO / "envs" / "cp462-tabular" / "tabular" / "starter"
-SLUGS = sorted(p.stem for p in CONFIG_DIR.glob("*.yaml"))
+
+from runners.tests.conftest import TABULAR_TASKS as TASKS
 
 
 def launcher() -> SubprocessLauncher:
@@ -38,91 +43,111 @@ def launcher() -> SubprocessLauncher:
 
 
 @pytest.fixture(scope="module")
-def trained(tmp_path_factory):
-    """submission จริง: เทรนด้วย `train.py` ที่แจก แล้วเหลือแต่ไฟล์ที่นิสิตต้องส่ง
+def tasks(tabular_tasks):
+    """โจทย์ทดสอบ — นิยามอยู่ที่ `conftest.py` เพราะเทสต์ Docker ใช้ตัวเดียวกัน"""
+    return tabular_tasks
+
+
+@pytest.fixture(scope="module")
+def trained(tmp_path_factory, tasks):
+    """submission จริง — **ดาวน์โหลดไฟล์แล้วเทรนจากไฟล์ เหมือนที่นิสิตทำ**
 
     `scope="module"` เพราะการเทรนสองโจทย์กินเวลาหลายสิบวินาที และผลของมันคงที่
     """
     built = {}
-    for slug in SLUGS:
-        work = tmp_path_factory.mktemp(slug)
-        for name in ("predictor.py", "train.py"):
-            shutil.copy2(STARTER / name, work / name)
+    for name, (_path, spec) in tasks.items():
+        work = tmp_path_factory.mktemp(name)
+        for filename in ("predictor.py", "train.py"):
+            shutil.copy2(STARTER / filename, work / filename)
+        # นี่คือไฟล์ที่นิสิตกดดาวน์โหลดจากหน้าโจทย์ — ทางออกทางเดียวของข้อมูล
+        (work / "data.csv").write_bytes(PLUGIN.student_bytes(spec))
+
         run = subprocess.run(
-            [sys.executable, "train.py", "--task", slug],
+            [sys.executable, "train.py", "--data", "data.csv",
+             "--target", spec.target, "--kind", spec.kind, "--primary", spec.primary],
             cwd=work, capture_output=True, text=True, timeout=900,
         )
-        assert run.returncode == 0, f"{slug}: train.py ล้ม\n{run.stderr}"
-        (work / "train.py").unlink()  # นิสิตส่งแค่ predictor.py + pipeline.pkl
-        built[slug] = work
+        assert run.returncode == 0, f"{name}: train.py ล้ม\n{run.stderr}"
+        for leftover in ("train.py", "data.csv"):
+            (work / leftover).unlink()  # นิสิตส่งแค่ predictor.py + pipeline.pkl
+        built[name] = work
     return built
 
 
 # ── สัญญาของ plugin ────────────────────────────────────────────────
 
 
-def test_the_plugin_satisfies_the_contract():
-    assert resolve(PLUGIN_SPEC) is PLUGIN
-    for name in REQUIRED:
+def test_the_plugin_satisfies_both_contracts():
+    """`tabular` ต้องทำได้ทั้งฝั่งให้คะแนนและฝั่งสร้างโจทย์"""
+    assert resolve(PLUGIN_SPEC, also=AUTHORING) is PLUGIN
+    for name in (*REQUIRED, *AUTHORING):
         assert callable(getattr(PLUGIN, name)), f"{name} ต้องเรียกได้"
 
 
-def test_predictor_config_carries_nothing_from_the_grading_set():
+def test_predictor_config_carries_nothing_from_the_grading_set(tasks):
     """**ด่านสำคัญที่สุดของไฟล์นี้** — ตรวจรายการคีย์แบบเป๊ะ ไม่ใช่ blacklist
 
     blacklist พลาดทุกครั้งที่มีคนเพิ่มฟิลด์ใหม่ที่ตั้งชื่อไม่ตรงคำต้องห้าม
     การล็อกรายการทำให้ฟิลด์ใหม่ที่รั่วต้องผ่านการแก้เทสต์นี้ก่อนเสมอ
     """
-    for slug in SLUGS:
-        spec = load(slug)
+    for name, (_path, spec) in tasks.items():
         config = PLUGIN.predictor_config(spec)
-        assert set(config) == {"task", "kind", "primary"}, f"{slug}: {sorted(config)}"
-        assert spec.data_seed not in config.values()
+        assert set(config) == {"kind", "primary"}, f"{name}: {sorted(config)}"
+        assert spec.dataset not in config.values(), "รหัสชุดข้อมูลต้องไม่เข้าไปในกล่อง"
         assert spec.split_seed not in config.values()
         assert spec.bootstrap_seed not in config.values()
 
 
-@pytest.mark.parametrize("slug", SLUGS)
-def test_config_hash_matches_what_the_students_selfcheck_pins(slug):
-    """hash ที่ runner บันทึกลง run ต้องเป็นตัวเดียวกับที่ `selfcheck` ตรึงไว้"""
-    spec = load(slug)
-    assert PLUGIN.config_hash(spec) == spec.config_hash
+@pytest.mark.parametrize("name", sorted(TASKS))
+def test_config_hash_survives_the_round_trip_through_yaml(name, tasks):
+    """hash ที่ runner บันทึกลง run ต้องเป็นตัวเดียวกับที่คำนวณจากสเปคในหน่วยความจำ"""
+    path, spec = tasks[name]
+    assert PLUGIN.config_hash(PLUGIN.load_spec(str(path))) == spec.config_hash
 
 
-@pytest.mark.parametrize("slug", SLUGS)
-def test_grading_data_is_not_what_students_get(slug):
-    """ชุดที่ใช้ตัดสินมาจาก dataset คนละใบ — และเมล็ดของมันมาจาก ARENA_SECRETS
+@pytest.mark.parametrize("name", sorted(TASKS))
+def test_what_students_download_shares_no_row_with_the_grading_set(name, tasks):
+    """**ข้อที่พังแล้วการแข่งจบ** — ไฟล์ที่แจกต้องไม่ทับกับกองที่ใช้ตัดสิน
 
-    `load()` (ฝั่งนิสิต) ได้สเปคที่ไม่มีเมล็ดลับ · `PLUGIN.load_spec()` (ฝั่ง trusted)
-    ฉีดเข้ามา — ความต่างนี้คือสิ่งที่กันไม่ให้นิสิตคำนวณเฉลยเองได้
+    เคยพังจริงในรูปแบบก่อนหน้า: ทั้งสองชุดสร้างจากเมล็ดที่อยู่ในไฟล์ที่แจก
+    นิสิตจึงคำนวณเฉลยเองได้ครบทุกแถว (macro-F1 = 1.0000) · ตอนนี้กองที่ใช้
+    ตัดสินเป็นแถวที่ไม่เคยถูกส่งออกไป ไม่ใช่แถวที่สร้างใหม่จากตัวเลขลับ
     """
-    from tabular.dataset import open_data
+    import io
 
-    assert load(slug).grading_seed is None, "สเปคฝั่งนิสิตต้องไม่มีเมล็ดลับ"
-    spec = PLUGIN.load_spec(str(CONFIG_DIR / f"{slug}.yaml"))
-    assert spec.grading_seed is not None, "ฝั่ง trusted ต้องได้เมล็ดลับมา"
+    import pandas as pd
 
-    student_ids = set()
-    for part in open_data(spec).values():
-        student_ids |= set(part.X["account_id"])
+    _path, spec = tasks[name]
+    handed_out = pd.read_csv(io.BytesIO(PLUGIN.student_bytes(spec)))
+    features = [c for c in handed_out.columns if c != spec.target]
+    seen = set(map(tuple, handed_out[features].astype(str).itertuples(index=False)))
+
     for kind in ("public", "private"):
         graded = PLUGIN.grading_data(spec, kind)
-        assert not (set(graded.X["account_id"]) & student_ids), f"{kind}: มีแถวซ้ำ"
+        secret = set(map(tuple, graded.X[features].astype(str).itertuples(index=False)))
+        assert not (seen & secret), f"{kind}: {len(seen & secret)} แถวอยู่ในไฟล์ที่แจกแล้ว"
+
+
+def test_the_download_never_carries_a_grading_row_even_after_a_reload(tasks):
+    """เรียกซ้ำต้องได้ไฟล์เดิมเป๊ะ — ไม่งั้นนิสิตสองคนได้ข้อมูลคนละชุด"""
+    _path, spec = tasks["churn"]
+    assert PLUGIN.student_bytes(spec) == PLUGIN.student_bytes(spec)
 
 
 # ── ทั้งเส้นด้วย starter kit ที่แจกจริง ─────────────────────────────
 
 
-@pytest.mark.parametrize("slug", SLUGS)
-def test_the_shipped_starter_kit_passes_every_check(slug, trained):
+@pytest.mark.parametrize("name", sorted(TASKS))
+def test_the_shipped_starter_kit_passes_every_check(name, tasks, trained):
     """**สิ่งที่นิสิตได้รับไปต้องผ่านการตรวจทั้งสามชั้น**
 
     ถ้าข้อนี้ล้ม แปลว่าเราแจก pipeline ที่ระบบของเราเองปฏิเสธ
     """
+    path, _spec = tasks[name]
     result = run_submission(
         env_plugin=PLUGIN_SPEC,
-        config_path=CONFIG_DIR / f"{slug}.yaml",
-        submission_dir=trained[slug],
+        config_path=path,
+        submission_dir=trained[name],
         launcher=launcher(),
     )
     assert result.ok, f"{result.status}: {result.detail}\n{result.log[-2000:]}"
@@ -133,14 +158,14 @@ def test_the_shipped_starter_kit_passes_every_check(slug, trained):
     }
 
 
-@pytest.mark.parametrize("slug", SLUGS)
-def test_the_score_is_the_same_metric_students_measure_themselves(slug, trained):
+@pytest.mark.parametrize("name", sorted(TASKS))
+def test_the_score_is_the_same_metric_students_measure_themselves(name, tasks, trained):
     """คะแนนจาก runner ต้องตรงกับที่คิดตรงๆ ทุกหลัก — ไม่งั้น leaderboard โกหก"""
-    spec = load(slug)
+    path, spec = tasks[name]
     result = run_submission(
         env_plugin=PLUGIN_SPEC,
-        config_path=CONFIG_DIR / f"{slug}.yaml",
-        submission_dir=trained[slug],
+        config_path=path,
+        submission_dir=trained[name],
         launcher=launcher(),
     )
     assert result.ok, f"{result.status}: {result.detail}"
@@ -149,25 +174,27 @@ def test_the_score_is_the_same_metric_students_measure_themselves(slug, trained)
     assert result.score.primary > 0.4, f"starter kit ควรได้คะแนนพอใช้ — ได้ {result.score.primary}"
 
 
-def test_public_and_private_are_different_sets(trained):
+def test_public_and_private_are_different_sets(tasks, trained):
     """คะแนนสองชุดต้องมาจากข้อมูลคนละก้อน — ไม่งั้นชุดลับไม่มีความหมาย"""
-    slug = SLUGS[0]
+    path, spec = tasks["churn"]
+    expected = PLUGIN.preview(spec)["sizes"]
+
     scores = {}
     for kind in ("public", "private"):
         result = run_submission(
             env_plugin=PLUGIN_SPEC,
-            config_path=CONFIG_DIR / f"{slug}.yaml",
-            submission_dir=trained[slug],
+            config_path=path,
+            submission_dir=trained["churn"],
             kind=kind,
             launcher=launcher(),
         )
         assert result.ok, f"{kind}: {result.status}: {result.detail}"
         scores[kind] = result.score.primary
-        assert result.n_rows == {"public": 1200, "private": 1800}[kind]
+        assert result.n_rows == expected[f"test_{kind}"]
     assert scores["public"] != scores["private"], "สองชุดให้คะแนนเท่ากันเป๊ะ — น่าสงสัย"
 
 
-def test_a_pipeline_that_refits_on_predict_is_caught(tmp_path):
+def test_a_pipeline_that_refits_on_predict_is_caught(tmp_path, tasks):
     """leakage แบบที่นิสิตทำโดยไม่รู้ตัวบ่อยที่สุด — normalize ใหม่ทุกครั้งที่ทำนาย"""
     (tmp_path / "predictor.py").write_text(
         "import numpy as np\n"
@@ -183,14 +210,14 @@ def test_a_pipeline_that_refits_on_predict_is_caught(tmp_path):
     )
     result = run_submission(
         env_plugin=PLUGIN_SPEC,
-        config_path=CONFIG_DIR / "churn.yaml",
+        config_path=tasks["churn"][0],
         submission_dir=tmp_path,
         launcher=launcher(),
     )
     assert result.status == "batch_dependent", f"{result.status}: {result.detail}"
 
 
-def test_predictions_outside_the_declared_labels_are_rejected(tmp_path):
+def test_predictions_outside_the_declared_labels_are_rejected(tmp_path, tasks):
     """คลาสที่ไม่มีในโจทย์ต้องถูกปฏิเสธ ไม่ใช่ถูกนับเป็นทายผิดเฉยๆ"""
     (tmp_path / "predictor.py").write_text(
         "import numpy as np\n"
@@ -205,7 +232,7 @@ def test_predictions_outside_the_declared_labels_are_rejected(tmp_path):
     )
     result = run_submission(
         env_plugin=PLUGIN_SPEC,
-        config_path=CONFIG_DIR / "churn.yaml",
+        config_path=tasks["churn"][0],
         submission_dir=tmp_path,
         launcher=launcher(),
     )
@@ -213,7 +240,7 @@ def test_predictions_outside_the_declared_labels_are_rejected(tmp_path):
     assert "7" in result.detail
 
 
-def test_nan_predictions_are_rejected(tmp_path):
+def test_nan_predictions_are_rejected(tmp_path, tasks):
     (tmp_path / "predictor.py").write_text(
         "import numpy as np\n"
         "\n"
@@ -227,7 +254,7 @@ def test_nan_predictions_are_rejected(tmp_path):
     )
     result = run_submission(
         env_plugin=PLUGIN_SPEC,
-        config_path=CONFIG_DIR / "housing.yaml",
+        config_path=tasks["housing"][0],
         submission_dir=tmp_path,
         launcher=launcher(),
     )
@@ -235,10 +262,12 @@ def test_nan_predictions_are_rejected(tmp_path):
     assert "NaN" in result.detail
 
 
-def test_the_answers_never_reach_the_sandbox(tmp_path):
+def test_the_answers_never_reach_the_sandbox(tmp_path, tasks):
     """โค้ดในกล่องต้องไม่มีทางเห็นเฉลย — ไล่หาทุกทางที่ `SubprocessLauncher` ตอบได้
 
     ต่างจากโจทย์ RL ตรงที่ของลับไม่ใช่ seed แต่เป็น `y` ของชุดที่ใช้ตัดสิน
+    **และตอนนี้รวมถึงรหัสของไฟล์ในคลังด้วย** — ใครที่ได้รหัสนั้นไปพร้อมกับสิทธิ์
+    อ่านคลัง จะอ่านไฟล์เต็มได้ทั้งใบ
 
     ⚠️ ข้อที่ว่า "`import tabular` จากในกล่องไม่ได้" ตรวจที่นี่ไม่ได้ — `SubprocessLauncher`
     ใช้ interpreter ตัวเดียวกับ runner จึงเห็นทุกอย่างที่ runner เห็น มันเป็น
@@ -253,8 +282,11 @@ def test_the_answers_never_reach_the_sandbox(tmp_path):
         "    def __init__(self, config):\n"
         "        import gc\n"
         "        for obj in gc.get_objects():\n"
-        "            if type(obj).__name__ in ('TaskSpec', 'Split', 'Dataset'):\n"
+        "            if type(obj).__name__ in ('TaskSpec', 'ThreeWay', 'Dataset'):\n"
         "                raise AssertionError('เอื้อมถึง ' + type(obj).__name__ + ' ได้')\n"
+        "        leaked = [k for k, v in config.items() if 'sha256' in str(v)]\n"
+        "        if leaked:\n"
+        "            raise AssertionError('รหัสชุดข้อมูลหลุดเข้ากล่อง: ' + str(leaked))\n"
         "\n"
         "    def predict(self, X):\n"
         "        leaked = [c for c in X.columns if c in FORBIDDEN]\n"
@@ -265,18 +297,17 @@ def test_the_answers_never_reach_the_sandbox(tmp_path):
     )
     result = run_submission(
         env_plugin=PLUGIN_SPEC,
-        config_path=CONFIG_DIR / "churn.yaml",
+        config_path=tasks["churn"][0],
         submission_dir=tmp_path,
         launcher=launcher(),
     )
     assert result.ok, f"{result.status}: {result.detail}"
-    assert np.isclose(result.score.primary, result.score.primary)
 
 
 # ── ครบวงจร: ส่งงาน → คิว → worker → คะแนน ──────────────────────────
 
 
-def test_a_prediction_competition_flows_through_the_worker(tmp_path, trained):
+def test_a_prediction_competition_flows_through_the_worker(tmp_path, tasks, trained):
     """เกณฑ์เดียวกับ README §14 M1 แต่สำหรับโจทย์ทำนาย
 
     พิสูจน์ว่า `task_type="prediction"` เดินทางครบเส้น — ตัวตรวจไฟล์ใน `core`
@@ -291,6 +322,7 @@ def test_a_prediction_competition_flows_through_the_worker(tmp_path, trained):
     from core.wiring import VALIDATORS
     from runners.worker import Worker
 
+    path, spec = tasks["churn"]
     arena = build_arena(tmp_path / "artifacts", validators=VALIDATORS)
     arena.store.save_course(
         Course(id="cp462-1-2026", name="CP462 Machine Learning", join_code="CP462TEST")
@@ -303,7 +335,7 @@ def test_a_prediction_competition_flows_through_the_worker(tmp_path, trained):
         title="ทำนายการเลิกใช้บริการ",
         task_type="prediction",
         env_plugin=PLUGIN_SPEC,
-        config_path=str(CONFIG_DIR / "churn.yaml"),
+        config_path=str(path),
         opens_at=now - timedelta(days=1),
         closes_at=now + timedelta(days=30),
         quota_per_day=5,
@@ -321,9 +353,9 @@ def test_a_prediction_competition_flows_through_the_worker(tmp_path, trained):
     # (ในกล่องจริงไม่เกิด เพราะ image ตั้ง PYTHONDONTWRITEBYTECODE และ mount แบบอ่านอย่างเดียว)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
-        for path in sorted(trained["churn"].iterdir()):
-            if path.is_file():
-                zf.writestr(path.name, path.read_bytes())
+        for item in sorted(trained["churn"].iterdir()):
+            if item.is_file():
+                zf.writestr(item.name, item.read_bytes())
 
     _submission, run = arena.submit(
         slug=competition.slug, team=team, user_id=user.id, archive=buf.getvalue(),
@@ -344,5 +376,6 @@ def test_a_prediction_competition_flows_through_the_worker(tmp_path, trained):
     assert done.metrics["checks"] == {
         "determinism": True, "row_permutation": True, "subset_consistency": True,
     }
-    assert done.metrics["n_rows"] == 1200
+    assert done.metrics["n_rows"] == PLUGIN.preview(spec)["sizes"]["test_public"]
     assert done.config_hash and done.env_version
+    assert np.isfinite(done.score)

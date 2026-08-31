@@ -1,118 +1,238 @@
-"""การแบ่งข้อมูล — ต้องทำซ้ำได้ ไม่ทับกัน และไม่ทำให้ชุดที่ใช้ตัดสินหลุด"""
+"""การแบ่งสามกอง — **ข้อที่พังแล้วการแข่งจบทันทีอยู่ข้างล่างสุด**
+
+เรียงจากคุณสมบัติทั่วไปไปหาคุณสมบัติเรื่องความปลอดภัย · ข้อสุดท้ายคือข้อที่
+เคยพังจริงมาแล้วในรูปแบบอื่น (นิสิตสร้างชุดที่ใช้ตัดสินเองได้จากเมล็ดที่แจก)
+"""
 
 from __future__ import annotations
 
+import numpy as np
+import pandas as pd
 import pytest
 
-from tabular.generator import make
-from tabular.splits import GRADING_PARTS, PARTS, as_frame, grading_split, split
-
-RATIOS = (0.60, 0.15, 0.25)
-
-
-@pytest.fixture
-def churn():
-    return make("churn", seed=1, n=5000)
-
-
-def test_same_seed_gives_the_same_split(churn):
-    a = split(churn, seed=9, ratios=RATIOS)
-    b = split(churn, seed=9, ratios=RATIOS)
-    for name in PARTS:
-        assert getattr(a, name).X.equals(getattr(b, name).X)
-        assert getattr(a, name).y.equals(getattr(b, name).y)
-
-
-def test_different_seed_gives_a_different_split(churn):
-    a = split(churn, seed=9, ratios=RATIOS)
-    b = split(churn, seed=10, ratios=RATIOS)
-    assert not a.train.X.equals(b.train.X)
-
-
-def test_every_row_lands_in_exactly_one_part(churn):
-    """ไม่ทับกันและไม่หาย — ถ้าทับ แถวของ test จะไปโผล่ใน train ที่นิสิตได้"""
-    parts = split(churn, seed=9, ratios=RATIOS)
-    ids = [set(getattr(parts, name).X["account_id"]) for name in PARTS]
-
-    assert sum(len(s) for s in ids) == len(churn), "มีแถวหายหรือซ้ำ"
-    assert set().union(*ids) == set(churn.X["account_id"])
-    for i, left in enumerate(ids):
-        for right in ids[i + 1 :]:
-            assert not (left & right), "มีแถวอยู่สองส่วนพร้อมกัน"
-
-
-def test_sizes_match_the_ratios_and_sum_exactly(churn):
-    parts = split(churn, seed=9, ratios=RATIOS)
-    sizes = parts.sizes()
-    assert sum(sizes.values()) == len(churn), "ผลรวมต้องเท่ากับข้อมูลทั้งหมดเป๊ะ"
-    for name, ratio in zip(PARTS, RATIOS):
-        assert abs(sizes[name] / len(churn) - ratio) < 0.01
-
-
-def test_class_balance_survives_a_plain_shuffle(churn):
-    """ไม่ stratify โดยตั้งใจ — เทสต์นี้ยืนยันว่าขนาดชุดใหญ่พอที่จะไม่ต้อง
-
-    ถ้าวันหนึ่งชุดข้อมูลเล็กลงมากจนข้อนี้แดง แปลว่าถึงเวลาต้อง stratify จริงๆ
-    ไม่ใช่แก้เกณฑ์ให้ผ่าน
-    """
-    parts = split(churn, seed=9, ratios=RATIOS)
-    overall = churn.y.mean()
-    for name in PARTS:
-        rate = getattr(parts, name).y.mean()
-        assert abs(rate - overall) < 0.05, f"{name}: สัดส่วนคลาสเพี้ยนไป {rate - overall:+.3f}"
-
-
-def test_the_student_split_cannot_hold_a_grading_set(churn):
-    """**ด่านสำคัญ** — `Split` ต้องไม่มีที่ให้ชุดที่ใช้ตัดสินอยู่เลย
-
-    เดิมคลาสนี้ถือ `test_public`/`test_private` ไว้ด้วย แล้วกันการหลุดด้วย
-    `open_parts()` ที่เลือกคืนแค่บางฟิลด์ · การกันแบบนั้นพึ่งวินัยของคนเขียน
-    ตอนนี้ชุดที่ใช้ตัดสินอยู่คนละคลาสและมาจากคนละ dataset — เผลอส่งออกไปไม่ได้
-    เพราะมันไม่ได้อยู่ในนี้ตั้งแต่แรก
-    """
-    parts = split(churn, seed=9, ratios=RATIOS)
-    assert set(parts.open_parts()) == {"train", "val", "test"}
-    for forbidden in GRADING_PARTS:
-        assert not hasattr(parts, forbidden), f"Split ไม่ควรมีฟิลด์ {forbidden}"
-
-
-def test_grading_split_cuts_public_and_private(churn):
-    graded = grading_split(churn, seed=9, public_ratio=0.4)
-    assert graded.sizes() == {"test_public": 2000, "test_private": 3000}
-    assert not (set(graded.test_public.X["account_id"])
-                & set(graded.test_private.X["account_id"]))
-
-
-def test_index_is_reset_so_students_get_predictable_rows(churn):
-    parts = split(churn, seed=9, ratios=RATIOS)
-    for name in PARTS:
-        part = getattr(parts, name)
-        assert list(part.X.index) == list(range(len(part)))
-        assert list(part.y.index) == list(range(len(part)))
-
-
-def test_as_frame_puts_the_target_last(churn):
-    parts = split(churn, seed=9, ratios=RATIOS)
-    frame = as_frame(parts.train)
-    assert list(frame.columns)[:-1] == list(parts.train.X.columns)
-    assert list(frame.columns)[-1] == parts.train.y.name
-
-
-@pytest.mark.parametrize(
-    "ratios,reason",
-    [
-        ((0.6, 0.4), "จำนวนส่วนไม่ครบ"),
-        ((0.6, 0.2, 0.1), "รวมกันไม่ได้ 1.0"),
-        ((0.7, 0.3, 0.0), "มีส่วนที่เป็นศูนย์"),
-    ],
+from tabular.splits import (
+    GRADING_PARTS,
+    PARTS,
+    SplitError,
+    as_frame,
+    strata_of,
+    thin_strata,
+    three_way,
 )
-def test_bad_ratios_are_rejected(churn, ratios, reason):
-    with pytest.raises(ValueError):
-        split(churn, seed=1, ratios=ratios)
+from tabular.table import Dataset, fingerprint
 
 
-def test_too_little_data_says_what_it_would_produce():
-    """ข้อความต้องบอกว่าจะได้อะไร ไม่ใช่แค่ว่าผิด — §13 ของ template"""
-    tiny = make("churn", seed=1, n=8)
-    with pytest.raises(ValueError, match="test"):
-        split(tiny, seed=1, ratios=(0.96, 0.02, 0.02))
+def _frame(n: int, *, positives: float = 0.25, seed: int = 0) -> Dataset:
+    """ข้อมูลจำลองที่คุมสัดส่วนคลาสได้ — ใช้ทดสอบเคสไม่สมดุลโดยเฉพาะ"""
+    rng = np.random.default_rng(seed)
+    y = (np.arange(n) < int(n * positives)).astype(int)
+    return Dataset(
+        X=pd.DataFrame({"row": np.arange(n), "noise": rng.normal(size=n)}),
+        y=pd.Series(rng.permutation(y), name="label"),
+    )
+
+
+def _split(data: Dataset, **kw):
+    options = {"kind": "classification", "seed": 3,
+               "student_ratio": 0.7, "grading_public_ratio": 0.5}
+    options.update(kw)
+    return three_way(data, **options)
+
+
+# ── โครงของผลลัพธ์ ────────────────────────────────────────────────────────
+
+
+def test_every_row_lands_in_exactly_one_part():
+    """ไม่มีแถวหาย ไม่มีแถวซ้ำ — สิ่งแรกที่ต้องจริงก่อนจะพูดถึงอย่างอื่น"""
+    data = _frame(1000)
+    split = _split(data)
+
+    seen = pd.concat([getattr(split, name).X["row"] for name in PARTS])
+    assert len(seen) == 1000
+    assert sorted(seen.tolist()) == list(range(1000))
+
+
+def test_sizes_follow_the_two_nested_ratios():
+    """`student_ratio` ตัดจากทั้งไฟล์ · `grading_public_ratio` ตัดจากส่วนที่เหลือ
+
+    นี่คือจุดที่คนอ่านผิดได้ง่ายที่สุด — `grading_public_ratio=0.5` ไม่ได้แปลว่า
+    ครึ่งหนึ่งของไฟล์ แต่แปลว่าครึ่งหนึ่งของ 30% ที่กันไว้ = 15% ของไฟล์
+    """
+    split = _split(_frame(1000), student_ratio=0.7, grading_public_ratio=0.5)
+    assert split.sizes() == {"student": 700, "test_public": 150, "test_private": 150}
+
+    split = _split(_frame(1000), student_ratio=0.8, grading_public_ratio=0.25)
+    assert split.sizes() == {"student": 800, "test_public": 50, "test_private": 150}
+
+
+@pytest.mark.parametrize("n", [997, 1000, 4321])
+@pytest.mark.parametrize("kind", ["classification", "regression"])
+def test_part_sizes_never_drift_with_the_number_of_strata(n, kind):
+    """ขนาดของกองต้องไม่ขึ้นกับว่ามีกี่กลุ่ม — regression มี 10 ช่วง
+
+    เดิมตัดทีละกลุ่มแล้วปัดหนึ่งครั้งต่อกลุ่ม เศษจึงสะสมเข้าทางเดียว: 2 คลาส
+    เลื่อนได้ 1–2 แถว แต่ 10 ช่วงเลื่อนได้ถึง 10 แถว · ข้อนี้ตรึงว่าเลื่อนไม่ได้เลย
+    """
+    data = (
+        _frame(n, positives=0.3)
+        if kind == "classification"
+        else Dataset(X=pd.DataFrame({"row": np.arange(n)}),
+                     y=pd.Series(np.linspace(0, 1, n), name="v"))
+    )
+    sizes = three_way(data, kind=kind, seed=5,
+                      student_ratio=0.7, grading_public_ratio=0.5).sizes()
+
+    student = int(n * 0.7 + 0.5)
+    public = int((n - student) * 0.5 + 0.5)
+    assert sizes == {"student": student, "test_public": public,
+                     "test_private": n - student - public}
+
+
+def test_the_preview_numbers_are_the_numbers_that_actually_happen():
+    """`thin_strata` ต้องทำนายด้วยสูตรเดียวกับที่แบ่งจริง — ไม่ใช่ค่าประมาณ
+
+    ผู้สอนตัดสินใจจากตัวเลขที่เห็นก่อนกดสร้าง · ถ้ามันเป็นคนละสูตรกับของจริง
+    คำเตือน "คลาสนี้จะเหลือ 3 แถว" จะเชื่อไม่ได้ และคำที่เชื่อไม่ได้คือคำที่
+    ทุกคนเรียนรู้ที่จะข้าม
+    """
+    from tabular.splits import _allocate
+
+    data = _frame(3000, positives=0.11)
+    split = three_way(data, kind="classification", seed=13,
+                      student_ratio=0.75, grading_public_ratio=0.4)
+
+    predicted = _allocate(
+        {"0": int((data.y == 0).sum()), "1": int((data.y == 1).sum())},
+        0.75, 0.4,
+    )
+    for name in PARTS:
+        actual = getattr(split, name).y.value_counts()
+        assert predicted["1"][name] == int(actual.get(1, 0)), name
+        assert predicted["0"][name] == int(actual.get(0, 0)), name
+
+
+def test_a_file_too_small_for_the_ratios_fails_loudly():
+    with pytest.raises(SplitError, match="ว่าง"):
+        _split(_frame(4, positives=0.5), student_ratio=0.9, grading_public_ratio=0.5)
+
+
+# ── stratify ──────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("positives", [0.5, 0.25, 0.08, 0.03])
+def test_class_balance_is_preserved_in_every_part(positives):
+    """**เหตุผลที่ต้อง stratify** — สัดส่วนคลาสต้องเท่ากันทุกกอง แม้ข้อมูลจะเบ้มาก
+
+    เดิมใช้ `permutation` ธรรมดาโดยให้เหตุผลว่าชุดใหญ่พอ · ข้อนี้ยิงที่ 3%
+    ซึ่งเป็นระดับที่โจทย์จริงอย่างการคัดกรองโรคเป็น แล้วการสุ่มธรรมดาแกว่ง
+    """
+    data = _frame(4000, positives=positives)
+    split = _split(data)
+
+    for name in PARTS:
+        got = getattr(split, name).y.mean()
+        assert abs(got - positives) < 0.01, f"{name} ได้ {got:.3f} ควรใกล้ {positives}"
+
+
+def test_regression_strata_cover_the_whole_range():
+    """regression ก็ต้อง stratify — ไม่งั้นกองที่ใช้ตัดสินอาจไม่มีค่าสูงเลย"""
+    n = 3000
+    data = Dataset(
+        X=pd.DataFrame({"row": np.arange(n)}),
+        # y เบ้ขวาแรงๆ — ค่าสูงมีน้อย ซึ่งเป็นเคสที่การสุ่มธรรมดาพลาด
+        y=pd.Series(np.exp(np.linspace(0, 6, n)), name="price"),
+    )
+    split = three_way(data, kind="regression", seed=1,
+                      student_ratio=0.7, grading_public_ratio=0.5)
+
+    whole = data.y.quantile([0.05, 0.95])
+    for name in GRADING_PARTS:
+        part = getattr(split, name).y
+        assert part.max() >= whole[0.95], f"{name} ไม่มีค่าสูงเลย"
+        assert part.min() <= whole[0.05], f"{name} ไม่มีค่าต่ำเลย"
+
+
+def test_missing_labels_become_their_own_stratum():
+    """ค่าว่างในคอลัมน์เฉลยต้องไม่ทำให้แถวหายไปเงียบๆ จาก `groupby`"""
+    y = pd.Series([0, 1, None, 1, 0], name="label")
+    assert strata_of(y, kind="classification").tolist() == ["0", "1", "<ว่าง>", "1", "0"]
+
+
+def test_thin_strata_reports_classes_that_will_be_too_small():
+    """**สิ่งที่ผู้สอนต้องเห็นก่อนกดสร้าง** — คลาสที่จะเหลือไม่กี่แถวตอนตัดสิน"""
+    y = pd.Series([0] * 980 + [1] * 20, name="label")
+    thin = thin_strata(y, kind="classification", student_ratio=0.7,
+                       grading_public_ratio=0.5)
+
+    assert "1" in thin, "คลาสที่มี 20 แถวจะเหลือ 3 แถวต่อกอง ต้องเตือน"
+    assert "0" not in thin
+    assert thin["1"]["test_private"] == 3
+
+
+# ── ทำซ้ำได้ ──────────────────────────────────────────────────────────────
+
+
+def test_the_same_seed_gives_the_same_split_bit_for_bit():
+    data = _frame(2000)
+    a, b = _split(data, seed=42), _split(data, seed=42)
+    for name in PARTS:
+        assert fingerprint(as_frame(getattr(a, name))) == fingerprint(as_frame(getattr(b, name)))
+
+
+def test_a_different_seed_moves_the_rows():
+    data = _frame(2000)
+    a, b = _split(data, seed=1), _split(data, seed=2)
+    assert set(a.test_private.X["row"]) != set(b.test_private.X["row"])
+
+
+def test_row_order_in_the_file_does_not_change_the_split():
+    """ไฟล์ที่เรียงใหม่แต่เนื้อเหมือนเดิม **ต้อง**ให้การแบ่งคนละแบบ
+
+    ฟังดูย้อนแย้ง แต่ถูกต้อง — การแบ่งอ้างตำแหน่งแถว ไม่ใช่เนื้อแถว · สิ่งที่
+    ตรึงความหมายของ "ไฟล์นี้" คือ `digest` ของเนื้อไฟล์ ซึ่งเปลี่ยนไปแล้วเมื่อ
+    เรียงใหม่ → `config_hash` เปลี่ยน → แพลตฟอร์มปฏิเสธการเทียบคะแนนเก่ากับใหม่
+    ข้อนี้จึงยืนยันว่าเราไม่ได้เผลอ "แก้" ให้มันทนต่อการเรียงใหม่ ซึ่งจะกลบสัญญาณ
+    """
+    data = _frame(1000)
+    flipped = Dataset(X=data.X.iloc[::-1].reset_index(drop=True),
+                      y=data.y.iloc[::-1].reset_index(drop=True))
+    assert set(_split(data).test_private.X["row"]) != set(_split(flipped).test_private.X["row"])
+
+
+def test_rows_are_shuffled_across_classes_inside_each_part():
+    """แต่ละกองต้องไม่เรียงเป็นก้อนตามคลาส — ไม่งั้น `head()` จะได้คลาสเดียวล้วน"""
+    part = _split(_frame(2000, positives=0.5)).student.y
+    assert 0.3 < part.head(100).mean() < 0.7
+
+
+# ── 🔒 เส้นแบ่งความไว้ใจ ──────────────────────────────────────────────────
+
+
+def test_the_student_part_shares_no_row_with_the_grading_parts():
+    """**ข้อที่พังแล้วการแข่งจบ** — สิ่งที่นิสิตได้ต้องไม่ทับกับสิ่งที่ใช้ตัดสินเลย
+
+    เคยพังมาแล้วในรูปแบบอื่น: ทั้งห้าส่วนเคยมาจาก dataset ชุดเดียวที่สร้างจาก
+    เมล็ดในไฟล์ที่แจกนิสิต ทำให้คำนวณเฉลยของชุดตัดสินได้ครบทุกแถว (macro-F1
+    = 1.0000) · โครงเปลี่ยนไปแล้วแต่คุณสมบัติที่ต้องจริงยังเป็นข้อเดิม
+    """
+    split = _split(_frame(3000))
+
+    student = set(split.student.X["row"])
+    for name in GRADING_PARTS:
+        grading = set(getattr(split, name).X["row"])
+        assert not (student & grading), f"{name} มีแถวที่นิสิตได้ไปแล้ว {len(student & grading)} แถว"
+
+    assert not (set(split.test_public.X["row"]) & set(split.test_private.X["row"])), (
+        "กองที่โชว์บนกระดานทับกับกองที่ตัดสินรอบสุดท้าย — ทีมที่จูนเข้าหากระดาน "
+        "จะได้เปรียบตอนตัดสินโดยอัตโนมัติ"
+    )
+
+
+def test_as_frame_carries_the_answer_and_is_only_used_for_the_student_part():
+    """`as_frame` รวมเฉลยเข้าไปด้วย — ยืนยันว่ามันทำอย่างนั้นจริง
+
+    จุดประสงค์คือทำให้เห็นชัดว่าฟังก์ชันนี้อันตรายถ้าเรียกกับกองที่ใช้ตัดสิน
+    ผู้เรียกที่ถูกต้องมีที่เดียวคือ `dataset.student_csv`
+    """
+    split = _split(_frame(500))
+    assert "label" in as_frame(split.student).columns

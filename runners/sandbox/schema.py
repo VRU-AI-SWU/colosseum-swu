@@ -34,6 +34,13 @@ class Limit:
     #: แก้ไม่ได้ผ่านฟอร์ม — ค่าที่เปลี่ยนแล้วต้อง generate seed ใหม่ทั้งชุด
     #: หรือค่าที่ไม่ใช่การตั้งค่าโจทย์ (เช่น `version`)
     fixed: bool = False
+    #: ตัวควบคุมพิเศษที่หน้าเว็บต้องใช้แทนช่องกรอกธรรมดา — ว่างไว้ = ช่องธรรมดา
+    #:
+    #: บางค่าพิมพ์เองไม่ได้ในทางปฏิบัติ · `dataset` เป็นลายนิ้วมือ 64 หลักที่ได้
+    #: จากการอัปโหลดไฟล์ ส่วน `target` กับ `drop` เป็นชื่อคอลัมน์ที่มีอยู่ในไฟล์
+    #: นั้นเท่านั้น — ฟอร์มที่ให้พิมพ์เองคือฟอร์มที่พิมพ์ผิดได้ และความผิดจะไป
+    #: โผล่ตอนให้คะแนน · ค่าที่ใช้: "upload" | "column" | "columns"
+    widget: str = ""
 
 
 @dataclass(frozen=True)
@@ -54,6 +61,7 @@ class Field:
     maximum: float | None = None
     help: str = ""
     fixed: bool = False
+    widget: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         out = {
@@ -72,6 +80,8 @@ class Field:
                 out[name] = getattr(self, name)
         if self.help:
             out["help"] = self.help
+        if self.widget:
+            out["widget"] = self.widget
         return out
 
 
@@ -195,6 +205,7 @@ def _field(
         maximum=limit.maximum,
         help=limit.help,
         fixed=limit.fixed,
+        widget=limit.widget,
     )
 
 

@@ -30,7 +30,9 @@ dev = ["pytest>=8"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["tabular"]
-# golden.json กับ configs/ ต้องไปกับ wheel — selfcheck ของนิสิตต้องใช้
+# golden.json ต้องไปกับ wheel — selfcheck ของนิสิตใช้เทียบว่าเครื่องคิดเลขตรงกับ grader
+# **ไม่มี configs/ แล้ว** — config ของโจทย์อยู่ในฐานข้อมูล และชุดข้อมูลเป็นไฟล์ในคลัง
+# บนเซิร์ฟเวอร์ ซึ่งไม่มีอะไรที่ควรเดินทางไปกับแพ็กเกจที่นิสิตติดตั้ง
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

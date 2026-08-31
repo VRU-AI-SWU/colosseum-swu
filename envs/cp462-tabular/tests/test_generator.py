@@ -13,7 +13,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from tabular.generator import MISSING_RATE, PLANS, TASKS, Dataset, fingerprint, make
+from tabular.generator import MISSING_RATE, PLANS, TASKS, fingerprint, make
+from tabular.table import Dataset
 
 @pytest.mark.parametrize("task", sorted(TASKS))
 def test_same_seed_gives_identical_data(task):

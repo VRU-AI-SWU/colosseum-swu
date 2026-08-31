@@ -181,12 +181,31 @@ def tabular_schema():
     return PLUGIN.config_schema()
 
 
-@pytest.mark.parametrize("slug", ["churn", "housing"])
-def test_tabular_schema_covers_every_key_in_the_shipped_yaml(tabular_schema, slug):
-    from tabular.config import CONFIG_DIR
+@pytest.fixture
+def tabular_base():
+    """สเปคที่ใช้ได้จริงหนึ่งอัน — ไม่ต้องมีคลัง เพราะ `replace` ไม่ได้อ่านไฟล์
 
-    missing = yaml_keys(CONFIG_DIR / f"{slug}.yaml") - keys_of(tabular_schema)
-    assert not missing, f"{slug}.yaml มีคีย์ที่ฟอร์มไม่รู้จัก: {sorted(missing)}"
+    เดิมข้อพวกนี้อ่านจาก `configs/churn.yaml` ที่แพ็กไปกับแพ็กเกจ · ไฟล์นั้นไม่มี
+    แล้วเพราะ config ของโจทย์อยู่ในฐานข้อมูล และชุดข้อมูลเป็นไฟล์ที่ผู้สอนอัปโหลด
+    """
+    from tabular.config import TaskSpec
+
+    return TaskSpec(
+        title="ทดสอบ", kind="classification", primary="macro_f1",
+        dataset="sha256:" + "ab" * 32, target="y",
+        split_seed=1, bootstrap_seed=2, labels=[0, 1],
+    )
+
+
+def test_the_form_describes_every_field_of_the_spec(tabular_schema):
+    """ฟอร์มต้องครอบทุกฟิลด์ของ `TaskSpec` — ฟิลด์ที่ตกไปจะทำให้ config ไม่ครบ
+
+    `derive()` อนุมานให้อยู่แล้ว ข้อนี้จึงเป็นตัวจับกรณีที่มีใครไปเขียนรายการ
+    ฟิลด์ด้วยมือทับในอนาคต
+    """
+    from tabular.config import TaskSpec
+
+    assert keys_of(tabular_schema) == set(TaskSpec.__dataclass_fields__)
 
 
 def test_tabular_enum_choices_come_from_the_config_module(tabular_schema):
@@ -197,14 +216,26 @@ def test_tabular_enum_choices_come_from_the_config_module(tabular_schema):
     assert set(got["primary"]) == {m for ms in PRIMARY_BY_KIND.values() for m in ms}
 
 
-def test_the_grading_seed_is_never_a_form_field(tabular_schema):
-    """🔒 เมล็ดของชุดที่ใช้ตัดสินอยู่ใน ARENA_SECRETS — ฟอร์มต้องไม่มีทางตั้งมัน
+def test_no_field_can_be_typed_by_hand_when_it_should_be_picked(tabular_schema):
+    """ค่าที่พิมพ์เองไม่ได้ในทางปฏิบัติ ต้องมีตัวควบคุมของตัวเอง
 
-    ถ้าตั้งจากฟอร์มได้ ผู้สอนที่รู้ค่าจะคำนวณเฉลยเองได้ และค่าจะไปนอนอยู่ใน
-    ฐานข้อมูลที่ API อ่านได้ ซึ่งเป็นสิ่งที่ทั้งการออกแบบพยายามเลี่ยง
+    `dataset` เป็นเลข 64 หลักที่ได้จากการอัปโหลด ส่วน `target` กับ `drop` เป็น
+    ชื่อคอลัมน์ที่มีอยู่ในไฟล์นั้นเท่านั้น · ช่องพิมพ์ธรรมดาสำหรับสามอันนี้คือ
+    ช่องที่พิมพ์ผิดได้ และความผิดจะไปโผล่ตอนนิสิตส่งงานเข้ามาแล้ว
     """
-    seed = next(f for f in tabular_schema if f["key"] == "grading_seed")
-    assert seed["fixed"], "grading_seed ต้องเป็นช่องที่แก้ผ่านฟอร์มไม่ได้"
+    widgets = {f["key"]: f.get("widget", "") for f in tabular_schema}
+    assert widgets["dataset"] == "upload"
+    assert widgets["target"] == "column"
+    assert widgets["drop"] == "columns"
+
+
+def test_the_form_never_asks_for_the_split_the_students_do_themselves(tabular_schema):
+    """นิสิตแบ่ง train/val/test เองด้วยเมล็ดของเขา — ฟอร์มต้องไม่มีช่องพวกนั้น
+
+    ถ้ายังมี ผู้สอนจะตั้งค่าที่ระบบไม่ได้ใช้ แล้วเข้าใจว่ามันมีผลกับคะแนน
+    """
+    assert not ({"ratios", "n_rows", "data_seed", "grading_rows", "grading_seed", "task", "slug"}
+                & keys_of(tabular_schema))
 
 
 @pytest.mark.parametrize(
@@ -212,17 +243,17 @@ def test_the_grading_seed_is_never_a_form_field(tabular_schema):
     [
         ("kind", "clustering"),
         ("primary", "roc_auc"),
-        ("n_rows", 50),
-        ("grading_rows", 50),
+        ("dataset", "churn"),
+        ("student_ratio", 0.05),
+        ("student_ratio", 0.99),
         ("grading_public_ratio", 1.0),
     ],
 )
-def test_tabular_values_outside_the_declared_limits_are_really_rejected(field, bad):
-    from tabular.config import CONFIG_DIR, ConfigError, load_config
+def test_tabular_values_outside_the_declared_limits_are_really_rejected(field, bad, tabular_base):
+    from tabular.config import ConfigError
 
-    base = load_config(CONFIG_DIR / "churn.yaml")
     with pytest.raises(ConfigError):
-        base.replace(**{field: bad})
+        tabular_base.replace(**{field: bad})
 
 
 # ── ทะเบียนที่ API ส่งออกไป ─────────────────────────────────────────
@@ -295,11 +326,10 @@ def test_every_declared_limit_in_vacuum_is_enforced_by_the_loader(vacuum_schema)
     )
 
 
-def test_every_declared_limit_in_tabular_is_enforced_by_the_loader(tabular_schema):
-    from tabular.config import CONFIG_DIR, ConfigError, load_config
+def test_every_declared_limit_in_tabular_is_enforced_by_the_loader(tabular_schema, tabular_base):
+    from tabular.config import ConfigError
 
-    base = load_config(CONFIG_DIR / "churn.yaml")
-    unenforced = check_limits_are_real(tabular_schema, base, ConfigError)
+    unenforced = check_limits_are_real(tabular_schema, tabular_base, ConfigError)
     assert not unenforced, (
         "ขอบเขตที่ประกาศแต่ loader ไม่ได้บังคับ:\n  " + "\n  ".join(unenforced)
     )
@@ -344,42 +374,39 @@ def test_narrowed_choices_are_a_subset_of_what_the_field_really_allows():
 
 
 @pytest.mark.parametrize("oid", ["classification", "regression"])
-def test_an_offers_defaults_really_load(oid):
+def test_an_offers_defaults_really_load(oid, tabular_base):
     """**ข้อสำคัญที่สุด** — ค่าที่ตัวเลือกกำหนดให้ ต้องประกอบเป็น config ที่ใช้ได้จริง
 
     ถ้าไม่ตรง ผู้สอนจะเลือกชนิดโจทย์ กรอกครบ กดบันทึก แล้วโดนปฏิเสธด้วยเหตุผล
     ที่พูดถึงฟิลด์ที่ฟอร์มไม่ได้แสดงให้เห็นด้วยซ้ำ
     """
     from tabular.arena import PLUGIN
-    from tabular.config import CONFIG_DIR, load_config
 
-    base = load_config(CONFIG_DIR / "churn.yaml")
-    base.replace(**offers_of(PLUGIN)[oid]["defaults"])   # ต้องไม่โยน
+    tabular_base.replace(**offers_of(PLUGIN)[oid]["defaults"])   # ต้องไม่โยน
 
 
 @pytest.mark.parametrize("oid", ["classification", "regression"])
-def test_every_narrowed_metric_actually_works_with_that_kind(oid):
+def test_every_narrowed_metric_actually_works_with_that_kind(oid, tabular_base):
     """ทุกคะแนนหลักที่เสนอ ต้องเข้าคู่กับ kind นั้นได้จริง — ไล่จากที่ประกาศเอง"""
     from tabular.arena import PLUGIN
-    from tabular.config import CONFIG_DIR, load_config
 
-    base = load_config(CONFIG_DIR / "churn.yaml")
     offer = offers_of(PLUGIN)[oid]
     for metric in offer["narrow"]["primary"]:
-        base.replace(**{**offer["defaults"], "primary": metric})   # ต้องไม่โยน
+        tabular_base.replace(**{**offer["defaults"], "primary": metric})   # ต้องไม่โยน
 
 
 @pytest.mark.parametrize("oid", ["classification", "regression"])
-def test_a_metric_from_the_other_kind_is_still_rejected(oid):
+def test_a_metric_from_the_other_kind_is_still_rejected(oid, tabular_base):
     """พิสูจน์ว่าการจำกัดมีความหมาย — ไม่ใช่ว่าอะไรก็ผ่านอยู่แล้ว"""
     from tabular.arena import PLUGIN
-    from tabular.config import CONFIG_DIR, ConfigError, load_config
+    from tabular.config import ConfigError
 
     offers = offers_of(PLUGIN)
     other = "regression" if oid == "classification" else "classification"
-    base = load_config(CONFIG_DIR / "churn.yaml")
     with pytest.raises(ConfigError):
-        base.replace(**{**offers[oid]["defaults"], "primary": offers[other]["narrow"]["primary"][0]})
+        tabular_base.replace(
+            **{**offers[oid]["defaults"], "primary": offers[other]["narrow"]["primary"][0]}
+        )
 
 
 def test_the_web_page_builds_its_choices_from_offers_not_from_hardcoded_names():

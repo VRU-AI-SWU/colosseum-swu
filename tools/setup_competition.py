@@ -149,33 +149,55 @@ class PredictionTask:
         return {}
 
     def verify(self, base_path: Path, overrides: dict[str, dict], slug: str) -> list[str]:
-        """**เมล็ดของชุดที่ใช้ตัดสินต้องมีอยู่จริง** ก่อนเปิดรับ submission
+        """**ไฟล์ข้อมูลต้องแบ่งได้จริง** ก่อนเปิดรับ submission
 
         เจตนาเดียวกับการตรวจ `config_hash` ของ CP463 — อะไรที่จะทำให้การให้คะแนน
-        ล้ม ต้องรู้ตอนตั้งค่า ไม่ใช่ตอนนิสิตส่งงานแล้ว · ถ้าไม่มีเมล็ด worker จะล้ม
-        ทุก run ด้วย `GradingSeedUnavailable` โดยที่นิสิตไม่ได้ทำอะไรผิด
-        """
-        from tabular.config import load_config
-        from tabular.secrets import GradingSeedUnavailable, load_grading_seed
+        ล้ม ต้องรู้ตอนตั้งค่า ไม่ใช่ตอนนิสิตส่งงานแล้ว · ถ้าไฟล์ไม่อยู่ในคลังของ
+        เครื่องนี้ worker จะล้มทุก run โดยที่นิสิตไม่ได้ทำอะไรผิด
 
-        spec = load_config(base_path)
+        เดิมข้อนี้ตรวจว่ามีเมล็ดลับใน `ARENA_SECRETS` ไหม · ตอนนี้ไม่มีเมล็ดแล้ว
+        และสิ่งที่ตรวจแทนแข็งแรงกว่า เพราะมัน **แบ่งข้อมูลจริง** ไม่ใช่แค่ดูว่ามี
+        ไฟล์ลับอยู่ — ปัญหาอย่างคลาสที่บางเกินไปจึงโผล่ตอนนี้ ไม่ใช่ตอนตัดสินเกรด
+        """
+        from tabular.arena import PLUGIN
+        from tabular.config import load_config
+        from tabular.store import DatasetError
+
         try:
-            load_grading_seed(spec.slug, allow_fallback=False)
-        except GradingSeedUnavailable as exc:
-            return [f"เมล็ดของชุดที่ใช้ตัดสิน: {exc}"]
-        return []
+            preview = PLUGIN.preview(load_config(base_path))
+        except DatasetError as exc:
+            return [f"ชุดข้อมูล: {exc}"]
+
+        problems = []
+        for label, counts in (preview.get("thin") or {}).items():
+            problems.append(
+                f"คลาส {label!r} บางเกินไป — จะเหลือ {counts['test_private']} แถว"
+                f"ในกองที่ตัดสินรอบสุดท้าย · อันดับจะขึ้นกับโชคมากกว่าโมเดล"
+            )
+        return problems
 
     def summary(self, base_path: Path) -> list[str]:
+        from tabular.arena import PLUGIN
         from tabular.config import load_config
+        from tabular.store import DatasetError
 
         spec = load_config(base_path)
-        return [
-            f"โจทย์      {spec.slug} · {spec.kind} · คะแนนหลัก {spec.primary}",
-            f"ชุดนิสิต    {spec.n_rows} แถว → train/val/test {spec.ratios}",
-            f"ชุดตัดสิน   {spec.grading_rows} แถว "
-            f"(public {spec.grading_public_ratio:.0%} · private {1 - spec.grading_public_ratio:.0%})",
-            f"config_hash {spec.config_hash}",
+        lines = [
+            f"โจทย์      {spec.title} · {spec.kind} · คะแนนหลัก {spec.primary}",
+            f"ชุดข้อมูล   {spec.dataset[:23]}… · เฉลยคือคอลัมน์ {spec.target!r}"
+            + (f" · ตัดทิ้ง {spec.drop}" if spec.drop else ""),
         ]
+        try:
+            sizes = PLUGIN.preview(spec)["sizes"]
+        except DatasetError as exc:
+            lines.append(f"การแบ่ง     อ่านไฟล์ไม่ได้ — {exc}")
+        else:
+            lines.append(
+                f"การแบ่ง     แจกนิสิต {sizes['student']} แถว · "
+                f"กระดาน {sizes['test_public']} · ตัดสิน {sizes['test_private']}"
+            )
+        lines.append(f"config_hash {spec.config_hash}")
+        return lines
 
 
 TASK_TYPES = {t.task_type: t for t in (AgentEnvTask(), PredictionTask())}

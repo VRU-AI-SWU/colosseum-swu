@@ -136,19 +136,59 @@ def test_verify_catches_a_config_that_drifted_from_the_seeds():
 
 
 PREDICTION = TASK_TYPES["prediction"]
-CHURN = REPO / "envs" / "cp462-tabular" / "tabular" / "configs" / "churn.yaml"
 
 pytest.importorskip("tabular", reason="ต้องติดตั้ง envs/cp462-tabular ก่อน")
 
+#: ชื่อโจทย์ที่ผู้สอนตั้ง — ใช้ยืนยันว่าชื่อเดินทางจาก config ไปถึง competition
+CHURN_TITLE = "ทำนายการเลิกใช้บริการ"
 
-def test_prediction_has_no_per_phase_config_change():
+
+@pytest.fixture(scope="module")
+def churn(tmp_path_factory):
+    """คลังชุดข้อมูล + ไฟล์ config ของโจทย์ churn — `(config_path, datasets_root)`
+
+    เดิมชี้ไปที่ `tabular/configs/churn.yaml` ที่แพ็กไปกับแพ็กเกจ · ไฟล์นั้นไม่มี
+    แล้ว เพราะ config อยู่ในฐานข้อมูลและชุดข้อมูลเป็นไฟล์ที่ผู้สอนอัปโหลดเข้าคลัง
+    fixture นี้จึงจำลองสิ่งที่ผู้สอนทำจริง: อัปโหลดไฟล์ แล้วเขียน config ที่ชี้ไปหามัน
+    """
+    import os
+
+    import yaml
+    from tabular import store
+    from tabular.arena import PLUGIN
+    from tabular.generator import sample_csv
+
+    root = tmp_path_factory.mktemp("datasets")
+    previous = os.environ.get(store.DATASETS_ENV)
+    os.environ[store.DATASETS_ENV] = str(root)
+
+    digest = PLUGIN.save_dataset(sample_csv("churn", seed=20260101, n=4000))
+    path = tmp_path_factory.mktemp("configs") / "churn.yaml"
+    path.write_text(
+        yaml.safe_dump({
+            "title": CHURN_TITLE, "kind": "classification", "primary": "macro_f1",
+            "dataset": digest, "target": "churned", "drop": ["account_id"],
+            "labels": [0, 1], "split_seed": 7, "bootstrap_seed": 11,
+        }, allow_unicode=True, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    yield path, root
+
+    if previous is None:
+        os.environ.pop(store.DATASETS_ENV, None)
+    else:
+        os.environ[store.DATASETS_ENV] = previous
+
+
+def test_prediction_has_no_per_phase_config_change(churn):
     """โจทย์เดียวตรึงทั้งเทอม — การเปลี่ยนสเปคกลางเทอมทำให้คะแนนเก่าเทียบไม่ได้
 
     ต่างจาก CP463 ที่ตั้งใจให้แต่ละ phase ยากขึ้น · ที่นี่สิ่งที่ต่างกันระหว่าง
     phase คือปฏิทินกับชุดที่ใช้ตัดสิน ซึ่งไม่ได้อยู่ใน config
     """
     for phase in PHASES:
-        assert PREDICTION.overrides(phase, CHURN) == {}
+        assert PREDICTION.overrides(phase, churn[0]) == {}
 
 
 def test_prediction_whitelist_excludes_the_package_that_sees_the_answers():
@@ -157,71 +197,91 @@ def test_prediction_whitelist_excludes_the_package_that_sees_the_answers():
     assert {"numpy", "pandas", "sklearn", "joblib"} <= PREDICTION.whitelist
 
 
-def test_prediction_title_comes_from_the_config_file():
-    """ชื่อโจทย์มาจาก YAML ไม่ใช่พิมพ์ซ้ำใน CLI — พิมพ์ซ้ำแล้วจะไม่ตรงกันวันหนึ่ง"""
-    assert PREDICTION.title(CHURN) == "ทำนายการเลิกใช้บริการ"
+def test_prediction_title_comes_from_the_config_file(churn):
+    """ชื่อโจทย์มาจาก config ไม่ใช่พิมพ์ซ้ำใน CLI — พิมพ์ซ้ำแล้วจะไม่ตรงกันวันหนึ่ง"""
+    assert PREDICTION.title(churn[0]) == CHURN_TITLE
 
 
-def test_prediction_verify_refuses_without_the_grading_seed(monkeypatch):
-    """**ด่านสำคัญ** — ไม่มีเมล็ดลับ = worker จะล้มทุก run โดยที่นิสิตไม่ได้ทำอะไรผิด
+def test_prediction_verify_refuses_when_the_data_file_is_not_on_this_machine(churn, monkeypatch):
+    """**ด่านสำคัญ** — ไฟล์ไม่อยู่ในคลัง = worker จะล้มทุก run โดยที่นิสิตไม่ผิด
 
     เจตนาเดียวกับการตรวจ config_hash ของ CP463: อะไรที่จะทำให้การให้คะแนนล้ม
     ต้องรู้ตอนตั้งค่า ไม่ใช่ตอนนิสิตส่งงานแล้ว
     """
-    monkeypatch.delenv("ARENA_SECRETS", raising=False)
-    problems = PREDICTION.verify(CHURN, {p: {} for p in PHASES}, "cp462-churn-1-2026")
-    assert problems, "ไม่มีเมล็ดลับแล้วต้องปฏิเสธ"
-    assert "ARENA_SECRETS" in problems[0]
+    from tabular import store
+
+    monkeypatch.setenv(store.DATASETS_ENV, str(churn[1] / "ที่ไม่มีอยู่"))
+    problems = PREDICTION.verify(churn[0], {p: {} for p in PHASES}, "cp462-churn-1-2026")
+    assert problems, "ไฟล์ไม่อยู่ในคลังแล้วต้องปฏิเสธ"
+    assert "ARENA_DATASETS" in problems[0]
 
 
-def test_prediction_verify_passes_when_the_seed_is_there(monkeypatch, tmp_path):
-    seeds = tmp_path / "cp462-1-2026" / "tabular"
-    seeds.mkdir(parents=True)
-    (seeds / "churn.yaml").write_text("grading_seed: 12345\n", encoding="utf-8")
-    monkeypatch.setenv("ARENA_SECRETS", str(tmp_path))
-
-    assert PREDICTION.verify(CHURN, {p: {} for p in PHASES}, "cp462-churn-1-2026") == []
+def test_prediction_verify_passes_when_the_file_is_there(churn):
+    assert PREDICTION.verify(churn[0], {p: {} for p in PHASES}, "cp462-churn-1-2026") == []
 
 
-def test_the_created_competition_is_one_the_worker_can_actually_run(tmp_path, monkeypatch):
+def test_prediction_verify_warns_about_a_class_too_thin_to_rank_on(tmp_path, churn):
+    """**สิ่งที่ผู้สอนต้องรู้ก่อนเปิดรับ** — คลาสที่เหลือไม่กี่แถวตอนตัดสิน
+
+    ไม่ใช่ข้อผิดพลาดของระบบ แต่เป็นข้อผิดพลาดของการออกแบบโจทย์ที่มองไม่เห็น
+    จนกว่าจะถึงวันตัดเกรด · เครื่องมือต้องพูดตอนที่ยังแก้ได้
+    """
+    import yaml
+    from tabular import store
+
+    rows = ["a,b,y"] + [f"{i},{i % 7},{1 if i < 12 else 0}" for i in range(1200)]
+    digest = store.put(("\n".join(rows) + "\n").encode("utf-8"))
+    path = tmp_path / "thin.yaml"
+    path.write_text(
+        yaml.safe_dump({
+            "title": "บาง", "kind": "classification", "primary": "macro_f1",
+            "dataset": digest, "target": "y", "drop": [], "labels": [0, 1],
+            "split_seed": 1, "bootstrap_seed": 2,
+        }, allow_unicode=True, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    problems = PREDICTION.verify(path, {p: {} for p in PHASES}, "zz-thin")
+    assert any("บางเกินไป" in p for p in problems), problems
+
+
+def test_the_created_competition_is_one_the_worker_can_actually_run(tmp_path, churn):
     """สร้างจริงผ่าน CLI แล้วให้ worker รันงานจนได้คะแนน
 
     เขียนแถวลงฐานข้อมูลได้ไม่ได้แปลว่าใช้งานได้ — เทสต์นี้เดินเส้นเดียวกับของจริง
     ตั้งแต่ `--create` จนถึงคะแนนขึ้น run
     """
     import io
+    import os
     import shutil
     import subprocess
     import zipfile
 
-    from core.db import Database
     from core.domain import Course, RunStatus
     from core.service import build_arena
     from core.wiring import VALIDATORS
     from runners.worker import Worker
+    from tabular.arena import PLUGIN
+    from tabular.config import load_config
 
-    seeds = tmp_path / "cp462-1-2026" / "tabular"
-    seeds.mkdir(parents=True)
-    (seeds / "churn.yaml").write_text("grading_seed: 987654321\n", encoding="utf-8")
-    monkeypatch.setenv("ARENA_SECRETS", str(tmp_path))
+    config_path, datasets_root = churn
 
     db_path = tmp_path / "arena.db"
     arena = build_arena(tmp_path / "artifacts", validators=VALIDATORS, db_path=db_path)
-    arena.store.save_course(
-        Course(id="cp462-1-2026", name="CP462", join_code="CP462X")
-    )
+    arena.store.save_course(Course(id="cp462-1-2026", name="CP462", join_code="CP462X"))
     arena.store.db.close()
 
+    env = {**os.environ, "ARENA_DATASETS": str(datasets_root)}
     run_tool = subprocess.run(
         [sys.executable, str(REPO / "tools" / "setup_competition.py"),
          "--db", str(db_path), "--slug", "cp462-churn-1-2026", "--create", "--yes",
          "--course", "cp462-1-2026", "--task-type", "prediction",
-         "--env-plugin", "tabular.arena:PLUGIN", "--config", str(CHURN),
+         "--env-plugin", "tabular.arena:PLUGIN", "--config", str(config_path),
          "--warmup", "2026-09-15..2026-09-30",
          "--main", "2026-10-01..2026-10-31",
          "--final", "2026-11-01..2026-11-30",
          "--opens-now"],
-        capture_output=True, text=True, timeout=300,
+        capture_output=True, text=True, timeout=300, env=env,
     )
     assert run_tool.returncode == 0, run_tool.stdout + run_tool.stderr
     assert "สร้างแล้ว" in run_tool.stdout
@@ -233,14 +293,18 @@ def test_the_created_competition_is_one_the_worker_can_actually_run(tmp_path, mo
     assert "tabular" not in competition.effective_whitelist()
     assert [p.name for p in competition.phases] == list(PHASES)
 
-    # submission จริง: เทรนด้วย train.py ที่แจก แล้วส่งเฉพาะไฟล์ที่นิสิตต้องส่ง
+    # submission จริง — **ดาวน์โหลดไฟล์แล้วเทรนจากไฟล์ เหมือนที่นิสิตทำ**
+    spec = load_config(config_path)
     starter = REPO / "envs" / "cp462-tabular" / "tabular" / "starter"
     work = tmp_path / "student"
     work.mkdir()
     for name in ("predictor.py", "train.py"):
         shutil.copy2(starter / name, work / name)
+    (work / "data.csv").write_bytes(PLUGIN.student_bytes(spec))
+
     trained = subprocess.run(
-        [sys.executable, "train.py", "--task", "churn"],
+        [sys.executable, "train.py", "--data", "data.csv",
+         "--target", spec.target, "--kind", spec.kind],
         cwd=work, capture_output=True, text=True, timeout=900,
     )
     assert trained.returncode == 0, trained.stderr
@@ -248,7 +312,7 @@ def test_the_created_competition_is_one_the_worker_can_actually_run(tmp_path, mo
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         for path in sorted(work.iterdir()):
-            if path.is_file() and path.name != "train.py":
+            if path.is_file() and path.name not in ("train.py", "data.csv"):
                 zf.writestr(path.name, path.read_bytes())
 
     user = arena.sign_in(email="a@example.invalid", name="นิสิต", google_sub="s1")
@@ -266,4 +330,4 @@ def test_the_created_competition_is_one_the_worker_can_actually_run(tmp_path, mo
     done = arena.queue.runs[run.id]
     assert done.status is RunStatus.DONE, f"{done.status}: {done.error_message}"
     assert done.score > 0.4
-    assert done.metrics["n_rows"] == 1200
+    assert done.metrics["n_rows"] == PLUGIN.preview(spec)["sizes"]["test_public"]

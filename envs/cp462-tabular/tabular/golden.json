@@ -1,39 +1,30 @@
 {
-  "_comment": "ค่าที่ `python -m tabular.selfcheck` ใช้เทียบ — สร้างด้วย tools/pin_golden.py อย่าแก้ด้วยมือ · ทุกค่าวัดจากชุดของนิสิตล้วน ไม่มีอะไรจากชุดที่ใช้ตัดสิน",
   "env_version": "1.0.0",
   "pickle_runtime": {
     "scikit-learn": "1.9"
   },
-  "tasks": {
-    "churn": {
-      "baselines": {
-        "strong": 0.667082,
-        "trivial": 0.42341
-      },
-      "config_hash": "sha256:9572a4523e65b841871a7cdd8799c34e059a6c68d9019d318c89c6afca14bce9",
-      "sizes": {
-        "test": 3000,
-        "train": 7200,
-        "val": 1800
-      },
-      "test": "sha256:349417a04acabc7d",
-      "train": "sha256:c0d3cd037ebc6963",
-      "val": "sha256:6f4bd80412e749a5"
+  "probe": {
+    "spec": {
+      "task": "churn",
+      "seed": 20260101,
+      "n": 3000,
+      "split_seed": 7,
+      "student_ratio": 0.7,
+      "grading_public_ratio": 0.5
     },
-    "housing": {
-      "baselines": {
-        "strong": 0.809715,
-        "trivial": -0.000891
-      },
-      "config_hash": "sha256:ca946e6a8170994e37a9965526c10a97e92c975d266da837cbfb634aa79e1261",
-      "sizes": {
-        "test": 3000,
-        "train": 7200,
-        "val": 1800
-      },
-      "test": "sha256:32612bb2ae46898f",
-      "train": "sha256:5c4abad9c38cc6b9",
-      "val": "sha256:ca73c74a518ce0bf"
+    "sizes": {
+      "student": 2100,
+      "test_public": 450,
+      "test_private": 450
+    },
+    "fingerprints": {
+      "student": "sha256:49f4230f825388f0",
+      "test_public": "sha256:fdecba6fce0eff3e",
+      "test_private": "sha256:1637755eac953b29"
+    },
+    "baselines": {
+      "trivial": 0.42820839,
+      "strong": 0.66083024
     }
   }
 }
