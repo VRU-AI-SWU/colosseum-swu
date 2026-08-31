@@ -521,3 +521,79 @@ def test_who_created_it_is_recorded(arena):
     client.post("/api/competitions", headers=auth(ta), data=new_competition())
     events = [e for e in arena.store.audit if e.action == "competition.created"]
     assert events and events[-1].actor_id == ta.id
+
+
+# ── สิ่งที่เห็นได้ ต้องผูกกับวิชา ไม่ใช่กับ "เป็นผู้สอนคนใดคนหนึ่ง" ────
+
+
+def with_a_scored_run(arena):
+    """ทีมที่ตั้งชื่อบนกระดานไว้ พร้อม run ที่มีคะแนนแล้ว"""
+    from core.domain import Run, RunKind, RunStatus, Team
+
+    competition = arena.store.competition_by_slug(SLUG)
+    team = Team(id=new_id(), course_id=COURSE, name="ชื่อจริงของทีม",
+                alias="นิรนาม", member_ids=[])
+    arena.store.save_team(team)
+    run = Run(
+        id=new_id(), submission_id="s", team_id=team.id, competition_id=competition.id,
+        kind=RunKind.PUBLIC, status=RunStatus.DONE, score=0.5,
+    )
+    arena.queue.runs[run.id] = run
+    return team
+
+
+def names_on_board(arena, email) -> list[str]:
+    client = TestClient(create_app(arena))
+    body = client.get(f"/api/competitions/{SLUG}/leaderboard",
+                      headers=auth(sign_in(arena, email))).json()
+    return [r["name"] for r in body["rows"]]
+
+
+def test_the_course_instructor_sees_real_names_on_their_own_board(arena):
+    """ผู้สอนต้องเห็นชื่อจริงของนิสิต**ตัวเอง**เพื่อตัดเกรด — alias มีไว้ลดแรงกดดัน
+    ระหว่างนิสิตด้วยกัน ไม่ใช่ซ่อนตัวจากการตรวจ (README §6.1)"""
+    with_a_scored_run(arena)
+    assert "ชื่อจริงของทีม" in names_on_board(arena, TA)
+
+
+def test_an_instructor_of_another_course_does_not_see_real_names(arena):
+    """**นี่คือสิ่งที่เปลี่ยนจาก `is_staff` มาเป็น `can_manage_course`** — ไม่มีเหตุผล
+    ให้ผู้สอนวิชาหนึ่งเห็นชื่อจริงของนิสิตในวิชาที่ตัวเองไม่ได้สอน"""
+    arena.course_staff = {**arena.course_staff, "cp463-1-2026": frozenset({OTHER})}
+    with_a_scored_run(arena)
+    names = names_on_board(arena, OTHER)
+    assert "นิรนาม" in names and "ชื่อจริงของทีม" not in names
+
+
+def test_students_see_only_the_board_names(arena):
+    with_a_scored_run(arena)
+    names = names_on_board(arena, STUDENT)
+    assert "นิรนาม" in names and "ชื่อจริงของทีม" not in names
+
+
+def test_a_system_wide_instructor_still_sees_real_names(arena):
+    with_a_scored_run(arena)
+    assert "ชื่อจริงของทีม" in names_on_board(arena, AJ)
+
+
+def join_code_seen_by(arena, email):
+    client = TestClient(create_app(arena))
+    user = sign_in(arena, email)
+    arena.enroll(user=user, join_code="AAAAAA")
+    body = client.get("/api/me", headers=auth(user)).json()
+    return next(e["course"]["join_code"] for e in body["enrollments"]
+                if e["course"]["id"] == COURSE)
+
+
+def test_the_course_instructor_gets_the_join_code_to_read_out_in_class(arena):
+    assert join_code_seen_by(arena, TA) == "AAAAAA"
+
+
+def test_a_student_never_gets_the_join_code_back(arena):
+    """นิสิตใส่รหัสเข้ามาได้ แต่ต้องไม่ได้รหัสคืนไปแจกต่อ"""
+    assert join_code_seen_by(arena, STUDENT) is None
+
+
+def test_an_instructor_of_another_course_does_not_get_this_courses_join_code(arena):
+    arena.course_staff = {**arena.course_staff, "cp463-1-2026": frozenset({OTHER})}
+    assert join_code_seen_by(arena, OTHER) is None

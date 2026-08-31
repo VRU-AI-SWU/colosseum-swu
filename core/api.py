@@ -221,7 +221,13 @@ def create_app(
                     "id": course.id,
                     "name": course.name,
                     "max_team_size": course.max_team_size,
-                    "join_code": course.join_code if arena.is_staff(user.email) else None,
+                    # รหัสเข้าวิชาให้เฉพาะผู้สอน**ของวิชานั้น** — เขาคือคนที่ต้องอ่าน
+                    # ให้นิสิตฟังในคาบ · ผู้สอนวิชาอื่นไม่มีเหตุผลที่จะได้รหัสนี้ไป
+                    "join_code": (
+                        course.join_code
+                        if arena.can_manage_course(user.email, course.id)
+                        else None
+                    ),
                 },
                 "team": {
                     "id": team.id,
@@ -493,8 +499,12 @@ def create_app(
         marks = baselines.get(slug, [])
         # ผู้สอนเห็นชื่อจริงเสมอ (README §6.1) — alias เป็นการลดแรงกดดันระหว่างนิสิต
         # ด้วยกัน ไม่ใช่การซ่อนตัวจากการตรวจ · ก่อนหน้านี้ไม่มีใครเห็นชื่อจริงเลย
+        #
+        # **ผูกกับวิชาของ competition นี้ ไม่ใช่ `is_staff` ทั้งระบบ** — ผู้สอนต้องเห็น
+        # ชื่อจริงของนิสิต*ตัวเอง*เพื่อตัดเกรด แต่ไม่มีเหตุผลให้เห็นชื่อจริงของนิสิต
+        # ในวิชาที่ตัวเองไม่ได้สอน · เดิมใช้ `is_staff` เพราะตอนนั้นมีผู้สอนคนเดียว
         rows = build(runs, arena.store.teams, kind=run_kind,
-                     reveal_names=arena.is_staff(user.email))
+                     reveal_names=arena.can_manage_course(user.email, competition.course_id))
 
         return {
             "competition": slug,
