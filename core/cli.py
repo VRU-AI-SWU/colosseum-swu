@@ -433,6 +433,27 @@ def _pick_launcher(args, sandbox):
     return sandbox.local(), "subprocess (auto fallback) ⚠️ ไม่มี container ห่อ"
 
 
+def _print_staff(arena) -> None:
+    """สรุปว่าใครเป็นผู้สอนบ้าง ตอนบริการเริ่ม
+
+    แยกออกมาเป็นฟังก์ชันเพื่อให้เทสต์อ่านบรรทัดที่พิมพ์ได้จริง — เคยมีบั๊กที่
+    ข้อความสองบรรทัดขัดกันเอง (บอกว่ามีผู้สอน แล้วบอกว่ายังไม่ได้ตั้ง) เพราะ
+    การแทรก `for` ไว้ก่อน `else` ทำให้มันกลายเป็น `for...else` ของ Python
+    ซึ่งทำงานเมื่อวนจบโดยไม่ `break` · อ่าน journal ถึงจะเจอ ไม่มีเทสต์ไหนจับได้เลย
+
+    ⚠️ **`else` ต้องอยู่ติดกับ `if` เท่านั้น** — อย่าแทรกอะไรไว้ตรงกลาง
+    """
+    if arena.staff_emails:
+        print(f"ผู้สอน     : {', '.join(sorted(arena.staff_emails))}")
+    else:
+        print("ผู้สอน     : ⚠️ ยังไม่ได้ตั้ง ARENA_STAFF_EMAILS — ไม่มีใครเปลี่ยนขนาดทีมได้")
+
+    for course_id, emails in sorted(arena.course_staff.items()):
+        # ตัวแปรที่สะกดชื่อวิชาผิดจะไม่มีผลกับใครเลย — ต้องบอก ไม่ใช่เงียบ
+        known = "" if course_id in arena.store.courses else "  ⚠️ ไม่มีวิชานี้ — ตัวแปรนี้ไม่มีผล"
+        print(f"ผู้สอนวิชา : {course_id} → {', '.join(sorted(emails))}{known}")
+
+
 def cmd_serve(args) -> int:
     """รัน API + worker ในกระบวนการเดียว — **สำหรับ dev เท่านั้น**"""
     import threading
@@ -483,13 +504,7 @@ def cmd_serve(args) -> int:
     print(f"sandbox    : {sandbox_note}")
     arena.staff_emails = staff_emails_from_env()
     arena.course_staff = course_staff_from_env()
-    if arena.staff_emails:
-        print(f"ผู้สอน     : {', '.join(sorted(arena.staff_emails))}")
-    for course_id, emails in sorted(arena.course_staff.items()):
-        known = "" if course_id in arena.store.courses else "  ⚠️ ไม่มีวิชานี้ — ตัวแปรนี้ไม่มีผล"
-        print(f"ผู้สอนวิชา : {course_id} → {', '.join(sorted(emails))}{known}")
-    else:
-        print("ผู้สอน     : ⚠️ ยังไม่ได้ตั้ง ARENA_STAFF_EMAILS — ไม่มีใครเปลี่ยนขนาดทีมได้")
+    _print_staff(arena)
     google = google_auth_from_env()
     if google:
         print(f"ล็อกอิน    : Google Workspace @{google.allowed_domain}")

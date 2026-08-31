@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -284,3 +285,62 @@ def test_a_gap_between_phases_is_allowed():
         "final": day_range("2026-11-01", "2026-11-30"),
     })
     assert [p.name for p in phases] == list(PHASES)
+
+
+# ── ข้อความตอนเริ่มบริการ ──────────────────────────────────────────
+
+
+def startup_lines(monkeypatch, tmp_path, env: dict[str, str]) -> list[str]:
+    """รัน `arena serve` เท่าที่จำเป็นเพื่ออ่านบรรทัดสรุป — ไม่เปิดพอร์ตจริง"""
+    import io
+    import contextlib
+
+    from core import cli
+    from core.wiring import course_staff_from_env, staff_emails_from_env
+
+    for key in [k for k in os.environ if k.startswith("ARENA_")]:
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+    a = build_arena(tmp_path / "artifacts")
+    a.store.save_course(Course(id=COURSE, name="CP462", join_code="AAAAAA"))
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        a.staff_emails = staff_emails_from_env()
+        a.course_staff = course_staff_from_env()
+        cli._print_staff(a)
+    return buf.getvalue().splitlines()
+
+
+def test_a_configured_deployment_does_not_warn_that_nobody_is_staff(monkeypatch, tmp_path):
+    """**บั๊กที่เคยเกิดจริง** — แทรก `for` ไว้ก่อน `else` แล้วมันกลายเป็น `for...else`
+
+    ผลคือเครื่องที่ตั้ง ARENA_STAFF_EMAILS ถูกต้องแล้วยังขึ้นคำเตือนว่ายังไม่ได้ตั้ง
+    ซึ่งชวนให้ไปไล่หาปัญหาผิดที่ · เจอตอนอ่าน journal หลัง restart จริง
+    """
+    lines = startup_lines(monkeypatch, tmp_path, {"ARENA_STAFF_EMAILS": AJ})
+    assert any(AJ in ln for ln in lines), lines
+    assert not any("ยังไม่ได้ตั้ง" in ln for ln in lines), lines
+
+
+def test_an_unconfigured_deployment_still_warns(monkeypatch, tmp_path):
+    lines = startup_lines(monkeypatch, tmp_path, {})
+    assert any("ยังไม่ได้ตั้ง" in ln for ln in lines), lines
+
+
+def test_per_course_staff_is_listed(monkeypatch, tmp_path):
+    lines = startup_lines(
+        monkeypatch, tmp_path,
+        {"ARENA_STAFF_EMAILS": AJ, env_key_for_course(COURSE): TA},
+    )
+    assert any(COURSE in ln and TA in ln for ln in lines), lines
+
+
+def test_a_typo_in_the_course_id_is_called_out(monkeypatch, tmp_path):
+    """ตัวแปรที่สะกดชื่อวิชาผิดจะไม่มีผลกับใครเลย — ต้องบอก ไม่ใช่เงียบ"""
+    lines = startup_lines(
+        monkeypatch, tmp_path,
+        {"ARENA_STAFF_EMAILS": AJ, env_key_for_course("cp999-9-9999"): TA},
+    )
+    assert any("ไม่มีวิชานี้" in ln for ln in lines), lines
