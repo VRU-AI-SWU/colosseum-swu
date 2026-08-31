@@ -211,6 +211,20 @@ def parse_range(text: str) -> tuple[datetime, datetime]:
     return start, end + timedelta(days=1)
 
 
+def _confirmed() -> bool:
+    """ถามยืนยัน — **ไม่มี tty ถือว่าไม่ยืนยัน**
+
+    เดิมโยน `EOFError` พร้อม traceback ตอนรันแบบไม่มี stdin (ผ่าน ssh หรือใน
+    สคริปต์) ซึ่งอ่านแล้วเหมือนเครื่องมือพัง ทั้งที่พฤติกรรมถูกอยู่แล้วคือไม่เขียน
+    อะไรลงไป · คนที่ตั้งใจรันแบบอัตโนมัติใช้ `--yes`
+    """
+    try:
+        return input("\nยืนยัน? (พิมพ์ yes) ").strip() == "yes"
+    except EOFError:
+        print("\n(ไม่มี stdin ให้ตอบ — ถ้าตั้งใจรันแบบอัตโนมัติให้ใส่ --yes)")
+        return False
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -368,8 +382,8 @@ def main() -> int:
                 print(f"\n  ℹ️ มี {len(stale)} run ที่ส่งไว้นอกปฏิทินใหม่ — ยังอยู่ในฐานข้อมูลครบ")
                 print("     แต่ `phase_at` จะหาช่วงไม่เจอ แล้วถอยไปใช้ชื่อ 'main'")
 
-        if not args.yes and input("\nยืนยัน? (พิมพ์ yes) ").strip() != "yes":
-            print("ยกเลิก")
+        if not args.yes and not _confirmed():
+            print("ยกเลิก — ไม่ได้เขียนอะไรลงฐานข้อมูล")
             return 1
 
         competition.opens_at = opens_at
