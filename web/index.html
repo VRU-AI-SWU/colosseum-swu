@@ -10,31 +10,66 @@
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
-  --stone:   #e9e4d9;   /* travertine — หินที่ใช้สร้างโคลอสเซียมจริง */
-  --stone-2: #dfd8c9;
-  --ink:     #2a2521;
-  --muted:   #6f665c;
-  --rule:    #c9bfad;
-  --blood:   #8c2f24;   /* แดงของธงโรมัน — ใช้เน้นอย่างเดียว ไม่ใช้เป็นพื้น */
-  --gold:    #a8832f;
-  --you:     #f5efe1;
-  --radius: 2px;
+  /* ── สี ──────────────────────────────────────────────────────────
+     ยังเป็นหินทรเวอร์ทีนเหมือนเดิม แต่ยกคอนทราสต์ขึ้นทั้งชุด
+     `--muted` เดิม (#6f665c บน #e9e4d9) อยู่ที่ ~4.0:1 ซึ่งต่ำกว่า WCAG AA
+     สำหรับตัวอักษรขนาดเล็ก — และหน้านี้ใช้ตัวเล็กสีนั้นเยอะมาก จึงอ่านยาก */
+  --bg:      #f4f1ea;   /* พื้นหลังของหน้า — สว่างและสะอาดกว่าเดิม */
+  --surface: #fffdf9;   /* พื้นของการ์ด — ยกขึ้นจากพื้นหลังนิดเดียว */
+  --ink:     #1f1c18;
+  --muted:   #5c5349;   /* 7.2:1 บน --surface */
+  --rule:    #e2dacb;
+  --rule-strong: #cfc4ae;
+  --blood:   #8c2f24;
+  --gold:    #8a6a1f;   /* เข้มขึ้นให้อ่านออกบนพื้นสว่าง */
+  --you:     #fdf6e3;
+  --ok:      #3f6b3b;
+
+  /* ── จังหวะ ── ใช้สเกลเดียวทั้งหน้า แทนการเดาค่าเป็นจุดๆ */
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
+  --s5: 24px; --s6: 32px; --s7: 48px;
+
+  --radius: 10px;
+  --radius-sm: 6px;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --stone: #171513; --stone-2: #221f1b; --ink: #e8e1d4; --muted: #9a9083;
-    --rule: #3a352e; --blood: #c95a4a; --gold: #d0a94c; --you: #26221c;
+    --bg: #131110; --surface: #1c1917; --ink: #ece5d8; --muted: #a1968a;
+    --rule: #302b26; --rule-strong: #453e36; --blood: #d4685a; --gold: #d6b25e;
+    --you: #262019; --ok: #7aa86f;
   }
-  :root:not([data-theme="light"]) body { background: #171513; }
+  :root:not([data-theme="light"]) body { background: var(--bg); }
 }
 * { box-sizing: border-box; }
 body {
-  margin: 0; background: var(--stone); color: var(--ink);
+  margin: 0; background: var(--bg); color: var(--ink);
   font-family: "IBM Plex Sans Thai", system-ui, -apple-system, sans-serif;
-  font-size: 15px; line-height: 1.6;
+  /* 16px ไม่ใช่ 15 — ภาษาไทยมีสระบนล่าง ตัวเล็กกว่านี้ทำให้วรรณยุกต์ชนกัน */
+  font-size: 16px; line-height: 1.65;
   -webkit-font-smoothing: antialiased;
 }
-.wrap { max-width: 860px; margin: 0 auto; padding: 0 20px 80px; }
+.wrap { max-width: 940px; margin: 0 auto; padding: 0 var(--s5) var(--s7); }
+
+/* ── การ์ด ── กล่องทุกใบบนหน้านี้ใช้ทรงเดียวกัน
+   เดิมแต่ละส่วนมีเส้นขอบบางๆ ของตัวเองแล้ววางชิดกัน จึงอ่านเป็นแถบยาวๆ ต่อกัน
+   แยกเป็นการ์ดที่มีพื้นของตัวเองทำให้สายตาจับได้ว่าอะไรเป็นก้อนเดียวกัน */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: var(--s5);
+  margin-top: var(--s5);
+}
+.card > h2, .sec-head h2 {
+  margin: 0; font-family: Cinzel, Georgia, serif; font-weight: 600;
+  font-size: 19px; letter-spacing: .06em;
+}
+.sec-head {
+  display: flex; align-items: baseline; gap: var(--s3) var(--s4);
+  flex-wrap: wrap; margin-bottom: var(--s4);
+}
+.sec-head .hint { color: var(--muted); font-size: 13px; }
+.sec-head .spacer { margin-left: auto; }
 
 /* ── hero ── รูปเต็มความกว้าง ชื่อทับอยู่บนฝ้า
    ตั้งใจไม่ทำเป็น background ของทั้งหน้า — หน้านี้คือตาราง ตัวเลขต้องอ่านง่ายที่สุด
@@ -83,26 +118,28 @@ h1 {
 
 /* ── แถบเป้าหมายถัดไป ── */
 .target {
-  margin: 30px 0 0; padding: 16px 20px;
+  margin: var(--s5) 0 0; padding: var(--s4) var(--s5);
   border: 1px solid var(--rule); border-left: 3px solid var(--blood);
-  background: var(--stone-2); border-radius: var(--radius);
+  background: var(--surface); border-radius: var(--radius);
+  font-size: 15px;
 }
 .target b { font-weight: 600; }
 .target .gap { color: var(--blood); font-variant-numeric: tabular-nums; }
 
 /* ── ตาราง ── */
-table { width: 100%; border-collapse: collapse; margin-top: 28px; }
+table { width: 100%; border-collapse: collapse; margin-top: var(--s4); font-size: 15px; }
 caption {
   text-align: left; color: var(--muted); font-size: 12px;
   letter-spacing: .12em; text-transform: uppercase; padding-bottom: 10px;
 }
 th {
-  font-weight: 500; font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
-  color: var(--muted); text-align: left; padding: 0 10px 8px;
-  border-bottom: 1px solid var(--rule);
+  font-weight: 600; font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--muted); text-align: left; padding: 0 12px 10px;
+  border-bottom: 1px solid var(--rule-strong);
 }
 th.n, td.n { text-align: right; font-variant-numeric: tabular-nums; }
-td { padding: 11px 10px; border-bottom: 1px solid var(--rule); }
+td { padding: 14px 12px; border-bottom: 1px solid var(--rule); }
+tbody tr:hover td { background: color-mix(in srgb, var(--ink) 4%, transparent); }
 tr.you td { background: var(--you); }
 tr.you .name::after {
   content: "คุณ"; margin-left: 8px; font-size: 10px; letter-spacing: .1em;
@@ -132,17 +169,27 @@ footer a { color: var(--muted); }
 
 /* ── แถบทีม ── ข้อมูลที่ต้องใช้เป็นครั้งคราว ไม่ใช่เนื้อหาหลักของหน้า
    จึงบางและเงียบกว่าตาราง แต่หยิบใช้ได้ทันทีเมื่อต้องการ */
+/* ── แผงข้อมูล ── เดิมเป็น flex แถวเดียวยาวๆ ที่อัดทุกอย่างเรียงกัน
+   ทำให้อ่านไม่ออกว่าค่าไหนเป็นของป้ายไหน · เปลี่ยนเป็นกริดที่ป้ายอยู่เหนือค่า
+   แล้วห่อบรรทัดเองเมื่อจอแคบ */
 .team {
-  margin-top: 26px; padding: 14px 16px;
+  margin-top: var(--s5); padding: var(--s5);
   border: 1px solid var(--rule); border-radius: var(--radius);
-  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
-  font-size: 13px;
+  background: var(--surface);
+  display: grid; gap: var(--s4) var(--s5);
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  align-items: start;
+  font-size: 15px;
+}
+.team .who {
+  display: block; font-size: 11px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 2px;
 }
 .team b { font-weight: 600; }
 .team .who { color: var(--muted); }
 .chip {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  background: var(--stone-2); border: 1px solid var(--rule);
+  background: var(--surface); border: 1px solid var(--rule);
   padding: 3px 9px; border-radius: var(--radius); cursor: pointer;
   font-size: 12px; letter-spacing: .06em;
 }
@@ -158,7 +205,7 @@ footer a { color: var(--muted); }
 .picker select {
   font: inherit; font-size: 13px; padding: 4px 8px; max-width: 100%;
   border: 1px solid var(--rule); border-radius: var(--radius);
-  background: var(--stone-2); color: var(--ink);
+  background: var(--surface); color: var(--ink);
 }
 .picker .para {
   font-size: 11px; letter-spacing: .04em; text-transform: uppercase;
@@ -173,7 +220,7 @@ footer a { color: var(--muted); }
      แล้วอ่านเหมือนช่องกรอกข้อความยาวๆ ทั้งที่รับได้แค่เลขหลักเดียวสองหลัก */
   flex: 0 0 auto; width: 4.5em; padding: 3px 6px; font: inherit; font-size: 13px;
   border: 1px solid var(--rule); border-radius: var(--radius);
-  background: var(--stone); color: var(--ink);
+  background: var(--bg); color: var(--ink);
 }
 .staff .warn { color: var(--blood); }
 /* คำอธิบายสองรหัส — ซ่อนไว้เพราะคนที่เข้าใจแล้วไม่ต้องอ่านซ้ำทุกครั้ง
@@ -186,7 +233,7 @@ footer a { color: var(--muted); }
 .help b { color: var(--ink); font-weight: 600; }
 .help code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  background: var(--stone-2); padding: 1px 5px; border-radius: var(--radius);
+  background: var(--surface); padding: 1px 5px; border-radius: var(--radius);
   font-size: 11px;
 }
 .help .warn { color: var(--blood); }
@@ -205,7 +252,7 @@ footer a { color: var(--muted); }
 input {
   flex: 1 1 220px; padding: 9px 11px; font: inherit; font-size: 14px;
   border: 1px solid var(--rule); border-radius: var(--radius);
-  background: var(--stone-2); color: var(--ink);
+  background: var(--surface); color: var(--ink);
 }
 button {
   padding: 9px 18px; font: inherit; font-size: 14px; cursor: pointer;
@@ -214,7 +261,7 @@ button {
 }
 button.ghost { background: transparent; color: var(--muted); border-color: var(--rule); }
 button.google {
-  background: var(--stone-2); color: var(--ink); border-color: var(--rule);
+  background: var(--surface); color: var(--ink); border-color: var(--rule);
   display: inline-flex; align-items: center; gap: 9px; font-weight: 500;
 }
 button.google:hover { border-color: var(--blood); }
@@ -252,7 +299,7 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
 .cal-now b { color: var(--ink); }
 .cal-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .ph { border: 1px solid var(--rule); border-radius: var(--radius);
-  padding: 9px 10px; background: var(--stone-2); }
+  padding: 9px 10px; background: var(--surface); }
 .ph.on { border-color: var(--gold); background: var(--you);
   box-shadow: inset 0 2px 0 var(--gold); }
 .ph.past { opacity: .55; }
@@ -263,7 +310,60 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
   line-height: 1.45; }
 .ph.on .ph-name::after { content: " · ตอนนี้"; color: var(--gold); font-weight: 600; }
 @media (max-width: 620px) { .cal-strip { grid-template-columns: 1fr; } }
-.cal-edit { margin-top: 10px; flex-wrap: wrap; }
+/* ── หน้าสร้างวิชาและโจทย์ ── ฟอร์มจริงที่มีหลายช่อง จึงใช้กริดที่ป้ายอยู่เหนือช่อง
+   ต่างจากแผงเล็กๆ ที่เรียงเป็นแถวเดียวได้ */
+.authoring { margin-top: var(--s5); }
+.authoring details { border-top: 1px solid var(--rule); }
+.authoring details:first-of-type { border-top: 0; }
+.authoring summary {
+  cursor: pointer; padding: var(--s4) 0; font-weight: 600; font-size: 15px;
+  display: flex; align-items: center; gap: var(--s2); list-style: none;
+}
+.authoring summary::-webkit-details-marker { display: none; }
+.authoring summary::before { content: "＋"; color: var(--muted); font-weight: 400; }
+.authoring details[open] summary::before { content: "－"; }
+.authoring summary .hint { font-weight: 400; color: var(--muted); font-size: 13px; }
+.form {
+  display: grid; gap: var(--s4);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  /* `start` ไม่ใช่ค่าปริยาย `stretch` — ไม่งั้นทุกช่องในแถวจะยืดสูงเท่าช่องที่สูงสุด
+     (ช่องที่มีคำอธิบายใต้มัน) แล้วกล่องกรอกจะกลายเป็นสี่เหลี่ยมสูงๆ ที่ดูเหมือน
+     ช่องกรอกข้อความหลายบรรทัด ทั้งที่รับค่าบรรทัดเดียว */
+  align-items: start;
+  padding-bottom: var(--s5);
+}
+.form .full { grid-column: 1 / -1; }
+.f { display: flex; flex-direction: column; gap: var(--s1); min-width: 0; }
+.f label { font-size: 12px; color: var(--muted); font-weight: 500; }
+.f input, .f select {
+  font: inherit; font-size: 15px; padding: 8px 10px; width: 100%; min-width: 0;
+  flex: 0 0 auto;
+  border: 1px solid var(--rule-strong); border-radius: var(--radius-sm);
+  background: var(--bg); color: var(--ink);
+}
+.f input:focus, .f select:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
+.f .tip { font-size: 12px; color: var(--muted); }
+/* คู่ของวัน — ห่อบรรทัดเองเมื่อคอลัมน์แคบ ไม่งั้นช่องที่สองล้นออกนอกการ์ด */
+.dates { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s2); }
+.dates input { flex: 1 1 130px; }
+.f-group { grid-column: 1 / -1; margin-top: var(--s2); }
+.f-group > h3 {
+  margin: 0 0 var(--s2); font-size: 11px; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--muted); font-weight: 600;
+}
+.f-group .form { padding-bottom: 0; }
+.btn {
+  font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
+  padding: 9px 18px; border-radius: var(--radius-sm);
+  border: 1px solid var(--ink); background: var(--ink); color: var(--surface);
+}
+.btn:hover { opacity: .88; }
+.btn.ghost { background: transparent; color: var(--ink); border-color: var(--rule-strong); }
+.msg { font-size: 14px; }
+.msg.warn { color: var(--blood); }
+.msg.ok { color: var(--ok); }
+
+.cal-edit { margin-top: var(--s4); flex-wrap: wrap; }
 .cal-edit input[type="date"] { width: 11em; }
 .cal-edit .grp { display: flex; align-items: center; gap: 4px; }
 </style>
@@ -329,6 +429,8 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
     </div>
   </section>
 
+  <section class="card authoring" id="authoring" hidden></section>
+
   <main id="board" hidden>
     <div class="team" id="team" hidden></div>
     <div class="team staff" id="staff" hidden></div>
@@ -377,17 +479,28 @@ const PHOTO_CREDIT = "";
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => (n === null || n === undefined) ? "—" : n.toFixed(4);
 
-let token = localStorage.getItem(KEY) || "";
+/* ── ที่เก็บของเบราว์เซอร์ ── **ทุกการเข้าถึงต้องห่อ try**
+   `localStorage` โยนได้ ไม่ใช่แค่คืนค่าว่าง — โหมดส่วนตัวบางตัว เบราว์เซอร์ที่ตั้ง
+   ให้บล็อก site data และหน้าที่เปิดจาก `data:` ทั้งหมดโยน SecurityError
+   เดิมบรรทัดแรกอ่านตรงๆ ซึ่งแปลว่า **ทั้งหน้าตายตั้งแต่ยังไม่ทันวาดอะไรเลย**
+   ทั้งที่สิ่งที่เสียไปจริงๆ มีแค่ "จำโทเคนไว้ให้" ซึ่งไม่ใช่สาระของหน้านี้ */
+const store = {
+  get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+  set(key, value) { try { localStorage.setItem(key, value); } catch {} },
+  remove(key) { try { localStorage.removeItem(key); } catch {} },
+};
+
+let token = store.get(KEY) || "";
 let timer = null;
 let me = null;          // ผลล่าสุดของ /api/me — ตัวตน + ทุกวิชาที่อยู่
 let courseId = "";      // วิชาที่กำลังดู
 let slug = "";          // competition ที่กำลังดู
 
 function savePick() {
-  try { localStorage.setItem(PICK_KEY, JSON.stringify({ courseId, slug })); } catch {}
+  store.set(PICK_KEY, JSON.stringify({ courseId, slug }));
 }
 function loadPick() {
-  try { return JSON.parse(localStorage.getItem(PICK_KEY) || "{}"); } catch { return {}; }
+  try { return JSON.parse(store.get(PICK_KEY) || "{}"); } catch { return {}; }
 }
 
 /** วิชาที่กำลังดูอยู่ (จาก me.enrollments) หรือ null ถ้ายังไม่ได้เลือก/ไม่ได้อยู่วิชาไหน */
@@ -414,7 +527,7 @@ function takeTokenFromUrl() {
   }
   if (fresh) {
     token = fresh;
-    localStorage.setItem(KEY, fresh);
+    store.set(KEY, fresh);
   }
 }
 
@@ -563,6 +676,200 @@ async function promptAlias(enrolment) {
   } catch (e) {
     alert(e.message || "เปลี่ยนชื่อไม่สำเร็จ");
   }
+}
+
+
+// ── หน้าสร้างวิชาและโจทย์ ────────────────────────────────────────────
+// วาดฟอร์มจาก `GET /api/environments` **ไม่ใช่เขียนฟอร์มมือต่อ env** — ฟอร์มที่
+// เขียนมือจะเพี้ยนจาก config จริงในวันที่มีคนเพิ่มฟิลด์ แล้วผู้สอนกรอกครบแต่
+// บันทึกไม่ได้ โดยข้อความที่เห็นพูดถึงฟิลด์ที่ฟอร์มไม่ได้แสดงด้วยซ้ำ
+let ENVS = null;
+
+const esc = (v) => escapeHtml(String(v == null ? "" : v));
+
+function fieldHtml(f) {
+  const id = "cfg-" + f.key.replace(/\./g, "-");
+  const tip = f.help ? `<span class="tip">${esc(f.help)}</span>` : "";
+  const req = f.required ? " required" : "";
+  let input;
+  if (f.type === "enum") {
+    const opts = (f.choices || []).map((c) =>
+      `<option value="${esc(c)}"${c === f.default ? " selected" : ""}>${esc(c)}</option>`).join("");
+    input = `<select id="${id}" data-key="${esc(f.key)}" data-type="enum"${req}>${opts}</select>`;
+  } else if (f.type === "bool") {
+    input = `<select id="${id}" data-key="${esc(f.key)}" data-type="bool">` +
+      `<option value="true"${f.default ? " selected" : ""}>ใช่</option>` +
+      `<option value="false"${f.default ? "" : " selected"}>ไม่</option></select>`;
+  } else {
+    const numeric = f.type === "int" || f.type === "float";
+    const step = f.type === "float" ? ' step="any"' : "";
+    const min = f.minimum != null ? ` min="${esc(f.minimum)}"` : "";
+    const max = f.maximum != null ? ` max="${esc(f.maximum)}"` : "";
+    const val = f.default == null ? "" : esc(f.default);
+    input = `<input id="${id}" data-key="${esc(f.key)}" data-type="${esc(f.type)}"` +
+      ` type="${numeric ? "number" : "text"}"${step}${min}${max} value="${val}"${req}>`;
+  }
+  return `<div class="f"><label for="${id}">${esc(f.key)}</label>${input}${tip}</div>`;
+}
+
+function configFormHtml(env) {
+  // ข้ามช่องที่ `fixed` — มันคือค่าที่แก้ผ่านฟอร์มไม่ได้ (เช่น เมล็ดของชุดที่ใช้
+  // ตัดสิน ซึ่งอยู่ใน ARENA_SECRETS) การแสดงช่องที่กรอกแล้วไม่มีผลคือการโกหก
+  const shown = env.fields.filter((f) => !f.fixed);
+  const sections = [...new Set(shown.map((f) => f.section))];
+  return sections.map((name) => {
+    const group = shown.filter((f) => f.section === name);
+    const head = name ? `<h3>${esc(name)}</h3>` : "";
+    return `<div class="f-group">${head}<div class="form">` +
+           group.map(fieldHtml).join("") + `</div></div>`;
+  }).join("");
+}
+
+function readConfigForm(root) {
+  /* อ่านค่าจากฟอร์มแล้วเขียนเป็น YAML — โครงของ config ลึกแค่ชั้นเดียวเสมอ
+     (`room.width`) การเขียนเองจึงพอ และเซิร์ฟเวอร์ตรวจด้วย loader จริงอยู่แล้ว
+     ถ้าเขียนผิดจะถูกปฏิเสธพร้อมข้อความของ env ไม่ใช่ผ่านไปเงียบๆ */
+  const flat = {};
+  root.querySelectorAll("[data-key]").forEach((el) => {
+    const type = el.dataset.type;
+    let v = el.value;
+    if (v === "") return;                        // ปล่อยให้ env ใช้ค่าเริ่มต้นของมัน
+    if (type === "int") v = parseInt(v, 10);
+    else if (type === "float") v = parseFloat(v);
+    else if (type === "bool") v = v === "true";
+    flat[el.dataset.key] = v;
+  });
+
+  const tree = {};
+  for (const [key, value] of Object.entries(flat)) {
+    const [a, b] = key.split(".");
+    if (b === undefined) tree[a] = value;
+    else (tree[a] = tree[a] || {})[b] = value;
+  }
+  const line = (k, v) => `${k}: ${typeof v === "string" ? JSON.stringify(v) : v}`;
+  return Object.entries(tree).map(([k, v]) =>
+    (v && typeof v === "object")
+      ? `${k}:\n` + Object.entries(v).map(([k2, v2]) => "  " + line(k2, v2)).join("\n")
+      : line(k, v)
+  ).join("\n") + "\n";
+}
+
+function calendarFieldsHtml(prefix) {
+  const today = new Date().getFullYear();
+  const rows = [
+    ["warmup", "Warm-up", `${today}-09-15`, `${today}-09-30`],
+    ["main", "Main", `${today}-10-01`, `${today}-10-31`],
+    ["final", "Final", `${today}-11-01`, `${today}-11-30`],
+  ];
+  return rows.map(([k, label, a, b]) =>
+    `<div class="f"><label>${label}</label><div class="dates">` +
+    `<input id="${prefix}-${k}-a" type="date" value="${a}">` +
+    `<input id="${prefix}-${k}-b" type="date" value="${b}"></div></div>`).join("");
+}
+
+function readCalendar(prefix) {
+  const out = {};
+  for (const k of ["warmup", "main", "final"]) {
+    out[k] = [$(`${prefix}-${k}-a`).value, $(`${prefix}-${k}-b`).value];
+  }
+  return out;
+}
+
+async function renderAuthoring() {
+  const el = $("authoring");
+  const managed = (me && me.managed_courses) || [];
+  if (!managed.length) { el.hidden = true; return; }
+  el.hidden = false;
+
+  if (ENVS === null) {
+    try { ENVS = (await api("/api/environments")).environments; } catch { ENVS = []; }
+  }
+
+  const courseOpts = managed.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+  const envOpts = ENVS.map((e, i) =>
+    `<option value="${i}">${esc(e.name)} · ${esc(e.task_type)}</option>`).join("");
+
+  el.innerHTML =
+    `<div class="sec-head"><h2>สร้างของใหม่</h2>` +
+    `<span class="hint">เห็นเฉพาะผู้สอน · ฟอร์มสร้างจากสิ่งที่ระบบติดตั้งอยู่จริง</span></div>` +
+
+    (me.is_staff ? `<details><summary>สร้างวิชา <span class="hint">— ผู้ดูแลระบบเท่านั้น</span></summary>
+      <div class="form">
+        <div class="f"><label for="nc-id">id ของวิชา</label>
+          <input id="nc-id" placeholder="cp461-1-2026">
+          <span class="tip">a-z 0-9 และ - เท่านั้น · รูปแบบ &lt;รหัสวิชา&gt;-&lt;ภาค&gt;-&lt;ปี&gt;</span></div>
+        <div class="f"><label for="nc-name">ชื่อที่นิสิตเห็น</label>
+          <input id="nc-name" placeholder="CP461 · Machine Learning 1/2026"></div>
+        <div class="f"><label for="nc-size">ทีมละไม่เกิน</label>
+          <input id="nc-size" type="number" min="1" max="20" value="6"></div>
+        <div class="f full"><button class="btn" id="nc-go">สร้างวิชา</button>
+          <span class="msg" id="nc-msg"></span></div>
+      </div></details>` : "") +
+
+    `<details><summary>สร้างโจทย์ <span class="hint">— ในวิชาที่คุณดูแล</span></summary>
+      <div class="form">
+        <div class="f"><label for="nk-course">วิชา</label>
+          <select id="nk-course">${courseOpts}</select></div>
+        <div class="f"><label for="nk-env">ชนิดโจทย์</label>
+          <select id="nk-env">${envOpts}</select></div>
+        <div class="f"><label for="nk-slug">slug</label>
+          <input id="nk-slug" placeholder="cp461-titanic-1-2026"></div>
+        <div class="f"><label for="nk-title">ชื่อโจทย์</label>
+          <input id="nk-title" placeholder="ว่างไว้ = ใช้ชื่อจาก config"></div>
+        <div class="f-group"><h3>ปฏิทิน</h3><div class="form">${calendarFieldsHtml("nk")}</div></div>
+        <div class="f-group" id="nk-cfg"></div>
+        <div class="f full"><button class="btn" id="nk-go">สร้างโจทย์</button>
+          <span class="msg" id="nk-msg"></span></div>
+      </div></details>`;
+
+  const drawConfig = () => {
+    const env = ENVS[parseInt($("nk-env").value, 10)];
+    $("nk-cfg").innerHTML = env
+      ? `<h3>config ของ ${esc(env.name)}</h3>` + configFormHtml(env)
+      : `<span class="tip">ยังไม่มี environment ติดตั้งบนเครื่องนี้</span>`;
+  };
+  if (ENVS.length) { $("nk-env").onchange = drawConfig; drawConfig(); }
+
+  if (me.is_staff) $("nc-go").onclick = () => createCourse();
+  $("nk-go").onclick = () => createCompetition();
+}
+
+async function createCourse() {
+  const msg = $("nc-msg");
+  msg.className = "msg";
+  msg.textContent = "กำลังสร้าง…";
+  try {
+    const body = new URLSearchParams({
+      course_id: $("nc-id").value, name: $("nc-name").value, size: $("nc-size").value,
+    });
+    const res = await api("/api/courses", { method: "POST", body });
+    msg.className = "msg ok";
+    msg.textContent = `สร้างแล้ว — รหัสเข้าวิชา ${res.course.join_code}`;
+    ENVS = null;
+    await refresh();
+  } catch (e) { msg.className = "msg warn"; msg.textContent = e.message || "สร้างไม่สำเร็จ"; }
+}
+
+async function createCompetition() {
+  const msg = $("nk-msg");
+  msg.className = "msg";
+  const env = ENVS[parseInt($("nk-env").value, 10)];
+  if (!env) { msg.className = "msg warn"; msg.textContent = "ไม่มี environment ให้เลือก"; return; }
+  msg.textContent = "กำลังสร้าง…";
+  try {
+    const body = new URLSearchParams({
+      course_id: $("nk-course").value,
+      slug: $("nk-slug").value,
+      title: $("nk-title").value,
+      env_plugin: env.env_plugin,
+      config: readConfigForm($("nk-cfg")),
+      phases: JSON.stringify(readCalendar("nk")),
+    });
+    const res = await api("/api/competitions", { method: "POST", body });
+    msg.className = "msg ok";
+    msg.textContent = `สร้างแล้ว — ${res.competition.title} · config_hash ${res.config_hash.slice(0, 20)}…`;
+    await refresh();
+  } catch (e) { msg.className = "msg warn"; msg.textContent = e.message || "สร้างไม่สำเร็จ"; }
 }
 
 // ── ผู้สอนเลื่อนปฏิทินเอง ──────────────────────────────────────────
@@ -714,7 +1021,7 @@ async function rotateToken() {
   try {
     const res = await api("/api/users/rotate-token", { method: "POST" });
     token = res.token;
-    localStorage.setItem(KEY, token);
+    store.set(KEY, token);
     await copy(token, { textContent: "" });   // ใส่ clipboard ให้เลย จะได้เอาไปตั้งต่อได้ทันที
     alert(
       "ออกโทเคนใหม่แล้ว และคัดลอกไว้ใน clipboard ให้เรียบร้อย\n\n" +
@@ -820,6 +1127,9 @@ async function refresh() {
   if ((me.managed_courses || []).indexOf(enrolment.course.id) >= 0) {
     renderStaffPanel(enrolment.course);
   }
+  // ท้ายสุดและห่อ try — เหมือนแผงแก้ปฏิทิน ของที่มีไว้ให้ผู้สอนคนเดียวใช้
+  // ต้องไม่มีทางลากสิ่งที่นิสิตทุกคนต้องเห็นหายไปด้วย
+  renderAuthoring().catch((e) => console.error("วาดหน้าสร้างของใหม่ไม่ได้", e));
 
   if (!slug) {
     // วิชาที่ยังไม่มีโจทย์ — ไม่ใช่ข้อผิดพลาด แค่ยังไม่ถึงเวลา
@@ -873,7 +1183,7 @@ function logout(msg) {
   me = null;
   courseId = "";
   slug = "";
-  localStorage.removeItem(KEY);
+  store.remove(KEY);
   $("team").hidden = true;
   show("gate");
   $("gate-err").hidden = !msg;
@@ -887,7 +1197,7 @@ $("enter").addEventListener("click", () => {
   const v = $("token").value.trim();
   if (!v) return;
   token = v;
-  localStorage.setItem(KEY, v);
+  store.set(KEY, v);
   $("gate-err").hidden = true;
   start();
 });
