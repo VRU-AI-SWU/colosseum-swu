@@ -10,33 +10,34 @@
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
-  /* ── สี ──────────────────────────────────────────────────────────
-     ยังเป็นหินทรเวอร์ทีนเหมือนเดิม แต่ยกคอนทราสต์ขึ้นทั้งชุด
-     `--muted` เดิม (#6f665c บน #e9e4d9) อยู่ที่ ~4.0:1 ซึ่งต่ำกว่า WCAG AA
-     สำหรับตัวอักษรขนาดเล็ก — และหน้านี้ใช้ตัวเล็กสีนั้นเยอะมาก จึงอ่านยาก */
-  --bg:      #f4f1ea;   /* พื้นหลังของหน้า — สว่างและสะอาดกว่าเดิม */
-  --surface: #fffdf9;   /* พื้นของการ์ด — ยกขึ้นจากพื้นหลังนิดเดียว */
-  --ink:     #1f1c18;
-  --muted:   #5c5349;   /* 7.2:1 บน --surface */
-  --rule:    #e2dacb;
-  --rule-strong: #cfc4ae;
-  --blood:   #8c2f24;
-  --gold:    #8a6a1f;   /* เข้มขึ้นให้อ่านออกบนพื้นสว่าง */
-  --you:     #fdf6e3;
-  --ok:      #3f6b3b;
+  /* ── สี ── สี่โทนที่ผู้สอนกำหนด: แดง #DA2128 · เทา #636466 · ดำ · ขาว
+     สีอื่นทั้งหมด (เส้น พื้นที่ยกขึ้น แถวของคุณ) อนุมานจากสี่ตัวนี้เท่านั้น
+     ไม่ได้เพิ่มสีใหม่ — ไม่งั้นมันจะกลายเป็นจานสีที่ไม่มีใครคุมได้ */
+  --red:     #DA2128;
+  --grey:    #636466;
 
-  /* ── จังหวะ ── ใช้สเกลเดียวทั้งหน้า แทนการเดาค่าเป็นจุดๆ */
+  --bg:      #FFFFFF;
+  --surface: #FFFFFF;
+  --raised:  #F6F6F7;   /* เทา 4% — ใช้กับ chip และ input */
+  --ink:     #000000;
+  --muted:   #636466;   /* 5.9:1 บนขาว */
+  --rule:    #E4E4E5;
+  --rule-strong: #C4C5C6;
+  --accent:  #DA2128;
+  --you:     #FDF0F0;   /* แดงจางที่สุดที่ยังเห็นว่าเป็นแถวของตัวเอง */
+
   --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
   --s5: 24px; --s6: 32px; --s7: 48px;
-
   --radius: 10px;
   --radius-sm: 6px;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #131110; --surface: #1c1917; --ink: #ece5d8; --muted: #a1968a;
-    --rule: #302b26; --rule-strong: #453e36; --blood: #d4685a; --gold: #d6b25e;
-    --you: #262019; --ok: #7aa86f;
+    --bg: #000000; --surface: #0D0D0E; --raised: #171718;
+    --ink: #FFFFFF; --muted: #9B9C9E;   /* เทาสว่างขึ้นให้ได้ 6.4:1 บนดำ */
+    --rule: #232324; --rule-strong: #3C3C3E;
+    --accent: #FF4C52;                   /* แดงสว่างขึ้น — #DA2128 บนดำได้แค่ 3.4:1 */
+    --you: #1C0E0F;
   }
   :root:not([data-theme="light"]) body { background: var(--bg); }
 }
@@ -119,12 +120,12 @@ h1 {
 /* ── แถบเป้าหมายถัดไป ── */
 .target {
   margin: var(--s5) 0 0; padding: var(--s4) var(--s5);
-  border: 1px solid var(--rule); border-left: 3px solid var(--blood);
+  border: 1px solid var(--rule); border-left: 3px solid var(--accent);
   background: var(--surface); border-radius: var(--radius);
   font-size: 15px;
 }
 .target b { font-weight: 600; }
-.target .gap { color: var(--blood); font-variant-numeric: tabular-nums; }
+.target .gap { color: var(--accent); font-variant-numeric: tabular-nums; }
 
 /* ── ตาราง ── */
 table { width: 100%; border-collapse: collapse; margin-top: var(--s4); font-size: 15px; }
@@ -143,17 +144,17 @@ tbody tr:hover td { background: color-mix(in srgb, var(--ink) 4%, transparent); 
 tr.you td { background: var(--you); }
 tr.you .name::after {
   content: "คุณ"; margin-left: 8px; font-size: 10px; letter-spacing: .1em;
-  color: var(--blood); border: 1px solid var(--blood); padding: 1px 5px; border-radius: 999px;
+  color: var(--accent); border: 1px solid var(--accent); padding: 1px 5px; border-radius: 999px;
 }
 .rank { font-family: Cinzel, Georgia, serif; color: var(--muted); width: 3.5em; }
-tr.first .rank { color: var(--gold); }
+tr.first .rank { color: var(--accent); }
 .score { font-weight: 600; width: 6em; }
 .name { font-weight: 500; }
 tr.mark td { background: transparent; color: var(--muted); }
 tr.mark .name { font-style: italic; font-weight: 400; }
 tr.mark .score { font-weight: 500; }
 .mv { font-size: 12px; color: var(--muted); width: 3em; }
-.mv.up { color: var(--gold); } .mv.down { color: var(--blood); }
+.mv.up { color: var(--accent); } .mv.down { color: var(--accent); }
 .meta { font-size: 12px; color: var(--muted); }
 
 /* ── ท้ายหน้า ── */
@@ -165,26 +166,39 @@ footer {
 footer a { color: var(--muted); }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); display: inline-block; }
 .dot.live { background: #4a7c46; }
-.dot.down { background: var(--blood); }
+.dot.down { background: var(--accent); }
 
 /* ── แถบทีม ── ข้อมูลที่ต้องใช้เป็นครั้งคราว ไม่ใช่เนื้อหาหลักของหน้า
    จึงบางและเงียบกว่าตาราง แต่หยิบใช้ได้ทันทีเมื่อต้องการ */
 /* ── แผงข้อมูล ── เดิมเป็น flex แถวเดียวยาวๆ ที่อัดทุกอย่างเรียงกัน
    ทำให้อ่านไม่ออกว่าค่าไหนเป็นของป้ายไหน · เปลี่ยนเป็นกริดที่ป้ายอยู่เหนือค่า
    แล้วห่อบรรทัดเองเมื่อจอแคบ */
+/* ── แผงข้อมูล ────────────────────────────────────────────────────
+   ⚠️ **ป้ายกับค่าต้องอยู่ใน `.pair` เดียวกัน** — เดิม markup วางมันเป็นพี่น้องกัน
+   แล้วอาศัยว่า flex เรียงต่อกันตามลำดับ · พอเปลี่ยนเป็นกริด แต่ละอันตกไปคนละช่อง
+   ผลคือ "ทีมละไม่เกิน" อยู่คนละคอลัมน์กับเลข 6 ของมัน ซึ่งอ่านแล้วสับสนกว่าเดิม
+   การผูกไว้ใน markup ทำให้ผิดแบบนั้นอีกไม่ได้ ไม่ใช่แค่บังเอิญถูก */
 .team {
   margin-top: var(--s5); padding: var(--s5);
   border: 1px solid var(--rule); border-radius: var(--radius);
   background: var(--surface);
   display: grid; gap: var(--s4) var(--s5);
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   align-items: start;
   font-size: 15px;
 }
-.team .who {
-  display: block; font-size: 11px; letter-spacing: .1em;
-  text-transform: uppercase; color: var(--muted); margin-bottom: 2px;
+.pair { display: flex; flex-direction: column; gap: var(--s1); min-width: 0; }
+.pair .who, .team > .who {
+  font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--muted); font-weight: 600;
 }
+.pair .val { font-weight: 500; overflow-wrap: anywhere; }
+/* แถวปุ่ม — เต็มความกว้างเสมอ ไม่ใช่ช่องหนึ่งของกริด */
+.team .actions {
+  grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--s3) var(--s5);
+  padding-top: var(--s4); border-top: 1px solid var(--rule);
+}
+.team .wide { grid-column: 1 / -1; }
 .team b { font-weight: 600; }
 .team .who { color: var(--muted); }
 .chip {
@@ -193,7 +207,7 @@ footer a { color: var(--muted); }
   padding: 3px 9px; border-radius: var(--radius); cursor: pointer;
   font-size: 12px; letter-spacing: .06em;
 }
-.chip:hover { border-color: var(--blood); }
+.chip:hover { border-color: var(--accent); }
 .team .spacer { margin-left: auto; }
 
 /* ── ตัวเลือกวิชาและโจทย์ ────────────────────────────────────────────
@@ -212,17 +226,16 @@ footer a { color: var(--muted); }
   color: var(--muted); border: 1px solid var(--rule); border-radius: 99px;
   padding: 2px 9px;
 }
-.staff { border-color: var(--gold); }
+.staff { border-color: var(--accent); }
 .staff label { color: var(--muted); }
-.staff input#c-name { width: 16em; }
+.staff { border-left: 3px solid var(--accent); }
 .staff input {
-  /* `.team` เป็น flex ที่มี `gap` — ถ้าไม่ล็อก flex ช่องตัวเลขจะยืดเต็มแถว
-     แล้วอ่านเหมือนช่องกรอกข้อความยาวๆ ทั้งที่รับได้แค่เลขหลักเดียวสองหลัก */
-  flex: 0 0 auto; width: 4.5em; padding: 3px 6px; font: inherit; font-size: 13px;
-  border: 1px solid var(--rule); border-radius: var(--radius);
-  background: var(--bg); color: var(--ink);
+  width: 100%; padding: 8px 10px; font: inherit; font-size: 15px;
+  border: 1px solid var(--rule-strong); border-radius: var(--radius-sm);
+  background: var(--raised); color: var(--ink);
 }
-.staff .warn { color: var(--blood); }
+.staff input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.staff .warn { color: var(--accent); }
 /* คำอธิบายสองรหัส — ซ่อนไว้เพราะคนที่เข้าใจแล้วไม่ต้องอ่านซ้ำทุกครั้ง
    แต่ต้องอยู่ตรงที่เห็นรหัส ไม่ใช่ในเอกสารคนละที่ */
 .help {
@@ -236,27 +249,32 @@ footer a { color: var(--muted); }
   background: var(--surface); padding: 1px 5px; border-radius: var(--radius);
   font-size: 11px;
 }
-.help .warn { color: var(--blood); }
+.help .warn { color: var(--accent); }
 .linkish {
   background: none; border: 0; color: var(--muted); cursor: pointer;
   font: inherit; font-size: 12px; text-decoration: underline; padding: 0;
 }
-.linkish:hover { color: var(--blood); }
-.linkish.danger { color: var(--blood); }
+.linkish:hover { color: var(--accent); }
+.linkish.danger { color: var(--accent); }
 
 /* ── กล่องใส่โทเคน ── */
 .gate { margin-top: 34px; padding: 22px; border: 1px solid var(--rule); border-radius: var(--radius); }
 .gate h2 { font-family: Cinzel, Georgia, serif; font-size: 15px; letter-spacing: .1em; margin: 0 0 8px; }
 .gate p { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; }
-input {
+/* ⚠️ **ต้องระบุขอบเขตเป็น `.row input` ไม่ใช่ `input` เปล่าๆ**
+   `flex: 1 1 220px` เขียนไว้สำหรับช่องกรอกที่เรียงเป็นแถวแนวนอนของ `.row`
+   ซึ่ง 220px คือ *ความกว้าง* · พอมีที่อื่นในหน้าใช้ flex แนวตั้ง (`.pair`)
+   ค่าเดียวกันกลายเป็น *ความสูง* แล้วช่องกรอกบรรทัดเดียวสูง 220px
+   — เกิดขึ้นจริงกับแผงผู้สอนและอ่านแล้วงงว่าเป็นช่องอะไร */
+.row input {
   flex: 1 1 220px; padding: 9px 11px; font: inherit; font-size: 14px;
   border: 1px solid var(--rule); border-radius: var(--radius);
   background: var(--surface); color: var(--ink);
 }
 button {
   padding: 9px 18px; font: inherit; font-size: 14px; cursor: pointer;
-  border: 1px solid var(--blood); background: var(--blood); color: #fff;
+  border: 1px solid var(--accent); background: var(--accent); color: #fff;
   border-radius: var(--radius); letter-spacing: .04em;
 }
 button.ghost { background: transparent; color: var(--muted); border-color: var(--rule); }
@@ -264,10 +282,10 @@ button.google {
   background: var(--surface); color: var(--ink); border-color: var(--rule);
   display: inline-flex; align-items: center; gap: 9px; font-weight: 500;
 }
-button.google:hover { border-color: var(--blood); }
+button.google:hover { border-color: var(--accent); }
 button.google svg { width: 16px; height: 16px; }
 .or { color: var(--muted); font-size: 12px; margin: 14px 0 8px; }
-.err { color: var(--blood); font-size: 13px; margin-top: 12px; }
+.err { color: var(--accent); font-size: 13px; margin-top: 12px; }
 [hidden] { display: none !important; }
 .scroll { overflow-x: auto; }
 
@@ -300,15 +318,15 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
 .cal-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .ph { border: 1px solid var(--rule); border-radius: var(--radius);
   padding: 9px 10px; background: var(--surface); }
-.ph.on { border-color: var(--gold); background: var(--you);
-  box-shadow: inset 0 2px 0 var(--gold); }
+.ph.on { border-color: var(--accent); background: var(--you);
+  box-shadow: inset 0 2px 0 var(--accent); }
 .ph.past { opacity: .55; }
 .ph .ph-name { font-size: 12px; font-weight: 600; letter-spacing: .04em; }
 .ph .ph-when { font-size: 11px; color: var(--muted); margin-top: 2px;
   font-variant-numeric: tabular-nums; }
 .ph .ph-what { font-size: 11px; color: var(--muted); margin-top: 5px;
   line-height: 1.45; }
-.ph.on .ph-name::after { content: " · ตอนนี้"; color: var(--gold); font-weight: 600; }
+.ph.on .ph-name::after { content: " · ตอนนี้"; color: var(--accent); font-weight: 600; }
 @media (max-width: 620px) { .cal-strip { grid-template-columns: 1fr; } }
 /* ── หน้าสร้างวิชาและโจทย์ ── ฟอร์มจริงที่มีหลายช่อง จึงใช้กริดที่ป้ายอยู่เหนือช่อง
    ต่างจากแผงเล็กๆ ที่เรียงเป็นแถวเดียวได้ */
@@ -341,7 +359,7 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
   border: 1px solid var(--rule-strong); border-radius: var(--radius-sm);
   background: var(--bg); color: var(--ink);
 }
-.f input:focus, .f select:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
+.f input:focus, .f select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .f .tip { font-size: 12px; color: var(--muted); }
 /* คู่ของวัน — ห่อบรรทัดเองเมื่อคอลัมน์แคบ ไม่งั้นช่องที่สองล้นออกนอกการ์ด */
 .dates { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s2); }
@@ -360,12 +378,15 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
 .btn:hover { opacity: .88; }
 .btn.ghost { background: transparent; color: var(--ink); border-color: var(--rule-strong); }
 .msg { font-size: 14px; }
-.msg.warn { color: var(--blood); }
-.msg.ok { color: var(--ok); }
+.msg.warn { color: var(--accent); }
+.msg.ok { color: var(--ink); }
 
-.cal-edit { margin-top: var(--s4); flex-wrap: wrap; }
-.cal-edit input[type="date"] { width: 11em; }
-.cal-edit .grp { display: flex; align-items: center; gap: 4px; }
+.cal-edit { margin-top: var(--s4); }
+.cal-edit input[type="date"] {
+  width: 100%; padding: 7px 9px; font: inherit; font-size: 14px;
+  border: 1px solid var(--rule-strong); border-radius: var(--radius-sm);
+  background: var(--raised); color: var(--ink);
+}
 </style>
 </head>
 <body>
@@ -885,23 +906,23 @@ function renderCalendarEditor(cal) {
   // `ends_at` เป็นขอบบนแบบไม่รวม ถ้าหน้าเว็บแปลงเองแล้วพลาด ผู้สอนที่เปิดฟอร์ม
   // แล้วกดบันทึกโดยไม่แก้อะไรจะเลื่อนปฏิทินไปหนึ่งวันทุกครั้ง
   el.innerHTML =
-    `<span class="who">ปฏิทิน</span>` +
+    `<div class="pair wide"><span class="who">แก้ปฏิทิน</span>` +
+      `<span class="val">วันสุดท้ายรวมทั้งวัน</span></div>` +
     cal.phases.map((p) =>
-      `<span class="grp"><label for="d-${p.name}-a">${PHASE_LABEL[p.name] || p.name}</label>` +
-      `<input id="d-${p.name}-a" type="date" value="${p.first_day}">` +
-      `<span class="who">–</span>` +
-      `<input id="d-${p.name}-b" type="date" value="${p.last_day}"></span>`
+      `<div class="pair"><label class="who" for="d-${p.name}-a">${PHASE_LABEL[p.name] || p.name}</label>` +
+      `<div class="dates"><input id="d-${p.name}-a" type="date" value="${p.first_day}">` +
+      `<input id="d-${p.name}-b" type="date" value="${p.last_day}"></div></div>`
     ).join("") +
-    `<button class="linkish" id="cal-save">บันทึกปฏิทิน</button>` +
-    `<span class="who" id="cal-msg"></span>`;
+    `<div class="actions"><button class="btn" id="cal-save">บันทึกปฏิทิน</button>` +
+    `<span class="msg" id="cal-msg"></span></div>`;
 
   $("cal-save").onclick = async () => {
     const msg = $("cal-msg");
-    msg.className = "who";
+    msg.className = "msg";
     const phases = {};
     for (const p of cal.phases) {
       const a = $(`d-${p.name}-a`).value, b = $(`d-${p.name}-b`).value;
-      if (!a || !b) { msg.className = "who warn"; msg.textContent = "กรอกวันให้ครบทุกช่วง"; return; }
+      if (!a || !b) { msg.className = "msg warn"; msg.textContent = "กรอกวันให้ครบทุกช่วง"; return; }
       phases[p.name] = [a, b];
     }
     msg.textContent = "กำลังบันทึก…";
@@ -914,7 +935,7 @@ function renderCalendarEditor(cal) {
       await loadCalendar();
       $("cal-msg").textContent = "บันทึกแล้ว";
     } catch (e) {
-      msg.className = "who warn";
+      msg.className = "msg warn";
       msg.textContent = e.message || "บันทึกไม่สำเร็จ";
     }
   };
@@ -928,21 +949,22 @@ function renderStaffPanel(course) {
   const el = $("staff");
   el.hidden = false;
   el.innerHTML =
-    `<span class="who">ผู้สอน</span>` +
-    `<label for="c-name">ชื่อวิชา</label>` +
-    `<input id="c-name" type="text" maxlength="60" value="${escapeHtml(course.name)}">` +
-    `<label for="mts">ทีมละไม่เกิน</label>` +
-    `<input id="mts" type="number" min="1" max="20" step="1" value="${course.max_team_size}">` +
-    `<span class="who">รหัสเข้าวิชา</span>` +
-    `<span class="chip" id="c-join">${escapeHtml(course.join_code || "—")}</span>` +
-    `<button class="linkish" id="mts-save">บันทึก</button>` +
-    `<span class="who" id="mts-msg"></span>`;
+    `<div class="pair wide"><span class="who">แผงผู้สอน</span>` +
+      `<span class="val">ค่าที่ตั้งที่นี่ใช้กับทุกโจทย์ในวิชานี้</span></div>` +
+    `<div class="pair"><label class="who" for="c-name">ชื่อวิชา</label>` +
+      `<input id="c-name" type="text" maxlength="60" value="${escapeHtml(course.name)}"></div>` +
+    `<div class="pair"><label class="who" for="mts">สมาชิกทีมละไม่เกิน (คน)</label>` +
+      `<input id="mts" type="number" min="1" max="20" step="1" value="${course.max_team_size}"></div>` +
+    `<div class="pair"><span class="who">รหัสเข้าวิชา</span>` +
+      `<span class="chip" id="c-join">${escapeHtml(course.join_code || "—")}</span></div>` +
+    `<div class="actions"><button class="btn" id="mts-save">บันทึก</button>` +
+    `<span class="msg" id="mts-msg"></span></div>`;
 
   if (course.join_code) $("c-join").onclick = (e) => copy(course.join_code, e.target);
 
   $("mts-save").onclick = async () => {
     const msg = $("mts-msg");
-    msg.className = "who";
+    msg.className = "msg";
     const size = parseInt($("mts").value, 10);
     if (!Number.isInteger(size)) { msg.textContent = "ขนาดทีมต้องเป็นตัวเลข"; return; }
     msg.textContent = "กำลังบันทึก…";
@@ -956,7 +978,7 @@ function renderStaffPanel(course) {
       $("mts-msg").textContent =
         `บันทึกแล้ว — ${res.course.name} · ทีมละไม่เกิน ${res.course.max_team_size} คน`;
     } catch (e) {
-      msg.className = "who warn";
+      msg.className = "msg warn";
       msg.textContent = e.message || "บันทึกไม่สำเร็จ";
     }
   };
@@ -971,16 +993,21 @@ function renderTeam(enrolment) {
   const who = team.members.length
     ? team.members.map((m) => escapeHtml(m.name)).join(" · ")
     : "ยังไม่ผูกกับบัญชี Google";
+  // ทุกคู่ป้าย–ค่าอยู่ใน `.pair` เดียวกัน · ดูเหตุผลที่ CSS ของ `.team`
   el.innerHTML =
-    `<span><b>${escapeHtml(team.name)}</b> <span class="who">${who}</span></span>` +
-    `<span class="who">รหัสเชิญทีม</span> <span class="chip" id="c-invite">${team.invite_code}</span>` +
-    `<span class="who">โทเคนของคุณ</span> <span class="chip" id="c-token">คลิกเพื่อคัดลอก</span>` +
-    `<span class="who">บนกระดาน</span> <span class="chip" id="c-alias">${escapeHtml(team.shown_as || team.name)}</span>` +
-    `<span class="spacer"></span>` +
+    `<div class="pair wide"><span class="who">ทีมของคุณ</span>` +
+      `<span class="val"><b>${escapeHtml(team.name)}</b> — ${who}</span></div>` +
+    `<div class="pair"><span class="who">รหัสเชิญทีม</span>` +
+      `<span class="chip" id="c-invite">${team.invite_code}</span></div>` +
+    `<div class="pair"><span class="who">โทเคนของคุณ</span>` +
+      `<span class="chip" id="c-token">คลิกเพื่อคัดลอก</span></div>` +
+    `<div class="pair"><span class="who">ชื่อบนกระดาน</span>` +
+      `<span class="chip" id="c-alias">${escapeHtml(team.shown_as || team.name)}</span></div>` +
+    `<div class="actions">` +
     `<button class="linkish" id="alias-edit">เปลี่ยนชื่อบนกระดาน</button>` +
     `<button class="linkish" id="join-open">เข้าทีมเพื่อน</button>` +
     `<button class="linkish" id="help-open">สองรหัสนี้ใช้ยังไง</button>` +
-    `<button class="linkish danger" id="rotate">โทเคนหลุด?</button>` +
+    `<button class="linkish danger" id="rotate">โทเคนหลุด?</button></div>` +
     `<div class="help" id="help" hidden>
        <b>🎟️ รหัสเชิญทีม</b> — ให้เพื่อน<b>ในวิชาเดียวกัน</b>กด “เข้าทีมเพื่อน”
        แล้วใส่รหัสนี้เพื่อย้ายเข้าทีมคุณ (ทีมละไม่เกิน ${maxSize} คน)
