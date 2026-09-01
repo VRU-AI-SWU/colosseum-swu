@@ -227,6 +227,21 @@ ARENA_COURSE_STAFF_CP462_1_2026=aj@g.swu.ac.th
 ARENA_DATASETS=/home/ratchainant/VRU-AI/projects/colosseum/data/datasets
 ```
 
+### ก่อนทำอะไรที่ย้อนยาก — สำเนาฐานข้อมูลก่อนเสมอ
+
+```bash
+ssh -t gpu-linux-server 'cd ~/VRU-AI/projects/colosseum/app && .venv/bin/python tools/backup.py --db ../data/arena.db --snapshot'
+```
+
+⚠️ **ห้ามใช้ `cp`** — `arena.db` ถูกเปิดค้างไว้โดยบริการที่กำลังรัน และ transaction
+ล่าสุดอยู่ในไฟล์ `-wal` ที่ `cp` ไฟล์เดียวไม่ได้เอาไปด้วย · เกิดขึ้นจริงมาแล้ว:
+สำเนาที่ได้ขาดไปทั้ง schema หนึ่งเวอร์ชันและ audit เจ็ดแถว โดยไม่มีอะไรฟ้อง
+จนกว่าจะถึงวันที่ต้องกู้คืนจริง
+
+`--snapshot` ใช้ SQLite backup API แล้ว checkpoint ให้เป็น**ไฟล์เดียวจบ** ไม่มี
+sidecar ห้อย จึงคัดลอกต่อไปที่อื่นได้อย่างปลอดภัย · มันเปิดสำเนาขึ้นมานับแถวให้ด้วย
+เพราะสำเนาที่ไม่เคยถูกเปิดอ่านคือสำเนาที่ยังไม่รู้ว่าใช้ได้จริงหรือเปล่า
+
 ### `ARENA_DATASETS` — คลังชุดข้อมูลของโจทย์ทำนาย
 
 🔒 **ทั้ง API และ worker ต้องชี้ไปที่โฟลเดอร์เดียวกัน** — API เขียนไฟล์ที่ผู้สอน

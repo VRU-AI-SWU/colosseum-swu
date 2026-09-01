@@ -13,6 +13,14 @@ transaction ล่าสุดอยู่ใน `-wal` การคัดลอ
                            --artifacts /path/artifacts \\
                            --dest /media/user/hdd/colosseum/backup
 
+**ก่อนทำอะไรที่ย้อนยาก** (migrate schema · ลบ competition · แก้ข้อมูลตรงๆ) ใช้
+
+    python tools/backup.py --db /path/data/arena.db --snapshot
+
+ซึ่งวางสำเนาไว้ข้างๆ ฐานข้อมูลเลย ไม่ต้องมีดิสก์สำรอง mount อยู่ · มีไว้เพราะ
+ทางที่ถูกต้องต้องสะดวกกว่าการพิมพ์ `cp` ไม่งั้นคนจะพิมพ์ `cp` (เกิดขึ้นแล้ว —
+สำเนาที่ได้ขาดไปทั้ง schema หนึ่งเวอร์ชันและ audit เจ็ดแถว โดยไม่มีอะไรฟ้อง)
+
 ทุกครั้งที่รันจะ **ตรวจสำเนาที่เพิ่งทำ** ด้วยการเปิดมันขึ้นมานับแถว — สำเนาที่ไม่เคย
 ถูกเปิดอ่านคือสำเนาที่ยังไม่รู้ว่าใช้ได้จริงหรือเปล่า
 """
@@ -39,10 +47,18 @@ def snapshot_db(db: Path, dest: Path, stamp: str) -> Path:
         dst = sqlite3.connect(str(out))
         try:
             src.backup(dst)  # อ่านแบบ page-by-page พร้อมกันกับที่มีคนเขียนได้
+            # **สำเนาต้องเป็นไฟล์เดียวจบ** — `backup()` สืบทอดโหมด WAL มาจากต้นทาง
+            # สำเนาจึงมี `-wal` ห้อยอยู่ด้วย ซึ่งเป็นความเปราะแบบเดียวกับที่สคริปต์
+            # นี้มีไว้เพื่อเลี่ยง: วันหนึ่งมีคนคัดลอกเฉพาะไฟล์ `.db` ไปเก็บ แล้ว
+            # ข้อมูลใน `-wal` หายไปเงียบๆ · `journal_mode=DELETE` บังคับให้ checkpoint
+            # ลงไฟล์หลักแล้วทิ้ง sidecar ทันที
+            dst.execute("PRAGMA journal_mode=DELETE")
         finally:
             dst.close()
     finally:
         src.close()
+    for sidecar in (out.with_name(out.name + "-wal"), out.with_name(out.name + "-shm")):
+        sidecar.unlink(missing_ok=True)
     return out
 
 
@@ -98,8 +114,13 @@ def tree_size(path: Path) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--db", required=True, type=Path)
-    ap.add_argument("--artifacts", required=True, type=Path)
-    ap.add_argument("--dest", required=True, type=Path, help="โฟลเดอร์บนดิสก์สำรอง")
+    ap.add_argument("--artifacts", type=Path, help="ไม่ต้องใส่เมื่อใช้ --snapshot")
+    ap.add_argument("--dest", type=Path, help="โฟลเดอร์บนดิสก์สำรอง")
+    ap.add_argument(
+        "--snapshot",
+        action="store_true",
+        help="สำเนาฐานข้อมูลอย่างเดียว วางไว้ข้างๆ ตัวจริง — ใช้ก่อน migrate หรือก่อนลบอะไร",
+    )
     ap.add_argument("--keep", type=int, default=14, help="เก็บสำเนาฐานข้อมูลกี่ชุด (0 = ไม่ลบ)")
     ap.add_argument(
         "--allow-same-device",
@@ -110,6 +131,20 @@ def main() -> int:
 
     if not args.db.exists():
         print(f"✗ ไม่พบ {args.db}", file=sys.stderr)
+        return 1
+
+    if args.snapshot:
+        # สำเนาเร็วก่อนทำอะไรที่ย้อนยาก — ยังใช้ backup API ตัวเดียวกับ backup จริง
+        # เพราะเหตุผลที่ห้ามใช้ `cp` ไม่ได้เปลี่ยนไปตามว่าสำเนานั้นจะอยู่ที่ไหน
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        out = snapshot_db(args.db, args.db.parent, stamp)
+        rows = verify(out)
+        print(f"✓ {out}  ({out.stat().st_size / 1e6:.1f} MB)")
+        print("  " + " · ".join(f"{t} {n}" for t, n in rows.items()))
+        return 0
+
+    if args.artifacts is None or args.dest is None:
+        print("✗ ต้องมีทั้ง --artifacts และ --dest (หรือใช้ --snapshot)", file=sys.stderr)
         return 1
     if not args.artifacts.is_dir():
         print(f"✗ ไม่พบ {args.artifacts}", file=sys.stderr)
