@@ -69,6 +69,34 @@ class NotEnrolled(Exception):
     """คนนี้ยังไม่ได้เข้าวิชาที่กำลังจะทำงานด้วย — ข้อความต้องบอกวิธีเข้า"""
 
 
+class StaffChangeRejected(Exception):
+    """แก้รายชื่อผู้ดูแลวิชาไม่ได้ — ข้อความต้องบอกว่าทำไมและต้องทำอะไรต่อ"""
+
+
+#: ความยาวสูงสุดของอีเมล — กันการยัดข้อความยาวๆ ลงตารางสิทธิ์
+MAX_EMAIL_LENGTH = 254
+
+
+def clean_staff_email(raw: str) -> str:
+    """ตรวจและทำให้เป็นรูปมาตรฐาน — **ตัวพิมพ์เล็กเสมอ**
+
+    การจับคู่สิทธิ์ใช้ตัวพิมพ์เล็กอยู่แล้ว (`is_staff` ทำ `.lower()`) · ถ้าเก็บ
+    ตามที่พิมพ์มา รายการบนหน้าเว็บจะมี `Aj@...` กับ `aj@...` เป็นคนละแถวทั้งที่
+    เป็นคนเดียวกัน แล้วการกดถอดจะไม่ตรงกับแถวที่เห็น
+    """
+    email = (raw or "").strip().lower()
+    if not email:
+        raise StaffChangeRejected("ต้องใส่อีเมล")
+    if len(email) > MAX_EMAIL_LENGTH:
+        raise StaffChangeRejected(f"อีเมลยาวเกิน {MAX_EMAIL_LENGTH} ตัวอักษร")
+    local, sep, domain = email.partition("@")
+    if not sep or not local or "." not in domain or domain.startswith(".") or domain.endswith("."):
+        raise StaffChangeRejected(f"{raw!r} ไม่ใช่อีเมลที่ใช้ได้")
+    if any(c.isspace() for c in email):
+        raise StaffChangeRejected("อีเมลต้องไม่มีช่องว่าง")
+    return email
+
+
 class TeamFull(Exception):
     pass
 
@@ -121,12 +149,96 @@ class Arena:
         return bool(email) and email.strip().lower() in self.staff_emails
 
     def can_manage_course(self, email: str, course_id: str) -> bool:
-        """แก้ค่าของวิชานี้ได้ไหม — ผู้สอนของวิชานั้น หรือผู้สอนระดับทั้งระบบ"""
+        """แก้ค่าของวิชานี้ได้ไหม — ผู้สอนของวิชานั้น หรือผู้สอนระดับทั้งระบบ
+
+        **สามชั้น เรียงจากแก้ยากไปแก้ง่าย** และชั้นบนไม่มีทางถูกชั้นล่างลบทิ้ง
+
+          1. `ARENA_STAFF_EMAILS`              ทั้งระบบ · ต้องมี root ถึงจะแก้
+          2. `ARENA_COURSE_STAFF_<COURSE>`     รายวิชา · ต้องมี root ถึงจะแก้
+          3. ตาราง `course_staff`              รายวิชา · แต่งตั้งจากหน้าเว็บได้
+
+        ชั้นที่ 3 มีเพื่อให้การเพิ่ม TA ไม่ต้อง ssh + sudo + restart ทุกครั้ง
+        ส่วนชั้นที่ 1–2 เป็นสมอที่รับประกันว่ามีทางกู้คืนเสมอ ถ้าวันหนึ่งบัญชี
+        ผู้สอนถูกยึดแล้วคนร้ายถอดคนอื่นออกจนหมด
+        """
         if self.is_staff(email):
             return True
         if not email:
             return False
-        return email.strip().lower() in self.course_staff.get(course_id, frozenset())
+        clean = email.strip().lower()
+        return (
+            clean in self.course_staff.get(course_id, frozenset())
+            or clean in self.store.course_staff.get(course_id, set())
+        )
+
+    def course_managers(self, course_id: str) -> list[dict]:
+        """ใครจัดการวิชานี้ได้บ้าง พร้อมบอกว่ามาจากชั้นไหน
+
+        หน้าเว็บต้องรู้ว่าแถวไหน**ถอดไม่ได้** ไม่งั้นจะแสดงปุ่มลบที่กดแล้วโดน
+        ปฏิเสธ ซึ่งอ่านเหมือนระบบพังมากกว่าเหมือนกติกา
+        """
+        out = []
+        for email in sorted(self.staff_emails):
+            out.append({"email": email, "source": "system", "removable": False})
+        for email in sorted(self.course_staff.get(course_id, frozenset())):
+            if email not in self.staff_emails:
+                out.append({"email": email, "source": "file", "removable": False})
+        fixed = {e["email"] for e in out}
+        for email in sorted(self.store.course_staff.get(course_id, set())):
+            if email not in fixed:
+                out.append({"email": email, "source": "web", "removable": True})
+        return out
+
+    def grant_course_staff(self, *, course_id: str, email: str, actor: User) -> list[dict]:
+        """แต่งตั้งผู้สอน/TA ของวิชานี้จากหน้าเว็บ
+
+        **ผู้เรียกต้องจัดการวิชานี้ได้อยู่แล้ว** — สิทธิ์ขยายได้เฉพาะภายในวิชา
+        ที่ตัวเองดูแล ไม่ใช่ข้ามวิชา · รัศมีความเสียหายถ้าบัญชีถูกยึดจึงเท่ากับ
+        หนึ่งวิชา ไม่ใช่ทั้งเครื่อง
+        """
+        if not self.can_manage_course(actor.email, course_id):
+            raise StaffChangeRejected(f"คุณไม่ได้ดูแลวิชา {course_id}")
+        if course_id not in self.store.courses:
+            raise StaffChangeRejected(f"ไม่รู้จักวิชา {course_id!r}")
+
+        clean = clean_staff_email(email)
+        self.store.add_course_staff(course_id, clean, added_by=actor.id)
+        self.store.record("course.staff_added", "course", course_id, actor_id=actor.id,
+                          email=clean)
+        return self.course_managers(course_id)
+
+    def revoke_course_staff(self, *, course_id: str, email: str, actor: User) -> list[dict]:
+        """ถอดผู้สอน/TA ที่แต่งตั้งผ่านหน้าเว็บ
+
+        **สองอย่างที่ทำไม่ได้** และทั้งคู่มีไว้กันการล็อกคนออกจากวิชาถาวร
+
+          · ถอดคนที่ตั้งไว้ใน `/etc/arena.env` — หน้าเว็บไม่ได้เป็นเจ้าของแถวนั้น
+          · ถอดคนสุดท้ายที่เหลืออยู่ — วิชาที่ไม่มีผู้ดูแลเลยต้องให้คนที่มี root
+            มาแก้ ซึ่งแพงกว่าการกันไว้ตั้งแต่แรกมาก
+        """
+        if not self.can_manage_course(actor.email, course_id):
+            raise StaffChangeRejected(f"คุณไม่ได้ดูแลวิชา {course_id}")
+
+        clean = clean_staff_email(email)
+        managers = {m["email"]: m for m in self.course_managers(course_id)}
+        who = managers.get(clean)
+        if who is None:
+            raise StaffChangeRejected(f"{clean} ไม่ได้อยู่ในรายชื่อผู้ดูแลวิชานี้")
+        if not who["removable"]:
+            raise StaffChangeRejected(
+                f"{clean} ถูกตั้งไว้ใน /etc/arena.env — ต้องแก้ที่ไฟล์นั้นบนเซิร์ฟเวอร์\n"
+                "  สิทธิ์ชั้นนั้นจงใจให้แก้ได้เฉพาะคนที่มี root เพื่อให้มีทางกู้คืนเสมอ"
+            )
+        if len(managers) <= 1:
+            raise StaffChangeRejected(
+                f"{clean} เป็นผู้ดูแลคนสุดท้ายของวิชานี้ — ถอดแล้วจะไม่มีใครแก้อะไรได้เลย\n"
+                "  เพิ่มคนใหม่ก่อน แล้วค่อยถอดคนนี้"
+            )
+
+        self.store.remove_course_staff(course_id, clean)
+        self.store.record("course.staff_removed", "course", course_id, actor_id=actor.id,
+                          email=clean)
+        return self.course_managers(course_id)
 
     def managed_courses(self, email: str) -> list[str]:
         """วิชาที่คนนี้จัดการได้ — หน้าเว็บใช้ตัดสินว่าจะแสดงแผงผู้สอนของวิชาไหน"""
@@ -729,6 +841,7 @@ def build_arena(
         store.competitions = db.load_competitions()
         store.submissions = db.load_submissions()
         store.audit = db.load_audit()
+        store.course_staff = db.load_course_staff()
         queue.runs = db.load_runs()
         queue._served = db.load_served()
     return Arena(

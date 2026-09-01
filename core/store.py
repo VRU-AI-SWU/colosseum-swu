@@ -122,6 +122,11 @@ class Store:
     submissions: dict[str, Submission] = field(default_factory=dict)
     users: dict[str, User] = field(default_factory=dict)
     audit: list[AuditEvent] = field(default_factory=list)
+    #: ผู้สอน/TA ที่**แต่งตั้งผ่านหน้าเว็บ** — `{course_id: {อีเมล}}`
+    #:
+    #: เก็บเป็นอีเมลไม่ใช่ `user_id` เพราะแต่งตั้งคนที่ยังไม่เคยล็อกอินได้ ซึ่งเป็น
+    #: กรณีปกติ: ผู้สอนเพิ่ม TA ไว้ก่อนเปิดเทอม แล้ว TA ค่อยล็อกอินทีหลัง
+    course_staff: dict[str, set[str]] = field(default_factory=dict)
     db: Database | None = None
 
     # ── เขียน (ต้องเรียกทุกครั้งที่แก้ ไม่งั้นของหายตอนรีสตาร์ท) ──────
@@ -131,6 +136,22 @@ class Store:
         if self.db:
             self.db.save_course(course)
         return course
+
+    def add_course_staff(self, course_id: str, email: str, *, added_by: str = "") -> None:
+        from datetime import datetime, timezone
+
+        email = email.strip().lower()
+        self.course_staff.setdefault(course_id, set()).add(email)
+        if self.db:
+            self.db.add_course_staff(
+                course_id, email, added_by, datetime.now(timezone.utc).isoformat()
+            )
+
+    def remove_course_staff(self, course_id: str, email: str) -> None:
+        email = email.strip().lower()
+        self.course_staff.get(course_id, set()).discard(email)
+        if self.db:
+            self.db.remove_course_staff(course_id, email)
 
     def save_team(self, team: Team) -> Team:
         self.teams[team.id] = team

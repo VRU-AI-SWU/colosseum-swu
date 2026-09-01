@@ -53,6 +53,7 @@ from core.service import (
     Arena,
     InviteInvalid,
     NotEnrolled,
+    StaffChangeRejected,
     SubmissionRejected,
     TeamFull,
     TooManyFinalPicks,
@@ -223,8 +224,16 @@ def create_app(
         หน้าเว็บจึงต้องได้รายการมาทั้งหมดเพื่อทำตัวสลับวิชา
         """
 
-        def team_view(team: Team) -> dict:
-            course = arena.store.course(team.course_id)
+        def course_view(course, team: Optional[Team]) -> dict:
+            """วิชาหนึ่งในสายตาของผู้เรียก — **`team` เป็น `None` ได้**
+
+            ผู้สอนที่ดูแลวิชาแต่ไม่ได้เข้าเป็นนิสิตในวิชานั้นเป็นกรณีปกติ (และเป็น
+            กรณีที่ถูกต้องกว่าด้วย) · เดิมหน้าเว็บเห็นเฉพาะวิชาที่ *มีทีม* ผลคือ
+            ผู้สอนวิชาใหม่ติดอยู่ที่หน้า "เข้าวิชาด้วยรหัส" และไม่มีทางไปถึงแผง
+            ผู้สอนหรือแผงสร้างโจทย์เลย — ต้องเข้าวิชาตัวเองในฐานะนิสิตก่อน
+            ซึ่งไม่มีเหตุผลรองรับและสร้างทีมปลอมทิ้งไว้ในระบบ
+            """
+            manages = arena.can_manage_course(user.email, course.id)
             return {
                 "course": {
                     "id": course.id,
@@ -232,13 +241,10 @@ def create_app(
                     "max_team_size": course.max_team_size,
                     # รหัสเข้าวิชาให้เฉพาะผู้สอน**ของวิชานั้น** — เขาคือคนที่ต้องอ่าน
                     # ให้นิสิตฟังในคาบ · ผู้สอนวิชาอื่นไม่มีเหตุผลที่จะได้รหัสนี้ไป
-                    "join_code": (
-                        course.join_code
-                        if arena.can_manage_course(user.email, course.id)
-                        else None
-                    ),
+                    "join_code": course.join_code if manages else None,
+                    "manages": manages,
                 },
-                "team": {
+                "team": None if team is None else {
                     "id": team.id,
                     "name": team.name,
                     "invite_code": team.invite_code,
@@ -248,9 +254,7 @@ def create_app(
                     # ใครเป็นใครเพื่อตัดเกรด · เพื่อนร่วมชั้นเห็นชื่อที่เจ้าตัวตั้ง
                     "members": [
                         {
-                            "name": u.shown_as(
-                                reveal=arena.can_manage_course(user.email, course.id)
-                            ),
+                            "name": u.shown_as(reveal=manages),
                             "email": u.email,
                         }
                         for uid in team.member_ids
@@ -273,6 +277,7 @@ def create_app(
                 ],
             }
 
+        enrolled = list(arena.store.courses_of(user.id))
         return {
             "user": {"name": user.name, "email": user.email, "token": user.token},
             # หน้าเว็บใช้ตัวนี้ตัดสินว่าจะโชว์แผงของผู้สอนไหม — **ไม่ใช่ด่านความปลอดภัย**
@@ -283,9 +288,16 @@ def create_app(
             # ผู้สอนระดับทั้งระบบได้ทุกวิชา ส่วนคนอื่นได้เฉพาะที่ประกาศไว้ใน
             # ARENA_COURSE_STAFF_<COURSE_ID>
             "managed_courses": arena.managed_courses(user.email),
+            # **วิชาที่อยู่ + วิชาที่ดูแล** — สองอย่างนี้เป็นคนละความสัมพันธ์
+            # แต่หน้าเว็บต้องสลับไปมาระหว่างมันด้วยตัวเลือกเดียวกัน · เรียงให้
+            # วิชาที่มีทีมขึ้นก่อน เพราะนั่นคือวิชาที่คนส่วนใหญ่เปิดมาเพื่อดู
             "enrollments": [
-                team_view(arena.store.team_of(user.id, cid))
-                for cid in arena.store.courses_of(user.id)
+                course_view(arena.store.course(cid), arena.store.team_of(user.id, cid))
+                for cid in enrolled
+            ] + [
+                course_view(arena.store.courses[cid], None)
+                for cid in arena.managed_courses(user.email)
+                if cid not in enrolled and cid in arena.store.courses
             ],
             "paradigms": [
                 {"id": p.id, "name": p.name, "blurb": p.blurb} for p in PARADIGMS.values()
@@ -384,6 +396,50 @@ def create_app(
         return {"course": {"id": course.id, "name": course.name,
                            "max_team_size": course.max_team_size,
                            "join_code": course.join_code}}
+
+    @app.get("/api/courses/{course_id}/staff")
+    def list_course_staff(course_id: str, user: UserDep):
+        """ใครดูแลวิชานี้ได้บ้าง — พร้อมบอกว่าแถวไหนถอดผ่านหน้าเว็บไม่ได้
+
+        **เฉพาะคนที่ดูแลวิชานั้น** — รายชื่อผู้สอนไม่ใช่ความลับ แต่มันคืออีเมล
+        ของคนจริง ซึ่งไม่ใช่สิ่งที่นิสิตทั้งชั้นต้องเห็นเป็นรายการ
+        """
+        if course_id not in arena.store.courses:
+            raise HTTPException(404, f"ไม่รู้จักวิชา {course_id!r}")
+        if not arena.can_manage_course(user.email, course_id):
+            raise HTTPException(403, "เฉพาะผู้สอนของวิชานี้เท่านั้น")
+        return {"course_id": course_id, "staff": arena.course_managers(course_id)}
+
+    @app.post("/api/courses/{course_id}/staff")
+    def add_course_staff(course_id: str, user: UserDep, email: str = Form("")):
+        """เพิ่มผู้สอน/TA ของวิชานี้จากหน้าเว็บ
+
+        **เพิ่มด้วยอีเมล ไม่ใช่เลือกจากรายชื่อคนที่เคยล็อกอิน** — กรณีปกติคือ
+        ผู้สอนเพิ่ม TA ไว้ก่อนเปิดเทอม ตอนที่ TA ยังไม่เคยเข้าระบบเลย
+        """
+        if course_id not in arena.store.courses:
+            raise HTTPException(404, f"ไม่รู้จักวิชา {course_id!r}")
+        try:
+            staff = arena.grant_course_staff(course_id=course_id, email=email, actor=user)
+        except StaffChangeRejected as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {"course_id": course_id, "staff": staff}
+
+    @app.post("/api/courses/{course_id}/staff/remove")
+    def remove_course_staff(course_id: str, user: UserDep, email: str = Form("")):
+        """ถอดผู้สอน/TA ที่แต่งตั้งผ่านหน้าเว็บ
+
+        คนที่ตั้งไว้ใน `/etc/arena.env` ถอดที่นี่ไม่ได้โดยตั้งใจ — นั่นคือสมอที่
+        ทำให้มีทางกู้คืนเสมอถ้าบัญชีผู้สอนถูกยึด · และถอดคนสุดท้ายไม่ได้ เพราะ
+        วิชาที่ไม่มีผู้ดูแลเลยต้องให้คนที่มี root มาแก้
+        """
+        if course_id not in arena.store.courses:
+            raise HTTPException(404, f"ไม่รู้จักวิชา {course_id!r}")
+        try:
+            staff = arena.revoke_course_staff(course_id=course_id, email=email, actor=user)
+        except StaffChangeRejected as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {"course_id": course_id, "staff": staff}
 
     @app.post("/api/teams/join")
     def join_team(user: UserDep, course_id: str = Form(...), invite_code: str = Form(...)):

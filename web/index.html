@@ -369,6 +369,15 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
   border: 1px dashed var(--rule-strong); border-radius: var(--radius-sm);
 }
 .chks { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s2); padding: 2px 0; }
+/* รายชื่อผู้ดูแลวิชา — อีเมลกินพื้นที่ ปุ่มชิดขวา คำอธิบายอยู่ตรงกลางและยุบก่อน */
+ul.staff { list-style: none; margin: var(--s1) 0 0; padding: 0; }
+ul.staff li {
+  display: flex; align-items: center; gap: var(--s2);
+  padding: 7px 0; border-bottom: 1px solid var(--rule);
+}
+ul.staff .mail { flex: 1 1 auto; overflow-wrap: anywhere; }
+ul.staff .hint { flex: 0 1 auto; text-align: right; }
+.btn.tiny { font-size: 13px; padding: 4px 10px; }
 .chk { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .chk input { width: auto; }
 /* ตารางตัวอย่างการแบ่ง — แถวคำอธิบายเกาะใต้แถวตัวเลขของตัวเอง */
@@ -1420,9 +1429,12 @@ function renderStaffPanel(course) {
     `<div class="pair"><span class="who">รหัสเข้าวิชา</span>` +
       `<span class="chip" id="c-join">${escapeHtml(course.join_code || "—")}</span></div>` +
     `<div class="actions"><button class="btn" id="mts-save">บันทึก</button>` +
-    `<span class="msg" id="mts-msg"></span></div>`;
+    `<span class="msg" id="mts-msg"></span></div>` +
+    `<div class="pair wide" id="staff-list"><span class="who">คนที่ดูแลวิชานี้</span>` +
+      `<span class="val hint">กำลังโหลด…</span></div>`;
 
   if (course.join_code) $("c-join").onclick = (e) => copy(course.join_code, e.target);
+  loadCourseStaff(course.id).catch(() => {});
 
   $("mts-save").onclick = async () => {
     const msg = $("mts-msg");
@@ -1446,6 +1458,85 @@ function renderStaffPanel(course) {
   };
 }
 
+/* ── ใครดูแลวิชานี้ได้บ้าง ────────────────────────────────────────────
+   เดิมรายชื่อนี้อยู่ใน `/etc/arena.env` ที่เดียว การเพิ่ม TA หนึ่งคนจึงต้อง
+   ssh + sudo + restart ทุกครั้ง · ตอนนี้เพิ่มจากที่นี่ได้
+
+   **แต่ถอดได้ไม่ทุกแถว** — คนที่ตั้งไว้ในไฟล์บนเซิร์ฟเวอร์เป็นสมอที่ทำให้มีทาง
+   กู้คืนเสมอถ้าบัญชีผู้สอนถูกยึด · เซิร์ฟเวอร์บอกมาเองว่าแถวไหนถอดได้
+   (`removable`) หน้าเว็บจึงไม่ต้องรู้กติกาซ้ำ และไม่มีทางวาดปุ่มที่กดแล้วโดน
+   ปฏิเสธ ซึ่งอ่านเหมือนระบบพังมากกว่าเหมือนกติกา */
+const STAFF_SOURCE = {
+  system: "ผู้ดูแลระบบ · ตั้งในไฟล์บนเซิร์ฟเวอร์",
+  file: "ตั้งในไฟล์บนเซิร์ฟเวอร์",
+  web: "",
+};
+
+async function loadCourseStaff(courseId) {
+  const el = $("staff-list");
+  if (!el) return;
+
+  let staff;
+  try {
+    staff = (await api(`/api/courses/${encodeURIComponent(courseId)}/staff`)).staff;
+  } catch (e) {
+    el.innerHTML = `<span class="who">คนที่ดูแลวิชานี้</span>` +
+      `<span class="msg warn">${escapeHtml(e.message || "โหลดไม่ได้")}</span>`;
+    return;
+  }
+
+  const rows = staff.map((s, i) => {
+    const note = STAFF_SOURCE[s.source] || "";
+    return `<li><span class="mail">${escapeHtml(s.email)}</span>` +
+      (note ? `<span class="hint">${escapeHtml(note)}</span>` : "") +
+      (s.removable
+        ? `<button class="btn ghost tiny" data-drop="${escapeHtml(s.email)}">ถอด</button>`
+        : `<span class="hint">ถอดที่นี่ไม่ได้</span>`) +
+      `</li>`;
+  }).join("");
+
+  el.innerHTML =
+    `<span class="who">คนที่ดูแลวิชานี้</span>` +
+    `<ul class="staff">${rows}</ul>` +
+    `<div class="actions"><input id="staff-email" type="email" placeholder="ta@g.swu.ac.th">` +
+    `<button class="btn" id="staff-add">เพิ่ม</button>` +
+    `<span class="msg" id="staff-msg"></span></div>` +
+    `<span class="hint">เพิ่มไว้ก่อนได้ ถึงคนนั้นจะยังไม่เคยล็อกอิน · ` +
+    `คนที่ตั้งในไฟล์บนเซิร์ฟเวอร์ต้องแก้ที่ <code>/etc/arena.env</code></span>`;
+
+  const say = (text, warn) => {
+    const msg = $("staff-msg");
+    msg.className = warn ? "msg warn" : "msg";
+    msg.textContent = text;
+  };
+  const call = async (path, email, done) => {
+    say("กำลังบันทึก…");
+    try {
+      await api(`/api/courses/${encodeURIComponent(courseId)}/staff${path}`,
+                { method: "POST", body: new URLSearchParams({ email }) });
+      // วาดใหม่**ก่อน** แล้วค่อยเขียนข้อความ — การวาดใหม่สร้าง #staff-msg ตัวใหม่
+      // ถ้าเขียนก่อน ข้อความยืนยันจะถูกลบทิ้งทันทีแล้วผู้สอนจะไม่รู้ว่าสำเร็จไหม
+      // (บทเรียนเดียวกับ #mts-msg และ #cal-msg)
+      await loadCourseStaff(courseId);
+      $("staff-msg").textContent = done;
+    } catch (e) { say(e.message || "ทำไม่สำเร็จ", true); }
+  };
+
+  $("staff-add").onclick = () => {
+    const email = $("staff-email").value.trim();
+    if (!email) { say("ใส่อีเมลก่อน", true); return; }
+    call("", email, `เพิ่ม ${email.trim().toLowerCase()} แล้ว`);
+  };
+  $("staff-email").onkeydown = (e) => { if (e.key === "Enter") $("staff-add").click(); };
+  el.querySelectorAll("[data-drop]").forEach((b) => {
+    b.onclick = () => {
+      // ถอดสิทธิ์คนอื่นเป็นสิ่งที่กดพลาดแล้วอธิบายยาก — ถามก่อนหนึ่งครั้ง
+      const who = b.dataset.drop;
+      if (confirm(`ถอด ${who} ออกจากผู้ดูแลวิชานี้?`)) call("/remove", who, `ถอด ${who} แล้ว`);
+    };
+  });
+}
+
 function renderTeam(enrolment) {
   const team = enrolment.team;
   const course = enrolment.course;
@@ -1453,6 +1544,24 @@ function renderTeam(enrolment) {
   const el = $("team");
   if (isBusy(el)) return;
   el.hidden = false;
+
+  /* ผู้สอนที่ดูแลวิชานี้แต่ไม่ได้เข้าเป็นนิสิต — **ไม่มีทีม และไม่ควรมี**
+     เดิมหน้านี้สมมติว่าทุกวิชาที่เห็นต้องมีทีมเสมอ ผู้สอนจึงต้องเข้าวิชาตัวเอง
+     ด้วยรหัสก่อนถึงจะทำอะไรได้ ซึ่งทิ้งทีมปลอมไว้ในระบบและทำให้กระดานมีแถวที่
+     ไม่ใช่ของนิสิตจริง */
+  if (!team) {
+    el.innerHTML =
+      `<div class="pair wide"><span class="who">บทบาทของคุณในวิชานี้</span>` +
+        `<span class="val">ผู้สอน — คุณไม่ได้อยู่ทีมไหนในวิชานี้ และไม่จำเป็นต้องอยู่</span></div>` +
+      `<div class="pair"><span class="who">โทเคนของคุณ</span>` +
+        `<span class="chip" id="c-token">คลิกเพื่อคัดลอก</span></div>` +
+      `<div class="actions"><button class="linkish" id="join-open">เข้าวิชานี้ในฐานะนิสิตด้วย</button>` +
+      `<span class="msg" id="team-msg"></span></div>`;
+    $("c-token").onclick = (e) => copy(token, e.target);
+    $("join-open").onclick = () => show("enroll");
+    return;
+  }
+
   const who = team.members.length
     ? team.members.map((m) => escapeHtml(m.name)).join(" · ")
     : "ยังไม่ผูกกับบัญชี Google";

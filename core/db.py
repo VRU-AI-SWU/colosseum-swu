@@ -46,7 +46,7 @@ from core.domain import (
     new_invite_code,
 )
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -60,6 +60,23 @@ CREATE TABLE IF NOT EXISTS courses (
     max_team_size INTEGER NOT NULL,
     join_code     TEXT NOT NULL DEFAULT '',
     archived_at   TEXT
+);
+
+-- ผู้สอน/TA ของวิชาหนึ่ง ที่**แต่งตั้งผ่านหน้าเว็บ**
+--
+-- ⚠️ นี่ไม่ใช่ที่เดียวที่บอกว่าใครจัดการวิชาได้ — `ARENA_STAFF_EMAILS` กับ
+-- `ARENA_COURSE_STAFF_<COURSE>` ใน environment ยังมีผลเสมอและ**ถอดจากหน้าเว็บ
+-- ไม่ได้** · ตารางนี้เป็นชั้นที่ *เพิ่ม* คนเข้ามา ไม่ใช่ชั้นที่แทนที่ของเดิม
+--
+-- เหตุผลที่แยกสองชั้น: ถ้าสิทธิ์ทั้งหมดอยู่ในฐานข้อมูลที่แก้ผ่านเว็บได้ คนที่
+-- ยึดบัญชีผู้สอนได้ครั้งเดียวจะถอดคนอื่นออกทั้งหมดแล้วยึดวิชาไว้ถาวร · การมี
+-- สมอที่แก้ได้เฉพาะคนที่มี root บนเครื่อง ทำให้มีทางกู้คืนเสมอ
+CREATE TABLE IF NOT EXISTS course_staff (
+    course_id TEXT NOT NULL,
+    email     TEXT NOT NULL,
+    added_by  TEXT NOT NULL DEFAULT '',
+    added_at  TEXT NOT NULL,
+    PRIMARY KEY (course_id, email)
 );
 
 CREATE TABLE IF NOT EXISTS teams (
@@ -348,6 +365,25 @@ def _migrate_5_to_6(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN preferred_name TEXT NOT NULL DEFAULT ''")
 
 
+def _migrate_6_to_7(conn: sqlite3.Connection) -> None:
+    """v6 → v7 · ผู้สอนของวิชาที่แต่งตั้งผ่านหน้าเว็บได้
+
+    ตารางใหม่ล้วน ไม่แตะของเดิม — deployment ที่ตั้งสิทธิ์ผ่าน environment อยู่
+    ยังทำงานเหมือนเดิมทุกประการ และตารางที่ว่างเปล่าไม่เปลี่ยนสิทธิ์ของใครเลย
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS course_staff (
+            course_id TEXT NOT NULL,
+            email     TEXT NOT NULL,
+            added_by  TEXT NOT NULL DEFAULT '',
+            added_at  TEXT NOT NULL,
+            PRIMARY KEY (course_id, email)
+        )
+        """
+    )
+
+
 #: เวอร์ชันปลายทาง → ฟังก์ชันที่พาจากเวอร์ชันก่อนหน้ามาถึงมัน
 MIGRATIONS = {
     2: _migrate_1_to_2,
@@ -355,6 +391,7 @@ MIGRATIONS = {
     4: _migrate_3_to_4,
     5: _migrate_4_to_5,
     6: _migrate_5_to_6,
+    7: _migrate_6_to_7,
 }
 
 
@@ -474,6 +511,25 @@ class Database:
             " VALUES(?,?,?,?,?)",
             (c.id, c.name, c.max_team_size, c.join_code, _dt(c.archived_at)),
         )
+
+    def add_course_staff(self, course_id: str, email: str, added_by: str, added_at: str) -> None:
+        """`INSERT OR REPLACE` — เพิ่มคนเดิมซ้ำไม่เป็นข้อผิดพลาด แค่ทับ `added_by`"""
+        self._write(
+            "INSERT OR REPLACE INTO course_staff(course_id, email, added_by, added_at)"
+            " VALUES(?,?,?,?)",
+            (course_id, email, added_by, added_at),
+        )
+
+    def remove_course_staff(self, course_id: str, email: str) -> None:
+        self._write(
+            "DELETE FROM course_staff WHERE course_id = ? AND email = ?", (course_id, email)
+        )
+
+    def load_course_staff(self) -> dict[str, set[str]]:
+        out: dict[str, set[str]] = {}
+        for r in self._rows("course_staff"):
+            out.setdefault(r["course_id"], set()).add(r["email"])
+        return out
 
     def save_user(self, user: User) -> None:
         self._write(
