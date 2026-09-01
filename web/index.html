@@ -381,6 +381,15 @@ ul.staff li {
 ul.staff .mail { flex: 1 1 auto; overflow-wrap: anywhere; }
 ul.staff .hint { flex: 0 1 auto; text-align: right; }
 .btn.tiny { font-size: 13px; padding: 4px 10px; }
+/* เขตอันตราย — แยกเส้นออกจากปุ่มที่ใช้บ่อย เพื่อไม่ให้กดโดนด้วยความเคยชิน
+   ชื่อ `danger-zone` ไม่ใช่ `danger` เพราะ `.linkish.danger` ถูกใช้อยู่แล้ว
+   กับปุ่ม "โทเคนหลุด?" — ชื่อชนกันจะทำให้ปุ่มนั้นกลายเป็น flex container */
+.danger-zone {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2);
+  margin-top: var(--s3); padding-top: var(--s2); border-top: 1px solid var(--rule);
+}
+.danger-btn { color: var(--accent); border-color: var(--accent); }
+.danger-btn:hover { background: var(--accent); color: var(--surface); opacity: 1; }
 .chk { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .chk input { width: auto; }
 /* ตารางตัวอย่างการแบ่ง — แถวคำอธิบายเกาะใต้แถวตัวเลขของตัวเอง */
@@ -1432,7 +1441,13 @@ function renderCalendarEditor(cal) {
       `<input id="d-${p.name}-b" type="date" value="${p.last_day}"></div></div>`
     ).join("") +
     `<div class="actions"><button class="btn" id="cal-save">บันทึกปฏิทิน</button>` +
-    `<span class="msg" id="cal-msg"></span></div>`;
+    `<span class="msg" id="cal-msg"></span></div>` +
+    /* ปุ่มลบอยู่ล่างสุด แยกเส้น และเป็นปุ่มโครงไม่ใช่ปุ่มทึบ — มันไม่ใช่สิ่งที่
+       ผู้สอนมาที่แผงนี้เพื่อทำ · ตัวกันจริงอยู่ที่เซิร์ฟเวอร์ (ลบไม่ได้ถ้ามีคน
+       ส่งงานแล้ว) ส่วนตรงนี้แค่ทำให้ไม่กดโดนโดยบังเอิญ */
+    `<div class="danger-zone"><button class="btn ghost danger-btn" id="cal-del">ลบโจทย์นี้</button>` +
+    `<span class="hint">ลบได้เฉพาะโจทย์ที่ยังไม่มีใครส่งงาน · กู้คืนไม่ได้</span>` +
+    `<span class="msg" id="del-msg"></span></div>`;
 
   $("cal-save").onclick = async () => {
     const msg = $("cal-msg");
@@ -1455,6 +1470,40 @@ function renderCalendarEditor(cal) {
     } catch (e) {
       msg.className = "msg warn";
       msg.textContent = e.message || "บันทึกไม่สำเร็จ";
+    }
+  };
+
+  $("cal-del").onclick = async () => {
+    const msg = $("del-msg");
+    msg.className = "msg";
+    msg.textContent = "";   // ล้างผลของการกดครั้งก่อน ไม่งั้นมันอ่านเหมือนผลของครั้งนี้
+    /* ให้พิมพ์คำยืนยัน ไม่ใช่แค่กด OK — การลบกู้คืนไม่ได้ และปุ่มนี้อยู่ในแผง
+       เดียวกับปุ่มบันทึกปฏิทินที่ผู้สอนกดบ่อย · `confirm()` เปล่าๆ กดผ่านด้วย
+       ความเคยชินได้ การพิมพ์บังคับให้อ่านก่อนหนึ่งครั้ง */
+    const answer = prompt(
+      `ลบโจทย์ "${cal.title}" ถาวร?\n\n` +
+      `ปฏิทิน การตั้งค่า และรหัสของโจทย์จะหายไปทั้งหมด กู้คืนไม่ได้\n` +
+      `พิมพ์  ลบ  เพื่อยืนยัน`
+    );
+    if (answer === null) return;
+    if (answer.trim() !== "ลบ") {
+      msg.className = "msg warn";
+      msg.textContent = "ยกเลิกแล้ว — ต้องพิมพ์คำว่า ลบ ให้ตรง";
+      return;
+    }
+
+    msg.textContent = "กำลังลบ…";
+    try {
+      await api(`/api/competitions/${encodeURIComponent(slug)}/delete`, { method: "POST" });
+      // โจทย์ที่เลือกอยู่หายไปแล้ว — ล้างตัวที่จำไว้ก่อน ไม่งั้น `refresh()`
+      // จะพยายามโหลดกระดานของ slug ที่ไม่มีอยู่แล้ว
+      slug = "";
+      savePick();
+      calEditOpen = false;
+      await refresh();
+    } catch (e) {
+      msg.className = "msg warn";
+      msg.textContent = e.message || "ลบไม่สำเร็จ";
     }
   };
 }
@@ -1789,6 +1838,12 @@ async function refresh() {
     $("rows").innerHTML = "";
     $("target").hidden = true;
     $("err").hidden = true;
+    /* ปฏิทินพูดถึงโจทย์ตัวหนึ่ง — ไม่มีโจทย์ก็ไม่มีอะไรให้พูดถึง
+       เจอตอนลบโจทย์สุดท้ายของวิชา: ปฏิทินของโจทย์ที่เพิ่งหายไปยังค้างอยู่บนจอ
+       พร้อมปุ่มแก้ที่กดแล้วจะยิงไปหา slug ที่ไม่มีอยู่แล้ว */
+    $("cal").hidden = true;
+    $("cal-toggle").hidden = true;
+    calEditOpen = false;
     show("board");
     return;
   }

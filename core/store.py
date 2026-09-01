@@ -165,6 +165,11 @@ class Store:
             self.db.save_competition(competition)
         return competition
 
+    def delete_competition(self, competition_id: str) -> None:
+        self.competitions.pop(competition_id, None)
+        if self.db:
+            self.db.delete_competition(competition_id)
+
     def save_submission(self, submission: Submission) -> Submission:
         self.submissions[submission.id] = submission
         if self.db:

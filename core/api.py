@@ -51,6 +51,7 @@ from core.calendar import CalendarInvalid, as_days
 from core.leaderboard import BaselineMark, build, insert_baselines, next_target
 from core.service import (
     Arena,
+    CompetitionInUse,
     InviteInvalid,
     NotEnrolled,
     StaffChangeRejected,
@@ -881,6 +882,24 @@ def create_app(
             media_type="text/csv; charset=utf-8",
             headers={"Content-Disposition": f'attachment; filename="{slug}.csv"'},
         )
+
+    @app.post("/api/competitions/{slug}/delete")
+    def delete_competition(slug: str, user: UserDep):
+        """ลบโจทย์ที่สร้างผิด — **ได้เฉพาะตอนที่ยังไม่มีใครส่งงาน**
+
+        ผู้สอนที่กรอกฟอร์มผิดต้องมีทางแก้ · แต่ด่านจริงอยู่ที่ `Arena` ไม่ใช่ที่นี่
+        เพราะกติกา "ลบได้เมื่อไร" ต้องเหมือนกันไม่ว่าคำสั่งจะมาจากหน้าเว็บหรือ CLI
+
+        ใช้ POST ไม่ใช่ DELETE เพราะ endpoint อื่นทั้งไฟล์เป็น GET/POST อยู่แล้ว
+        และ CORS ที่ตั้งไว้อนุญาตแค่สองเมธอดนี้ (ดู `allow_methods`)
+        """
+        try:
+            gone = arena.delete_competition(slug=slug, actor=user)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except CompetitionInUse as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {"deleted": gone}
 
     @app.post("/api/competitions/{slug}/calendar")
     def set_calendar(slug: str, user: UserDep, phases: str = Form(...)):

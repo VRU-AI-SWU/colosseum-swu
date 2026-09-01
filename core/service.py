@@ -69,6 +69,10 @@ class NotEnrolled(Exception):
     """คนนี้ยังไม่ได้เข้าวิชาที่กำลังจะทำงานด้วย — ข้อความต้องบอกวิธีเข้า"""
 
 
+class CompetitionInUse(Exception):
+    """ลบ competition ไม่ได้ — ข้อความต้องบอกว่าอะไรขวางอยู่และทำอะไรแทนได้"""
+
+
 class StaffChangeRejected(Exception):
     """แก้รายชื่อผู้ดูแลวิชาไม่ได้ — ข้อความต้องบอกว่าทำไมและต้องทำอะไรต่อ"""
 
@@ -539,6 +543,50 @@ class Arena:
             phases={name: list(ranges[name]) for name in PHASES if name in ranges},
         )
         return competition
+
+    def delete_competition(self, *, slug: str, actor: User) -> dict:
+        """ลบ competition ที่สร้างผิด — **ได้เฉพาะตอนที่ยังไม่มีใครส่งงาน**
+
+        ผู้สอนที่กรอกฟอร์มผิดต้องมีทางแก้ ไม่งั้นวิชาจะสะสมโจทย์ร้างที่นิสิตเห็น
+        แล้วสับสน · แต่พอมี submission แล้ว การลบคือการทำลายงานของนิสิตและ
+        audit trail ซึ่งเป็นคนละเรื่องกับการแก้ที่พิมพ์ผิด
+
+        **ต่างจาก `retire_team.py` ที่ยุบแทนการลบโดยตั้งใจ** — ทีมที่ยุบยังมี
+        run ที่ต้องตรวจย้อนหลังได้ ส่วน competition ที่ไม่มี run เลยไม่มีอะไร
+        ให้ย้อนดู การเก็บแถวว่างไว้จึงไม่ได้ประโยชน์ มีแต่จะรกหน้าเลือกโจทย์
+
+        บันทึกเนื้อ config ลง audit ก่อนลบ — README §7 บอกว่าต้องย้อนดูได้เสมอ
+        ว่าใครทำอะไร และของที่บันทึกไว้ทำให้สร้างกลับได้ถ้าลบผิดตัว
+        """
+        competition = self.store.competition_by_slug(slug)
+        if competition is None:
+            raise KeyError(f"ไม่รู้จัก competition {slug!r}")
+        if not self.can_manage_course(actor.email, competition.course_id):
+            raise CompetitionInUse(f"คุณไม่ได้ดูแลวิชา {competition.course_id}")
+
+        submissions = [
+            s for s in self.store.submissions.values() if s.competition_id == competition.id
+        ]
+        runs = [r for r in self.queue.runs.values() if r.competition_id == competition.id]
+        if submissions or runs:
+            raise CompetitionInUse(
+                f"{slug} มีงานที่ส่งเข้ามาแล้ว {len(submissions)} ชิ้น "
+                f"และผลการรัน {len(runs)} ครั้ง — ลบไม่ได้\n"
+                "  การลบจะทำลายงานของนิสิตและประวัติการให้คะแนนไปพร้อมกัน\n"
+                "  ถ้าต้องการปิดไม่ให้ส่งเพิ่ม ให้เลื่อนวันปิดรับในปฏิทินแทน"
+            )
+
+        kind, source = competition.config_source()
+        self.store.record(
+            "competition.deleted", "competition", competition.id, actor_id=actor.id,
+            slug=competition.slug, title=competition.title,
+            task_type=competition.task_type, env_plugin=competition.env_plugin,
+            course_id=competition.course_id,
+            # เก็บ config ไว้ให้สร้างกลับได้ — ลบผิดตัวเป็นเรื่องที่เกิดขึ้นได้
+            config_source=kind, config=source,
+        )
+        self.store.delete_competition(competition.id)
+        return {"slug": slug, "title": competition.title}
 
     def set_max_team_size(self, *, course_id: str, size: int, actor_id: str | None) -> Course:
         """ผู้สอนเปลี่ยนขนาดทีมของวิชา — **ผู้เรียกต้องตรวจสิทธิ์มาก่อนแล้ว**

@@ -365,3 +365,16 @@ def test_both_endpoints_send_the_same_word():
     api = (INDEX.parent.parent / "core" / "api.py").read_text()
     assert '"status": c.status(now)' in api
     assert '"status": competition.status(now)' in api
+
+
+def test_the_calendar_disappears_when_the_course_has_no_competition():
+    """**เจอตอนลบโจทย์สุดท้ายของวิชา** — ปฏิทินของโจทย์ที่หายไปยังค้างอยู่
+
+    ปฏิทินพูดถึงโจทย์ตัวหนึ่ง · ไม่มีโจทย์ก็ไม่มีอะไรให้พูดถึง และปุ่มแก้ที่ค้าง
+    อยู่จะยิงไปหา slug ที่ไม่มีแล้ว
+    """
+    html = INDEX.read_text()
+    block = html[html.index("if (!slug) {"):]
+    block = block[: block.index("\n  }")]
+    for line in ('$("cal").hidden = true', '$("cal-toggle").hidden = true'):
+        assert line in block, f"สาขา 'วิชานี้ยังไม่มีโจทย์' ต้องมี {line}"

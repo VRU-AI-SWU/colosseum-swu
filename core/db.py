@@ -565,6 +565,14 @@ class Database:
             ),
         )
 
+    def delete_competition(self, competition_id: str) -> None:
+        """ลบแถวเดียว — **ผู้เรียกต้องตรวจมาก่อนแล้วว่าไม่มีอะไรอ้างถึงมัน**
+
+        ไม่มี `ON DELETE CASCADE` โดยตั้งใจ · การลบ competition ที่มี run อยู่
+        ต้องเป็นไปไม่ได้ ไม่ใช่เป็นไปได้แล้วลากของอื่นหายตามไปเงียบๆ
+        """
+        self._write("DELETE FROM competitions WHERE id = ?", (competition_id,))
+
     def save_submission(self, s: Submission) -> None:
         self._write(
             "INSERT OR REPLACE INTO submissions(id, competition_id, team_id, submitted_by,"
