@@ -34,7 +34,7 @@ def _frame(n: int, *, positives: float = 0.25, seed: int = 0) -> Dataset:
 
 def _split(data: Dataset, **kw):
     options = {"kind": "classification", "seed": 3,
-               "student_ratio": 0.7, "grading_public_ratio": 0.5}
+               "student_ratio": 0.7, "final_ratio": 0.15}
     options.update(kw)
     return three_way(data, **options)
 
@@ -52,17 +52,17 @@ def test_every_row_lands_in_exactly_one_part():
     assert sorted(seen.tolist()) == list(range(1000))
 
 
-def test_sizes_follow_the_two_nested_ratios():
-    """`student_ratio` ตัดจากทั้งไฟล์ · `grading_public_ratio` ตัดจากส่วนที่เหลือ
+def test_both_ratios_are_shares_of_the_whole_file():
+    """**ทั้งสองตัววัดจากทั้งไฟล์เหมือนกัน** — กองกลางคือส่วนที่เหลือ
 
-    นี่คือจุดที่คนอ่านผิดได้ง่ายที่สุด — `grading_public_ratio=0.5` ไม่ได้แปลว่า
-    ครึ่งหนึ่งของไฟล์ แต่แปลว่าครึ่งหนึ่งของ 30% ที่กันไว้ = 15% ของไฟล์
+    เดิมตัวที่สองเป็นสัดส่วน*ภายในส่วนที่กันไว้* ซึ่งอธิบายไม่ได้จริง — ผู้สอน
+    ถามตรงๆ ว่า "เลข 0.5 มันมาจากไหน" · ตอนนี้อ่านจากซ้ายไปขวาได้เลย
     """
-    split = _split(_frame(1000), student_ratio=0.7, grading_public_ratio=0.5)
+    split = _split(_frame(1000), student_ratio=0.7, final_ratio=0.15)
     assert split.sizes() == {"student": 700, "test_public": 150, "test_private": 150}
 
-    split = _split(_frame(1000), student_ratio=0.8, grading_public_ratio=0.25)
-    assert split.sizes() == {"student": 800, "test_public": 50, "test_private": 150}
+    split = _split(_frame(1000), student_ratio=0.8, final_ratio=0.05)
+    assert split.sizes() == {"student": 800, "test_public": 150, "test_private": 50}
 
 
 @pytest.mark.parametrize("n", [997, 1000, 4321])
@@ -80,12 +80,12 @@ def test_part_sizes_never_drift_with_the_number_of_strata(n, kind):
                      y=pd.Series(np.linspace(0, 1, n), name="v"))
     )
     sizes = three_way(data, kind=kind, seed=5,
-                      student_ratio=0.7, grading_public_ratio=0.5).sizes()
+                      student_ratio=0.7, final_ratio=0.15).sizes()
 
     student = int(n * 0.7 + 0.5)
-    public = int((n - student) * 0.5 + 0.5)
-    assert sizes == {"student": student, "test_public": public,
-                     "test_private": n - student - public}
+    final = int(n * 0.15 + 0.5)
+    assert sizes == {"student": student, "test_public": n - student - final,
+                     "test_private": final}
 
 
 def test_the_preview_numbers_are_the_numbers_that_actually_happen():
@@ -99,11 +99,11 @@ def test_the_preview_numbers_are_the_numbers_that_actually_happen():
 
     data = _frame(3000, positives=0.11)
     split = three_way(data, kind="classification", seed=13,
-                      student_ratio=0.75, grading_public_ratio=0.4)
+                      student_ratio=0.75, final_ratio=0.1)
 
     predicted = _allocate(
         {"0": int((data.y == 0).sum()), "1": int((data.y == 1).sum())},
-        0.75, 0.4,
+        0.75, 0.1,
     )
     for name in PARTS:
         actual = getattr(split, name).y.value_counts()
@@ -113,7 +113,7 @@ def test_the_preview_numbers_are_the_numbers_that_actually_happen():
 
 def test_a_file_too_small_for_the_ratios_fails_loudly():
     with pytest.raises(SplitError, match="ว่าง"):
-        _split(_frame(4, positives=0.5), student_ratio=0.9, grading_public_ratio=0.5)
+        _split(_frame(4, positives=0.5), student_ratio=0.9, final_ratio=0.05)
 
 
 # ── stratify ──────────────────────────────────────────────────────────────
@@ -143,7 +143,7 @@ def test_regression_strata_cover_the_whole_range():
         y=pd.Series(np.exp(np.linspace(0, 6, n)), name="price"),
     )
     split = three_way(data, kind="regression", seed=1,
-                      student_ratio=0.7, grading_public_ratio=0.5)
+                      student_ratio=0.7, final_ratio=0.15)
 
     whole = data.y.quantile([0.05, 0.95])
     for name in GRADING_PARTS:
@@ -162,7 +162,7 @@ def test_thin_strata_reports_classes_that_will_be_too_small():
     """**สิ่งที่ผู้สอนต้องเห็นก่อนกดสร้าง** — คลาสที่จะเหลือไม่กี่แถวตอนตัดสิน"""
     y = pd.Series([0] * 980 + [1] * 20, name="label")
     thin = thin_strata(y, kind="classification", student_ratio=0.7,
-                       grading_public_ratio=0.5)
+                       final_ratio=0.15)
 
     assert "1" in thin, "คลาสที่มี 20 แถวจะเหลือ 3 แถวต่อกอง ต้องเตือน"
     assert "0" not in thin

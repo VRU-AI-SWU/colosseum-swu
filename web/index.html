@@ -360,6 +360,9 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
   background: var(--bg); color: var(--ink);
 }
 .f input:focus, .f select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* ตัวอย่างต้องอ่านออกทันทีว่าเป็นตัวอย่าง ไม่ใช่ค่าที่กรอกไว้ให้แล้ว —
+   ค่าจริงเป็นตัวตรงสีเข้ม ส่วนตัวอย่างเป็นตัวเอียงสีจาง ต่างกันตั้งแต่ชายตามอง */
+.f input::placeholder { color: var(--muted); font-style: italic; opacity: .75; }
 .f .tip { font-size: 12px; color: var(--muted); }
 /* คู่ของวัน — ห่อบรรทัดเองเมื่อคอลัมน์แคบ ไม่งั้นช่องที่สองล้นออกนอกการ์ด */
 .dates { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s2); }
@@ -1064,10 +1067,10 @@ async function renderAuthoring() {
     (me.is_staff ? `<details><summary>สร้างวิชา <span class="hint">— ผู้ดูแลระบบเท่านั้น</span></summary>
       <div class="form">
         <div class="f"><label for="nc-id">id ของวิชา</label>
-          <input id="nc-id" placeholder="cp461-1-2026">
+          <input id="nc-id" placeholder="เช่น cp461-1-2026">
           <span class="tip">a-z 0-9 และ - เท่านั้น · รูปแบบ &lt;รหัสวิชา&gt;-&lt;ภาค&gt;-&lt;ปี&gt;</span></div>
         <div class="f"><label for="nc-name">ชื่อที่นิสิตเห็น</label>
-          <input id="nc-name" placeholder="CP461 · Machine Learning 1/2026"></div>
+          <input id="nc-name" placeholder="เช่น CP461 · Machine Learning 1/2026"></div>
         <div class="f"><label for="nc-size">ทีมละไม่เกิน</label>
           <input id="nc-size" type="number" min="1" max="20" value="6"></div>
         <div class="f full"><button class="btn" id="nc-go">สร้างวิชา</button>
@@ -1085,10 +1088,10 @@ async function renderAuthoring() {
           <select id="nk-env">${choiceOpts}</select>
           <span class="tip" id="nk-blurb"></span></div>
         <div class="f"><label for="nk-name">ชื่อโจทย์</label>
-          <input id="nk-name" placeholder="diabetes-screening">
+          <input id="nk-name" placeholder="เช่น diabetes-screening">
           <span class="tip" id="nk-name-note">นิสิตจะเห็นชื่อนี้แบบจัดรูปให้แล้ว</span></div>
         <div class="f full"><label for="nk-slug">รหัสของโจทย์ <span class="hint">— ระบบตั้งให้จากสามช่องบน</span></label>
-          <input id="nk-slug" placeholder="เลือกวิชาและตั้งชื่อก่อน">
+          <input id="nk-slug" placeholder="ระบบจะตั้งให้เมื่อกรอกสามช่องบน">
           <span class="tip">ใช้ใน URL และในคำสั่ง <code>arena submit</code> · แก้เองได้ถ้าต้องการ</span></div>
         <div class="f-group"><h3>ปฏิทิน</h3><div class="form">${calendarFieldsHtml("nk")}</div></div>
         <div class="f-group" id="nk-cfg"></div>
@@ -1178,7 +1181,15 @@ function configExtras(c) {
 async function uploadDataset(input) {
   const note = $(input.id + "-note");
   const file = input.files && input.files[0];
-  if (!file) { DATASET = null; return; }
+  /* ⚠️ **ช่องว่างไม่ได้แปลว่าลืมไฟล์** — เบราว์เซอร์ตั้งค่า `<input type=file>`
+     จากสคริปต์ไม่ได้ ช่องจึงว่างเสมอหลังฟอร์มถูกวาดใหม่ · และการกด "Choose File"
+     แล้วกดยกเลิก ก็ยิง `change` โดยไม่มีไฟล์เหมือนกัน
+
+     เดิมตรงนี้ล้าง `DATASET` ทิ้ง ผลคือผู้สอนกดยกเลิกกล่องเลือกไฟล์แล้วระบบลืม
+     ไฟล์เงียบๆ **ทั้งที่บรรทัดใต้ช่องยังบอกว่าไฟล์โหลดอยู่** แล้วไปโดนปฏิเสธ
+     ตอนกดสร้างด้วย "missing 1 required positional argument: 'dataset'"
+     ซึ่งไม่ได้ชี้ไปที่สาเหตุเลย · เดินซ้ำได้จริงในเบราว์เซอร์ */
+  if (!file) return;
 
   note.textContent = `กำลังอ่าน ${file.name}…`;
   const form = new FormData();
@@ -1260,7 +1271,7 @@ async function drawPreview() {
 
   const NAMES = {
     student: ["แจกนิสิต", "เขาแบ่ง train/val เองจากกองนี้"],
-    test_public: ["กระดานระหว่างเทอม", "นิสิตไม่เห็นข้อมูล เห็นแค่คะแนน"],
+    test_public: ["กระดานระหว่างเทอม", "ส่วนที่เหลือ — ระบบคำนวณให้ ไม่มีช่องให้กรอก"],
     test_private: ["ตัดสินรอบสุดท้าย", "ไม่มีผลกลับเลยจนถึงวันปิดรับ"],
   };
   const total = body.rows || 1;
@@ -1326,6 +1337,13 @@ async function createCompetition() {
   if (!c) { msg.className = "msg warn"; msg.textContent = "ไม่มีชนิดโจทย์ให้เลือก"; return; }
   const bad = outOfRange($("nk-cfg"));
   if (bad) { msg.className = "msg warn"; msg.textContent = bad; return; }
+  /* ถ้าโจทย์ชนิดนี้ต้องมีไฟล์ ต้องรู้ตั้งแต่ตรงนี้ — ปล่อยไปเซิร์ฟเวอร์จะได้
+     ข้อความจาก dataclass ของ Python ที่พูดถึงชื่อฟิลด์ ไม่ใช่ชื่อช่องบนฟอร์ม */
+  if ($("nk-cfg").querySelector('[data-type="upload"]') && !DATASET) {
+    msg.className = "msg warn";
+    msg.textContent = "ยังไม่ได้เลือกไฟล์ข้อมูล — กด Choose File แล้วเลือกไฟล์ CSV";
+    return;
+  }
   msg.textContent = "กำลังสร้าง…";
   try {
     /* **ชื่อเดียว ไม่ใช่สองชื่อ** — เดิมมีทั้ง "ชื่อโจทย์" ของ competition และ
@@ -1498,7 +1516,7 @@ async function loadCourseStaff(courseId) {
   el.innerHTML =
     `<span class="who">คนที่ดูแลวิชานี้</span>` +
     `<ul class="staff">${rows}</ul>` +
-    `<div class="actions"><input id="staff-email" type="email" placeholder="ta@g.swu.ac.th">` +
+    `<div class="actions"><input id="staff-email" type="email" placeholder="เช่น ta@g.swu.ac.th">` +
     `<button class="btn" id="staff-add">เพิ่ม</button>` +
     `<span class="msg" id="staff-msg"></span></div>` +
     `<span class="hint">เพิ่มไว้ก่อนได้ ถึงคนนั้นจะยังไม่เคยล็อกอิน · ` +

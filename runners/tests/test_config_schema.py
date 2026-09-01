@@ -246,7 +246,7 @@ def test_the_form_never_asks_for_the_split_the_students_do_themselves(tabular_sc
         ("dataset", "churn"),
         ("student_ratio", 0.05),
         ("student_ratio", 0.99),
-        ("grading_public_ratio", 1.0),
+        ("final_ratio", 0.9),
     ],
 )
 def test_tabular_values_outside_the_declared_limits_are_really_rejected(field, bad, tabular_base):

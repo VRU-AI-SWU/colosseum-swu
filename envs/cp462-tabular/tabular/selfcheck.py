@@ -40,7 +40,7 @@ SCORE_TOLERANCE = 1e-4
 #: ชุดตรวจคงที่ — ตัวเลขพวกนี้เป็นแค่ "ข้อมูลตัวอย่างที่ทำซ้ำได้" ไม่ใช่ข้อมูลของโจทย์
 #: **ห้ามเปลี่ยนโดยไม่ pin golden ใหม่** เพราะทุกค่าใน golden.json ผูกกับมัน
 PROBE = {"task": "churn", "seed": 20260101, "n": 3000,
-         "split_seed": 7, "student_ratio": 0.7, "grading_public_ratio": 0.5}
+         "split_seed": 7, "student_ratio": 0.7, "final_ratio": 0.15}
 
 GREEN, RED, YELLOW, DIM, OFF = "\033[32m", "\033[31m", "\033[33m", "\033[2m", "\033[0m"
 
@@ -66,7 +66,7 @@ def probe_split():
         kind="classification",
         seed=PROBE["split_seed"],
         student_ratio=PROBE["student_ratio"],
-        grading_public_ratio=PROBE["grading_public_ratio"],
+        final_ratio=PROBE["final_ratio"],
     )
 
 

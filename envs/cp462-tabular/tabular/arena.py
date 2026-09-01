@@ -16,7 +16,9 @@ from tabular import __version__
 from tabular import splits, store
 from tabular.config import (
     KINDS,
+    MAX_FINAL_RATIO,
     MAX_STUDENT_RATIO,
+    MIN_FINAL_RATIO,
     MIN_STUDENT_RATIO,
     PRIMARY_BY_KIND,
     ConfigError,
@@ -57,22 +59,26 @@ CONFIG_LIMITS = {
         widget="columns",
         help="รหัสแถว ชื่อคน วันที่ดึงข้อมูล — อะไรที่รู้แล้วทำนายได้โดยไม่ต้องเรียนรู้",
     ),
+    # ชื่ออังกฤษตามที่ผู้สอนขอ — ศัพท์พวกนี้เขาใช้ในคาบอยู่แล้ว การแปลเป็นไทย
+    # ทำให้ต้องแปลกลับในหัวทุกครั้ง · คำอธิบายใต้ช่องยังเป็นไทยเพราะมันคือส่วนที่
+    # อธิบาย *ทำไม* ไม่ใช่ส่วนที่ตั้งชื่อ
     "student_ratio": Limit(
-        label="สัดส่วนที่แจกนิสิต",
+        label="Ratio to be Public Dataset",
         minimum=MIN_STUDENT_RATIO, maximum=MAX_STUDENT_RATIO,
-        help="ของทั้งไฟล์ · ที่เหลือคือชุดที่ใช้ตัดสิน ซึ่งนิสิตไม่เคยเห็น",
+        help="ส่วนที่แจกนิสิต · คิดจากทั้งไฟล์",
     ),
-    "grading_public_ratio": Limit(
-        label="ในชุดที่ใช้ตัดสิน ส่วนที่โชว์บนกระดาน",
-        minimum=0.01, maximum=0.99,
-        help="ที่เหลือซ่อนไว้ตัดสินรอบสุดท้าย — กันการจูนเข้าหากระดานตลอดเทอม",
+    "final_ratio": Limit(
+        label="Ratio to be Final Test Set",
+        minimum=MIN_FINAL_RATIO, maximum=MAX_FINAL_RATIO,
+        help="ส่วนที่ใช้ตัดสินรอบสุดท้าย · คิดจากทั้งไฟล์ · ที่เหลือเป็นกระดานระหว่างเทอม",
     ),
     "split_seed": Limit(
-        label="เมล็ดการแบ่งสามกอง",
+        label="Seed (Data Splitting)",
         help="คุมการแบ่งของ*ระบบ* — ไม่เกี่ยวกับ train/val ที่นิสิตแบ่งเองด้วยเมล็ดของเขา",
     ),
     "bootstrap_seed": Limit(
-        label="เมล็ดของช่วงความเชื่อมั่น", help="ตรึงไว้ให้ทุกทีมเทียบกันได้และรันซ้ำได้ค่าเดิม"
+        label="Seed (Confidence Interval)",
+        help="ตรึงไว้ให้ทุกทีมเทียบกันได้และรันซ้ำได้ค่าเดิม",
     ),
     "labels": Limit(
         label="คลาสทั้งหมด",
@@ -162,7 +168,7 @@ class TabularPlugin:
                 _target_series(spec),
                 kind=spec.kind,
                 student_ratio=spec.student_ratio,
-                grading_public_ratio=spec.grading_public_ratio,
+                final_ratio=spec.final_ratio,
             )
         return out
 

@@ -69,7 +69,7 @@ def parts(spec: TaskSpec) -> splits.ThreeWay:
         kind=spec.kind,
         seed=spec.split_seed,
         student_ratio=spec.student_ratio,
-        grading_public_ratio=spec.grading_public_ratio,
+        final_ratio=spec.final_ratio,
     )
 
 

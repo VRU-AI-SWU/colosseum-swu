@@ -10,7 +10,7 @@
       "n": 3000,
       "split_seed": 7,
       "student_ratio": 0.7,
-      "grading_public_ratio": 0.5
+      "final_ratio": 0.15
     },
     "sizes": {
       "student": 2100,

@@ -109,13 +109,29 @@ def test_the_profile_values_are_plain_python_types(sample_csv):
     ("labels", [], "ต้องประกาศ `labels`"),
     ("student_ratio", 0.05, "แจกนิสิต"),
     ("student_ratio", 0.98, "แจกนิสิต"),
-    ("grading_public_ratio", 0.0, "grading_public_ratio"),
-    ("grading_public_ratio", 1.0, "grading_public_ratio"),
+    ("final_ratio", 0.0, "ตัดสินรอบสุดท้าย"),
+    ("final_ratio", 0.9, "ตัดสินรอบสุดท้าย"),
 ])
 def test_a_bad_field_is_refused_at_load_time(field, value, message):
     """ทุกข้อต้องล้มตอนโหลด ไม่ใช่ไปพังตอนนิสิตส่งงานเข้ามาแล้ว"""
     with pytest.raises(ConfigError, match=message):
         _spec(**{field: value})
+
+
+def test_the_two_ratios_must_leave_room_for_the_leaderboard():
+    """**สองค่านี้วัดจากทั้งไฟล์** รวมกันต้องน้อยกว่า 100% ไม่งั้นกระดานไม่มีข้อมูล
+
+    ข้อความต้องบอกทั้งสองค่าที่กรอกมาและผลรวม — ผู้สอนที่เห็นแค่ "ค่าไม่ถูกต้อง"
+    จะไม่รู้ว่าต้องลดตัวไหน
+    """
+    with pytest.raises(ConfigError, match="ไม่เหลือข้อมูลให้ leaderboard"):
+        _spec(student_ratio=0.9, final_ratio=0.5)
+
+
+def test_the_leaderboard_share_is_derived_not_typed():
+    """กองที่สามเป็นผลลบ — ไม่มีช่องให้กรอก จึงไม่มีอะไรให้กรอกผิด"""
+    assert _spec(student_ratio=0.7, final_ratio=0.15).leaderboard_ratio == pytest.approx(0.15)
+    assert _spec(student_ratio=0.6, final_ratio=0.1).leaderboard_ratio == pytest.approx(0.3)
 
 
 def test_the_target_cannot_also_be_dropped():
@@ -148,7 +164,7 @@ def test_a_config_from_the_old_shape_explains_what_changed():
     ("split_seed", 999),
     ("bootstrap_seed", 999),
     ("student_ratio", 0.6),
-    ("grading_public_ratio", 0.3),
+    ("final_ratio", 0.3),
     ("labels", [1, 0]),
     ("kind", "regression"),
 ])

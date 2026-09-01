@@ -86,25 +86,23 @@ def _label(value) -> str:
     return str(value)
 
 
-def _cut(total: int, student_ratio: float, grading_public_ratio: float) -> list[int]:
-    """แปลงสัดส่วนสองชั้นเป็นจำนวนแถวสามกอง — ผลรวมเท่ากับ `total` เป๊ะเสมอ
+def _cut(total: int, student_ratio: float, final_ratio: float) -> list[int]:
+    """แปลงสัดส่วนสองตัวเป็นจำนวนแถวสามกอง — ผลรวมเท่ากับ `total` เป๊ะเสมอ
 
-    **คิดเป็นจำนวนเต็มทีละชั้น ไม่ใช่คูณสัดส่วนซ้อนกันแล้วค่อยปัด** — วิธีหลัง
-    ให้ผลที่ขึ้นกับ noise ของ float: `1.0 - 0.8` ได้ `0.19999999999999996`
-    แล้วเมื่อไปคูณต่อจนตกใกล้ครึ่งพอดี การปัดจะกระโดดไปคนละทาง ผลคือกองเลื่อน
-    ไปหนึ่งแถวโดยไม่มีเหตุผลที่อธิบายให้ผู้สอนเข้าใจได้
-
-    คิดทีละชั้นยังตรงกับประโยคที่ผู้สอนอ่านบนฟอร์มด้วย — "แจก 80% แล้วในส่วน
-    ที่เหลือ เอา 25% ขึ้นกระดาน"
+    **ทั้งสองสัดส่วนวัดจากทั้งไฟล์เหมือนกัน** กองที่สามเป็นเศษที่เหลือ · เดิม
+    ตัวที่สองเป็นสัดส่วน*ภายในส่วนที่กันไว้* ซึ่งอธิบายให้ผู้สอนเข้าใจไม่ได้จริง
+    — เขาถามตรงๆ ว่าเลขนั้นมาจากไหน
 
     ปัดแบบครึ่งขึ้น (`+ 0.5`) ไม่ใช่ `round()` ของ Python ซึ่งปัดเข้าหาเลขคู่
     (`round(12.5) == 12` แต่ `round(37.5) == 38`) — พฤติกรรมที่อธิบายยากมาก
     เวลาผู้สอนถามว่าทำไมสองคลาสที่ตั้งค่าเหมือนกันได้ผลคนละแบบ
+
+    กองกลาง (leaderboard) รับเศษทั้งหมด เพราะมันเป็นกองที่คำนวณจากอีกสองกอง
+    อยู่แล้ว — การให้เศษไปกองที่ผู้สอนกรอกเองจะทำให้ตัวเลขที่เห็นไม่ตรงกับที่พิมพ์
     """
     student = int(total * student_ratio + 0.5)
-    rest = total - student
-    public = int(rest * grading_public_ratio + 0.5)
-    return [student, public, rest - public]
+    final = int(total * final_ratio + 0.5)
+    return [student, total - student - final, final]
 
 
 def _spread(sizes: dict[str, int]) -> list[tuple[float, str, int]]:
@@ -133,7 +131,7 @@ def _spread(sizes: dict[str, int]) -> list[tuple[float, str, int]]:
 
 
 def _allocate(
-    sizes: dict[str, int], student_ratio: float, grading_public_ratio: float
+    sizes: dict[str, int], student_ratio: float, final_ratio: float
 ) -> dict[str, dict[str, int]]:
     """แต่ละกลุ่มจะมีกี่แถวในแต่ละกอง — คำนวณจากขนาดกลุ่มล้วน ไม่ต้องใช้ข้อมูลจริง
 
@@ -143,7 +141,7 @@ def _allocate(
     order = _spread(sizes)
     counts = {label: dict.fromkeys(PARTS, 0) for label in sizes}
     start = 0
-    for name, count in zip(PARTS, _cut(len(order), student_ratio, grading_public_ratio)):
+    for name, count in zip(PARTS, _cut(len(order), student_ratio, final_ratio)):
         for _, label, _j in order[start : start + count]:
             counts[label][name] += 1
         start += count
@@ -156,12 +154,11 @@ def three_way(
     kind: str,
     seed: int,
     student_ratio: float,
-    grading_public_ratio: float,
+    final_ratio: float,
 ) -> ThreeWay:
     """แบ่งสามกองแบบ stratified
 
-    สัดส่วนสองตัวซ้อนกัน: `student_ratio` ตัดจากทั้งไฟล์ แล้ว
-    `grading_public_ratio` ตัดจาก*ส่วนที่เหลือ* — ไม่ใช่จากทั้งไฟล์
+    สัดส่วนทั้งสองตัววัดจาก**ทั้งไฟล์** — กอง leaderboard คือส่วนที่เหลือ
     """
     strata = strata_of(dataset.y, kind=kind)
     rng = np.random.default_rng(seed)
@@ -183,7 +180,7 @@ def three_way(
 
     parts = {}
     start = 0
-    for name, count in zip(PARTS, _cut(len(order), student_ratio, grading_public_ratio)):
+    for name, count in zip(PARTS, _cut(len(order), student_ratio, final_ratio)):
         idx = order[start : start + count]
         start += count
         # สับอีกครั้งภายในกอง — ไม่งั้นแถวจะเรียงสลับคลาสเป็นจังหวะตายตัว แล้วโค้ด
@@ -211,7 +208,7 @@ def thin_strata(
     *,
     kind: str,
     student_ratio: float,
-    grading_public_ratio: float,
+    final_ratio: float,
     floor: int = 5,
 ) -> dict[str, dict[str, int]]:
     """กลุ่มที่จะเหลือน้อยเกินไปในกองที่ใช้ตัดสิน — **ตรวจก่อนสร้างโจทย์**
@@ -222,7 +219,7 @@ def thin_strata(
     """
     strata = strata_of(y, kind=kind)
     sizes = {label: int((strata == label).sum()) for label in sorted(strata.unique())}
-    allocated = _allocate(sizes, student_ratio, grading_public_ratio)
+    allocated = _allocate(sizes, student_ratio, final_ratio)
     return {
         label: counts
         for label, counts in allocated.items()
