@@ -223,6 +223,9 @@ def create_app(
         นิสิตที่เรียนทั้ง AI และ ML มีทีมคนละทีมในสองวิชา แต่ใช้โทเคนอันเดียว
         หน้าเว็บจึงต้องได้รายการมาทั้งหมดเพื่อทำตัวสลับวิชา
         """
+        # อ่านเวลาครั้งเดียวแล้วใช้ทั้งคำตอบ — ถ้าเรียก `now()` ต่อ competition
+        # สองอันที่อยู่คนละฝั่งของเส้นแบ่งอาจได้สถานะที่ไม่สอดคล้องกันในคำตอบเดียว
+        now = datetime.now(timezone.utc)
 
         def course_view(course, team: Optional[Team]) -> dict:
             """วิชาหนึ่งในสายตาของผู้เรียก — **`team` เป็น `None` ได้**
@@ -267,7 +270,9 @@ def create_app(
                         "slug": c.slug,
                         "title": c.title,
                         "paradigm": c.paradigm,
-                        "is_open": c.is_open(datetime.now(timezone.utc)),
+                        "is_open": c.is_open(now),
+                        # สามสถานะ ไม่ใช่สอง — ดู `Competition.status`
+                        "status": c.status(now),
                     }
                     for c in sorted(
                         (k for k in arena.store.competitions.values()
@@ -672,6 +677,7 @@ def create_app(
             "opens_at": competition.opens_at.isoformat(),
             "closes_at": competition.closes_at.isoformat(),
             "is_open": competition.is_open(now),
+            "status": competition.status(now),
             "quota_per_day": competition.quota_per_day,
             "max_final_submissions": competition.max_final_submissions,
             "current_phase": current.name if current else None,

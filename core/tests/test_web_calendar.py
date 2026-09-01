@@ -314,3 +314,54 @@ def test_logging_out_forgets_the_uploaded_dataset():
     assert 'querySelectorAll(".signed-in")' in block and 'innerHTML = ""' in block, (
         "ต้องล้างเนื้อของแผงด้วย ไม่ใช่แค่ซ่อน — `hidden` ไม่กันคนที่เปิด devtools"
     )
+
+
+# ── สถานะของโจทย์ มีสาม ไม่ใช่สอง ──────────────────────────────────
+
+
+def test_a_competition_has_three_states_not_two():
+    """**บั๊กที่ผู้สอนเจอ** — โจทย์ที่ยังไม่ถึงวันเปิด ถูกเขียนว่า "ปิดรับแล้ว"
+
+    `is_open` เป็น boolean เดียวที่ครอบ "ยังไม่ถึงเวลา" กับ "เลยเวลาแล้ว" ไว้
+    ด้วยกัน · ปฏิทินเดาถูกเพราะมันได้ `opens_at` ไปด้วย แต่ dropdown ได้แค่
+    boolean เลยเดาผิด — สองที่บนหน้าเดียวกันบอกคนละเรื่อง
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from core.domain import Competition, new_id
+
+    now = datetime.now(timezone.utc)
+    def at(opens, closes):
+        return Competition(
+            id=new_id(), course_id="c", slug="s", title="t",
+            task_type="prediction", env_plugin="x:P", config_path="",
+            opens_at=now + timedelta(days=opens), closes_at=now + timedelta(days=closes),
+        )
+
+    assert at(1, 30).status(now) == "upcoming"
+    assert at(-1, 30).status(now) == "open"
+    assert at(-30, -1).status(now) == "closed"
+    # `is_open` ยังเป็นเท็จทั้งสองฝั่ง — นั่นคือเหตุผลที่ต้องมี `status`
+    assert at(1, 30).is_open(now) is False
+    assert at(-30, -1).is_open(now) is False
+
+
+def test_the_page_never_decides_the_state_by_comparing_clocks_itself():
+    """หน้าเว็บต้องใช้คำจากเซิร์ฟเวอร์ — สองที่ที่คำนวณเองจะเพี้ยนกันสักวัน"""
+    html = INDEX.read_text()
+    assert "STATE_SUFFIX[c.status]" in html, "dropdown ต้องใช้ status ไม่ใช่ is_open"
+    assert 'cal.status !== "open"' in html, "ปฏิทินต้องใช้ status ไม่ใช่เทียบเวลาเอง"
+    assert "now < new Date(cal.opens_at).getTime()" not in html, (
+        "ไม่ควรมีการเทียบเวลาเพื่อตัดสินสถานะเหลืออยู่ในหน้าเว็บอีก"
+    )
+
+
+def test_both_endpoints_send_the_same_word():
+    """`/api/me` กับ `/api/competitions/{slug}` ต้องส่ง `status` เหมือนกัน
+
+    หน้าเว็บอ่านจากคนละ endpoint สำหรับ dropdown กับปฏิทิน · ถ้าอันไหนไม่ส่ง
+    `status` มา ที่นั่นจะกลับไปแสดงคำผิดเงียบๆ
+    """
+    api = (INDEX.parent.parent / "core" / "api.py").read_text()
+    assert '"status": c.status(now)' in api
+    assert '"status": competition.status(now)' in api

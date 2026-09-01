@@ -531,6 +531,22 @@ class Competition:
     def is_open(self, when: datetime) -> bool:
         return self.opens_at <= when < self.closes_at
 
+    def status(self, when: datetime) -> str:
+        """`"upcoming"` · `"open"` · `"closed"` — **สามสถานะ ไม่ใช่สอง**
+
+        `is_open` เป็น boolean เดียวที่ครอบ "ยังไม่ถึงเวลา" กับ "เลยเวลาแล้ว"
+        ไว้ด้วยกัน ซึ่งพอไปถึงหน้าเว็บก็ต้องเดาว่าอันไหน · ที่ผ่านมาปฏิทินเดาถูก
+        เพราะมันได้ `opens_at` ไปด้วย แต่รายการโจทย์ใน dropdown ได้แค่ boolean
+        เลยเขียนว่า "ปิดรับแล้ว" ให้โจทย์ที่ยังไม่เปิด
+
+        คำนวณที่นี่ที่เดียวแล้วส่งเป็นคำ — สองที่จะเดาคนละแบบไม่ได้อีก
+        """
+        if when < self.opens_at:
+            return "upcoming"
+        if when >= self.closes_at:
+            return "closed"
+        return "open"
+
 
 @dataclass
 class Submission:

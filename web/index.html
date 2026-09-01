@@ -661,6 +661,19 @@ function paradigmName(id) {
   return p ? p.name : id;
 }
 
+/* ── สถานะของโจทย์ มีสาม ไม่ใช่สอง ────────────────────────────────────
+   เดิมหน้านี้เขียนว่า "(ปิดรับแล้ว)" ให้ทุกอันที่ `is_open` เป็นเท็จ ซึ่งรวม
+   โจทย์ที่**ยังไม่ถึงวันเปิด**ด้วย · ปฏิทินข้างล่างเดาถูกเพราะมันได้ `opens_at`
+   ไปด้วย ผลคือสองที่บนหน้าเดียวกันบอกคนละเรื่อง
+
+   ตอนนี้เซิร์ฟเวอร์คำนวณเป็น**คำ**มาให้ (`Competition.status`) ทั้งสองที่จึงอ่าน
+   จากแหล่งเดียวกันและเดาคนละแบบไม่ได้อีก */
+const STATE_SUFFIX = {
+  upcoming: " (ยังไม่เปิด)",
+  open: "",
+  closed: " (ปิดรับแล้ว)",
+};
+
 function renderCourseBar() {
   const enrolment = current();
   const el = $("picker");
@@ -686,7 +699,7 @@ function renderCourseBar() {
         `<optgroup label="${escapeHtml(paradigmName(pid))}">` +
         list.map((c) =>
           `<option value="${escapeHtml(c.slug)}"${c.slug === slug ? " selected" : ""}>` +
-          `${escapeHtml(c.title)}${c.is_open ? "" : " (ปิดรับแล้ว)"}</option>`).join("") +
+          `${escapeHtml(c.title)}${STATE_SUFFIX[c.status] || ""}</option>`).join("") +
         `</optgroup>`).join("") +
       `</select>`
     : `<span class="who">ยังไม่มีโจทย์ในวิชานี้</span>`;
@@ -1923,8 +1936,11 @@ async function loadCalendar() {
     now >= new Date(p.starts_at).getTime() && now < new Date(p.ends_at).getTime());
 
   let note;
-  if (!cal.is_open) {
-    note = now < new Date(cal.opens_at).getTime()
+  if (cal.status !== "open") {
+    // ใช้คำจากเซิร์ฟเวอร์ ไม่เทียบเวลาเอง — เดิมที่นี่เทียบเองแล้วบังเอิญถูก
+    // ส่วน dropdown ข้างบนเทียบไม่ได้เพราะไม่มี `opens_at` · แหล่งเดียวกันแปลว่า
+    // ไม่มีทางบอกคนละเรื่องอีก
+    note = cal.status === "upcoming"
       ? `<b>ยังไม่เปิดรับงาน</b> — เริ่ม ${thaiDate(cal.opens_at)}`
       : "<b>ปิดรับงานแล้ว</b>";
   } else if (current) {
