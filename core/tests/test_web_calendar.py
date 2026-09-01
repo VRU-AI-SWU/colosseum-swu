@@ -378,3 +378,41 @@ def test_the_calendar_disappears_when_the_course_has_no_competition():
     block = block[: block.index("\n  }")]
     for line in ('$("cal").hidden = true', '$("cal-toggle").hidden = true'):
         assert line in block, f"สาขา 'วิชานี้ยังไม่มีโจทย์' ต้องมี {line}"
+
+
+# ── ช่วงความเชื่อมั่นบนกระดาน ──────────────────────────────────────
+
+
+def test_the_leaderboard_shows_the_interval_it_already_computes():
+    """ระบบคำนวณ `ci_low`/`ci_high` ไว้ทุก run มาตลอด แต่หน้าเว็บไม่เคยแสดง
+
+    ผลคือนิสิตเห็น 0.642 กับ 0.618 แล้วคิดว่าตัวเองแพ้ ทั้งที่บนชุด 50 แถว
+    สองค่านั้นแยกกันไม่ออกทางสถิติ
+    """
+    html = INDEX.read_text()
+    assert "m.ci_low" in html, "ตารางต้องอ่าน ci_low ที่ API ส่งมาให้แล้ว"
+    assert "ช่วงความเชื่อมั่น" in html
+
+
+def test_the_overlap_marker_says_undecided_not_equal():
+    """**ช่วงทับกัน ≠ เท่ากัน** — มันแปลว่าข้อมูลเท่านี้ยังบอกไม่ได้ว่าใครดีกว่า
+
+    ถ้าเขียนว่า "เท่ากัน" เราจะกล่าวอ้างเกินกว่าที่ข้อมูลรองรับ ซึ่งเป็นความผิด
+    แบบเดียวกับที่ฟีเจอร์นี้มีไว้เพื่อแก้
+    """
+    html = INDEX.read_text()
+    # ดูเฉพาะ**ข้อความที่ผู้ใช้เห็น** ไม่ใช่ทั้งไฟล์ — คอมเมนต์อธิบายกับดักนี้ได้
+    # โดยเอ่ยถึงคำที่ห้ามใช้บนหน้าจอ ซึ่งไม่ใช่ความผิด
+    marker = re.search(r'<span class="tie" title="([^"]*)">([^<]*)</span>', html)
+    assert marker, "ไม่เจอเครื่องหมายบอกว่าช่วงทับกัน"
+    shown = marker.group(1) + " " + marker.group(2)
+    assert "ยังบอกไม่ได้ว่าใครดีกว่า" in shown
+    for wrong in ("เท่ากัน", "เสมอกัน"):
+        assert wrong not in shown, f"ห้ามเขียนว่า {wrong} — ช่วงทับกันไม่ได้แปลว่าฝีมือเท่ากัน"
+
+
+def test_the_meta_column_header_is_not_hardcoded_to_one_task_type():
+    """`ดูดครบ` เป็นของโจทย์ RL — ไม่มีความหมายกับโจทย์ทำนาย"""
+    html = INDEX.read_text()
+    assert 'id="col-meta"' in html
+    assert '$("col-meta")' in html, "หัวคอลัมน์ต้องถูกตั้งจากข้อมูลที่มีจริง"
