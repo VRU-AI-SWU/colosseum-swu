@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import re
 import secrets
 import uuid
 from dataclasses import dataclass, field
@@ -307,6 +308,57 @@ def valid_course_id(text: str) -> str:
             "  แนะนำรูปแบบ <รหัสวิชา>-<ภาค>-<ปี> เช่น cp462-1-2026"
         )
     return text
+
+
+#: คำที่ไม่ขึ้นต้นด้วยตัวใหญ่กลางชื่อ — บุพบท คำนำหน้านาม และคำเชื่อมสั้นๆ
+#:
+#: ⚠️ **รายการนี้ถูกคัดลอกไว้ที่ `web/index.html` ด้วย** เพราะหน้าเว็บต้องแสดง
+#: ชื่อที่จะได้ *ก่อน* กดบันทึก · มีเทสต์บังคับว่าสองที่ต้องตรงกัน — ถ้าต่างกัน
+#: ผู้สอนจะเห็นชื่อหนึ่งบนฟอร์มแล้วได้อีกชื่อหนึ่งบนหน้าโจทย์
+TITLE_SMALL_WORDS = frozenset(
+    "a an the and but or nor for so yet at by in of on to up as vs via with from into onto over".split()
+)
+
+
+def proper_title(raw: str) -> str:
+    """`diabetes-screening` → `Diabetes Screening` · `price_of_houses` → `Price of Houses`
+
+    ผู้สอนพิมพ์ชื่อสั้นๆ แบบที่สะดวกพิมพ์ (ขีดกลาง ขีดล่าง ตัวเล็กล้วน) แต่สิ่งที่
+    นิสิตเห็นบนหน้าโจทย์ควรอ่านเหมือนชื่อเรื่อง ไม่ใช่ชื่อไฟล์
+
+    **สามอย่างที่ไม่แตะ** เพราะการ "แก้ให้" จะทำลายเจตนาของคนตั้ง
+
+      · คำที่มีตัวใหญ่อยู่แล้วไม่ใช่ตัวแรก — `eCommerce` `McDonald` `PhD`
+      · คำที่เป็นตัวใหญ่ล้วน — `ML` `CSV` `HR` เป็นตัวย่อ ไม่ใช่คำที่พิมพ์ผิด
+      · คำที่ไม่ใช่อักษรละติน — ภาษาไทยไม่มีตัวใหญ่ตัวเล็ก
+    """
+    words = [w for w in re.split(r"[\s\-_]+", (raw or "").strip()) if w]
+    if not words:
+        return ""
+
+    out = []
+    for index, word in enumerate(words):
+        first_or_last = index in (0, len(words) - 1)
+        if not word.isascii() or not word[0].isalpha():
+            out.append(word)
+        elif word.isupper() or any(c.isupper() for c in word[1:]):
+            out.append(word)
+        elif not first_or_last and word.lower() in TITLE_SMALL_WORDS:
+            out.append(word.lower())
+        else:
+            out.append(word[0].upper() + word[1:].lower())
+    return " ".join(out)
+
+
+def slugify(raw: str) -> str:
+    """`Diabetes Screening!` → `diabetes-screening` — ส่วนของ slug ที่มาจากชื่อโจทย์
+
+    ตัดอักขระที่ `valid_course_id` ไม่รับออกไปเลย แทนที่จะปฏิเสธ — ผู้สอนกำลัง
+    พิมพ์*ชื่อ* ไม่ได้กำลังพิมพ์ id · การบังคับให้เขาแก้ชื่อให้เป็น id ที่ถูกต้อง
+    คือการเอาข้อจำกัดของระบบไปเป็นภาระของคนใช้
+    """
+    text = re.sub(r"[^a-z0-9]+", "-", (raw or "").strip().lower())
+    return text.strip("-")
 
 
 class AliasInvalid(Exception):

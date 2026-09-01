@@ -20,10 +20,11 @@
 # อาการที่เห็นคือ "Field required: team" ซึ่งไม่ได้ชี้ไปที่สาเหตุเลย
 
 import json
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Annotated, Callable, Optional
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Response, UploadFile
 
 from core.domain import (
     PARADIGMS,
@@ -97,6 +98,12 @@ def create_app(
     google: Optional[GoogleAuth] = None,
     environments: Optional[Callable[[], list[dict]]] = None,
     prepare_config: Optional[Callable[[str, str], dict]] = None,
+    #: สามอย่างที่โจทย์ทำนายต้องมี — รับไฟล์ · บอกว่าจะแบ่งออกมายังไง · แจกให้นิสิต
+    #: `None` = deployment นี้ไม่มี env ที่รับไฟล์ข้อมูล แล้ว endpoint ที่ต้องใช้
+    #: จะตอบ 503 พร้อมบอกว่าขาดอะไร ซึ่งชัดกว่าการที่บริการไม่ยอมเริ่ม
+    upload_dataset: Optional[Callable[[str, bytes], dict]] = None,
+    preview_config: Optional[Callable[[str, str], dict]] = None,
+    student_dataset: Optional[Callable[[str, str], bytes]] = None,
 ) -> FastAPI:
     """`allow_origins` = โดเมนของหน้าเว็บที่เรียก API นี้ได้ (README §10.1)
 
@@ -720,6 +727,98 @@ def create_app(
         # ฉีดเข้ามาตอน wiring เหมือน `validators` และ `baselines` — `core/api.py`
         # ต้องไม่ import `runners/` หรือ `envs/` ตรงๆ (README §10.5)
         return {"environments": environments() if environments else []}
+
+    # ── ชุดข้อมูลของโจทย์ทำนาย ──────────────────────────────────────
+    #
+    # ทั้งสามข้างล่างแตะข้อมูลที่นิสิตไม่ควรเห็นทั้งใบ — สิทธิ์จึงตรวจที่ endpoint
+    # เสมอ ไม่พึ่งว่าหน้าเว็บซ่อนปุ่มให้แล้ว
+
+    @app.post("/api/datasets")
+    async def upload_dataset_file(
+        user: UserDep,
+        file: Annotated[UploadFile, File()],
+        course_id: Annotated[str, Form()] = "",
+        env_plugin: Annotated[str, Form()] = "",
+    ):
+        """ผู้สอนอัปโหลด CSV — คืนรหัสของไฟล์ พร้อมรายชื่อคอลัมน์และค่าที่พบ
+
+        หน้าเว็บใช้คำตอบนี้เติมช่อง "คอลัมน์เฉลย" กับ "คลาสทั้งหมด" ให้ · ผู้สอน
+        จึงไม่ต้องพิมพ์ชื่อคอลัมน์จากความจำ ซึ่งพิมพ์ผิดได้และความผิดจะไปโผล่
+        ตอนนิสิตส่งงานเข้ามาแล้ว
+
+        **ตรวจก่อนเก็บเสมอ** — ไฟล์ที่ `load_spec` อ่านไม่ได้ต้องไม่เข้าคลัง
+
+        **ผู้สอนของวิชานั้นเท่านั้น** — ไฟล์ที่อัปโหลดกลายเป็นเฉลยของโจทย์
+        """
+        if not arena.can_manage_course(user.email, course_id):
+            raise HTTPException(403, f"เฉพาะผู้สอนของวิชา {course_id} เท่านั้นที่อัปโหลดข้อมูลได้")
+        if upload_dataset is None:
+            raise HTTPException(503, "deployment นี้ยังไม่ได้ต่อ env ที่รับไฟล์ข้อมูล")
+
+        blob = await file.read()
+        try:
+            return upload_dataset(env_plugin, blob)
+        except Exception as exc:  # noqa: BLE001 — ข้อความมาจาก env จริง อ่านรู้เรื่องกว่า
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/competitions/preview")
+    def preview_split(
+        user: UserDep,
+        course_id: str = Form(""),
+        env_plugin: str = Form(""),
+        config: str = Form(""),
+    ):
+        """config ชุดนี้จะแบ่งข้อมูลออกมาหน้าตายังไง — **ก่อน**กดสร้าง
+
+        ผู้สอนกรอกสัดส่วนเป็นตัวเลข 0–1 แต่สิ่งที่เขาตัดสินใจจริงคือจำนวนแถวและ
+        การกระจายคลาสในแต่ละกอง · ฟอร์มที่ไม่บอกตัวเลขนั้นคือฟอร์มที่ให้เดา
+        """
+        if not arena.can_manage_course(user.email, course_id):
+            raise HTTPException(403, f"เฉพาะผู้สอนของวิชา {course_id} เท่านั้น")
+        if preview_config is None:
+            raise HTTPException(503, "deployment นี้ยังไม่ได้ต่อ env ที่รับไฟล์ข้อมูล")
+
+        try:
+            return preview_config(env_plugin, config)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.get("/api/competitions/{slug}/data")
+    def download_data(slug: str, user: UserDep):
+        """นิสิตดาวน์โหลดกองที่แจก — **ทางออกทางเดียวของข้อมูลจากเซิร์ฟเวอร์**
+
+        ต้องอยู่ในวิชานั้นจริง · ไม่ใช่แค่มีโทเคนที่ใช้ได้ · ไฟล์นี้คือเฉลยของ
+        กองที่แจก การปล่อยให้คนนอกวิชาโหลดได้ไม่ได้ทำให้การแข่งพัง แต่มันคือ
+        ข้อมูลของวิชาที่ผู้สอนเป็นคนตัดสินใจว่าใครได้เห็น
+        """
+        competition = arena.store.competition_by_slug(slug)
+        if competition is None:
+            raise HTTPException(404, f"ไม่รู้จัก competition {slug!r}")
+        if student_dataset is None:
+            raise HTTPException(503, "deployment นี้ยังไม่ได้ต่อ env ที่รับไฟล์ข้อมูล")
+
+        # ไม่ใช้ `team_in` เพราะมันตอบ 409 ให้เอง — ที่นี่ผู้สอนที่ยังไม่ได้เข้าวิชา
+        # ในฐานะนิสิตต้องโหลดได้ด้วย จึงต้องถามสองคำถามแล้วค่อยตัดสิน
+        try:
+            arena.team_for(user=user, course_id=competition.course_id)
+        except NotEnrolled:
+            if not arena.can_manage_course(user.email, competition.course_id):
+                raise HTTPException(
+                    403, f"ต้องเข้าวิชา {competition.course_id} ก่อนถึงจะโหลดข้อมูลได้"
+                ) from None
+
+        kind, source = competition.config_source()
+        config_text = source if kind == "text" else Path(source).read_text(encoding="utf-8")
+        try:
+            blob = student_dataset(competition.env_plugin, config_text)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(400, str(exc)) from exc
+
+        return Response(
+            content=blob,
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{slug}.csv"'},
+        )
 
     @app.post("/api/competitions/{slug}/calendar")
     def set_calendar(slug: str, user: UserDep, phases: str = Form(...)):

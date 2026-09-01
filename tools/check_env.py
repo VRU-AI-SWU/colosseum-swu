@@ -10,6 +10,13 @@ REQUIRED = ("ARENA_GOOGLE_CLIENT_ID", "ARENA_GOOGLE_CLIENT_SECRET", "ARENA_WEB_O
 
 #: ไม่บังคับ แต่ถ้าไม่มีจะไม่มีใครเปลี่ยนขนาดทีมจากหน้าเว็บได้เลย
 OPTIONAL = ("ARENA_STAFF_EMAILS",)
+
+#: ค่าที่เป็น path — ตรวจว่าโฟลเดอร์มีอยู่จริงและสิทธิ์ไม่กว้างเกินไป
+#:
+#: `ARENA_DATASETS` คือคลังชุดข้อมูลของโจทย์ทำนาย · ไฟล์ในนั้นคือ**เฉลยของทั้งวิชา**
+#: และตั้งแต่เลิกใช้เมล็ดลับ การอ่านไฟล์ได้เท่ากับได้เฉลยครบทุกแถว · ถ้าไม่ได้ตั้ง
+#: ผู้สอนจะอัปโหลดข้อมูลไม่ได้เลย และถ้าตั้งไว้คนละที่กับ worker ทุก run จะล้ม
+PATHS = {"ARENA_DATASETS": 0o700}
 path = pathlib.Path("/etc/arena.env")
 
 st = path.stat()
@@ -65,9 +72,33 @@ for k in OPTIONAL:
             # จับคู่ด้วยตัวพิมพ์เล็กอยู่แล้ว แต่การเขียนไม่ตรงกันชวนให้เข้าใจผิดว่าพัง
             print(f"      ℹ️ {e} มีตัวพิมพ์ใหญ่ — ระบบไม่สนใจตัวพิมพ์ ใช้ได้ปกติ")
 
-extra = [k for k in seen if k not in REQUIRED + OPTIONAL]
+for k, want_mode in PATHS.items():
+    v = (seen.get(k) or "").strip()
+    if not v:
+        print(f"  {k:<28} (ไม่ได้ตั้ง — ผู้สอนอัปโหลดชุดข้อมูลไม่ได้)")
+        continue
+    d = pathlib.Path(v)
+    if not d.is_dir():
+        problems.append(f"{k}: ไม่มีโฟลเดอร์ {v} — สร้างด้วย `install -d -m 700 {v}`")
+        continue
+    mode = d.stat().st_mode & 0o777
+    files = len(list(d.glob("*.csv")))
+    print(f"  {k:<28} {v} · โหมด {oct(mode)[-3:]} · {files} ชุดข้อมูล")
+    if mode & 0o077:
+        problems.append(
+            f"{k}: โหมด {oct(mode)[-3:]} กว้างเกินไป — ไฟล์ในนี้คือเฉลยของทั้งวิชา "
+            f"(`chmod 700 {v}`)"
+        )
+
+extra = [k for k in seen if k not in REQUIRED + OPTIONAL + tuple(PATHS)
+         and not k.startswith("ARENA_COURSE_STAFF_")]
 if extra:
     print(f"  ตัวแปรอื่น: {extra}")
+
+staff = {k: v for k, v in seen.items() if k.startswith("ARENA_COURSE_STAFF_")}
+for k, v in sorted(staff.items()):
+    course = k[len("ARENA_COURSE_STAFF_"):].lower().replace("_", "-")
+    print(f"  {k:<28} วิชา {course} · {v}")
 
 print()
 if problems:

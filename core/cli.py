@@ -468,7 +468,10 @@ def cmd_serve(args) -> int:
         course_staff_from_env,
         environments,
         prepare_config,
+        preview_config,
         staff_emails_from_env,
+        student_dataset,
+        upload_dataset,
     )
     from runners.worker import SANDBOXES, Worker
 
@@ -542,6 +545,9 @@ def cmd_serve(args) -> int:
             google=google,
             environments=environments,
             prepare_config=prepare_config,
+            upload_dataset=upload_dataset,
+            preview_config=preview_config,
+            student_dataset=student_dataset,
         ),
         host=args.host,
         port=args.port,

@@ -363,6 +363,23 @@ tr.you .name::after { white-space: nowrap; display: inline-block; }
 .f .tip { font-size: 12px; color: var(--muted); }
 /* คู่ของวัน — ห่อบรรทัดเองเมื่อคอลัมน์แคบ ไม่งั้นช่องที่สองล้นออกนอกการ์ด */
 .dates { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s2); }
+/* ช่องที่รอไฟล์ — บอกว่าต้องทำอะไรก่อน แทนที่จะโชว์ช่องว่างที่กรอกไม่ได้ */
+.waiting {
+  font-size: 13px; color: var(--muted); padding: 9px 11px;
+  border: 1px dashed var(--rule-strong); border-radius: var(--radius-sm);
+}
+.chks { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s2); padding: 2px 0; }
+.chk { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.chk input { width: auto; }
+/* ตารางตัวอย่างการแบ่ง — แถวคำอธิบายเกาะใต้แถวตัวเลขของตัวเอง */
+table.split { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.split th { text-align: left; font-weight: 600; padding: 6px 0; }
+table.split td { padding: 6px 0; }
+table.split td.num { text-align: right; padding-left: var(--s2); white-space: nowrap; }
+table.split tr.why td {
+  padding: 0 0 8px; font-size: 12px; color: var(--muted);
+  border-bottom: 1px solid var(--rule);
+}
 .dates input { flex: 1 1 130px; }
 .f-group { grid-column: 1 / -1; margin-top: var(--s2); }
 .f-group > h3 {
@@ -782,7 +799,39 @@ function isBusy(el) {
 // บันทึกไม่ได้ โดยข้อความที่เห็นพูดถึงฟิลด์ที่ฟอร์มไม่ได้แสดงด้วยซ้ำ
 let ENVS = null;
 
+/* ชุดข้อมูลที่ผู้สอนเพิ่งอัปโหลด — `{digest, rows, columns}` จาก POST /api/datasets
+   เก็บไว้นอกตัววาด เพราะตัววาดถูกเรียกซ้ำทุกรอบรีเฟรช ถ้าเก็บใน DOM ไฟล์ที่
+   อัปโหลดไว้จะหายทุก 30 วินาที */
+let DATASET = null;
+
 const esc = (v) => escapeHtml(String(v == null ? "" : v));
+
+/* ── ชื่อที่ผู้สอนตั้ง → ชื่อที่นิสิตเห็น ────────────────────────────
+   ผู้สอนพิมพ์ชื่อสั้นๆ แบบที่สะดวกพิมพ์ (`diabetes-screening`) แต่สิ่งที่นิสิตเห็น
+   ควรอ่านเหมือนชื่อเรื่อง (`Diabetes Screening`) ไม่ใช่ชื่อไฟล์
+
+   ⚠️ **กติกาเดียวกับ `core/domain.py:proper_title`** — ที่นี่มีไว้เพื่อให้ผู้สอน
+   เห็นผลก่อนกดบันทึก ส่วนเซิร์ฟเวอร์เป็นผู้ตัดสิน · มีเทสต์บังคับว่ารายการคำ
+   ทั้งสองที่ต้องตรงกัน (`test_dataset_upload.py`) ถ้าต่างกัน ผู้สอนจะเห็นชื่อหนึ่ง
+   บนฟอร์มแล้วได้อีกชื่อหนึ่งบนหน้าโจทย์ */
+const SMALL_WORDS = new Set(
+  'a an the and but or nor for so yet at by in of on to up as vs via with from into onto over'.split(' ')
+);
+
+function properTitle(raw) {
+  const words = String(raw || "").trim().split(/[\s\-_]+/).filter(Boolean);
+  return words.map((w, i) => {
+    const edge = i === 0 || i === words.length - 1;
+    // ไม่ใช่อักษรละติน (ไทย) · ตัวย่อ (`ML`) · ตัวใหญ่กลางคำ (`eCommerce`) — ไม่แตะ
+    if (!/^[\x00-\x7F]*$/.test(w) || !/^[A-Za-z]/.test(w)) return w;
+    if (w === w.toUpperCase() || /[A-Z]/.test(w.slice(1))) return w;
+    if (!edge && SMALL_WORDS.has(w.toLowerCase())) return w.toLowerCase();
+    return w[0].toUpperCase() + w.slice(1).toLowerCase();
+  }).join(" ");
+}
+
+const slugPart = (raw) =>
+  String(raw || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
 function fieldHtml(f) {
   const id = "cfg-" + f.key.replace(/\./g, "-");
@@ -793,7 +842,9 @@ function fieldHtml(f) {
   const label = esc(f.label || f.key);
   const req = f.required ? " required" : "";
   let input;
-  if (f.type === "enum") {
+  if (f.widget) {
+    input = widgetHtml(f, id, req);
+  } else if (f.type === "enum") {
     const opts = (f.choices || []).map((c) =>
       `<option value="${esc(c)}"${c === f.default ? " selected" : ""}>${esc(c)}</option>`).join("");
     input = `<select id="${id}" data-key="${esc(f.key)}" data-type="enum"${req}>${opts}</select>`;
@@ -820,6 +871,54 @@ function fieldHtml(f) {
   return `<div class="f"><label for="${id}">${label}</label>${input}${tip}</div>`;
 }
 
+/* ── ช่องที่พิมพ์เองไม่ได้ในทางปฏิบัติ ───────────────────────────────
+   `dataset` เป็นลายนิ้วมือ 64 หลักที่ได้จากการอัปโหลด · `target` กับ `drop` เป็น
+   ชื่อคอลัมน์ที่มีอยู่ใน**ไฟล์นั้น**เท่านั้น · ช่องพิมพ์ธรรมดาสำหรับสามอันนี้คือ
+   ช่องที่พิมพ์ผิดได้ และความผิดจะไปโผล่ตอนนิสิตส่งงานเข้ามาแล้ว
+
+   env เป็นคนบอกว่าช่องไหนต้องใช้ตัวควบคุมอะไร (`Limit.widget`) — หน้าเว็บไม่ได้
+   รู้จักชื่อฟิลด์ `dataset` เอง เพิ่ม env ที่สามจึงไม่ต้องแก้ตรงนี้ */
+function widgetHtml(f, id, req) {
+  const key = esc(f.key);
+  if (f.widget === "upload") {
+    /* `<input type=file>` ตั้งค่าจากสคริปต์ไม่ได้ตามข้อกำหนดของเบราว์เซอร์ — พอ
+       ฟอร์มถูกวาดใหม่ ช่องจะว่างเสมอ · ถ้าไม่เขียนสรุปของไฟล์ที่ยังถืออยู่กลับไป
+       ผู้สอนจะเห็นช่องไฟล์ว่างคู่กับรายชื่อคอลัมน์ที่มีข้อมูล แล้วไม่รู้ว่าระบบ
+       ยังจำไฟล์ไว้หรือต้องเลือกใหม่ */
+    const note = DATASET
+      ? `${DATASET.rows.toLocaleString()} แถว · ${DATASET.columns.length} คอลัมน์ · ` +
+        `${DATASET.digest.slice(7, 19)}…`
+      : "";
+    return `<input id="${id}" data-key="${key}" data-type="upload" type="file" accept=".csv,text/csv">` +
+           `<span class="tip" id="${id}-note">${esc(note)}</span>`;
+  }
+
+  const columns = (DATASET && DATASET.columns) || [];
+  if (!columns.length) {
+    return `<div class="waiting" id="${id}" data-key="${key}" data-type="${esc(f.widget)}">` +
+           `อัปโหลดไฟล์ข้อมูลก่อน แล้วรายชื่อคอลัมน์จะขึ้นที่นี่</div>`;
+  }
+  if (f.widget === "column") {
+    /* เดาคอลัมน์เฉลยเป็น**คอลัมน์สุดท้าย** ไม่ใช่คอลัมน์แรก — แทบทุกไฟล์วางเฉลย
+       ไว้ท้ายสุด ส่วนคอลัมน์แรกมักเป็น id ซึ่งเป็นคำตอบที่ผิดที่สุดที่เป็นไปได้
+       (โมเดลจะทำนาย id แล้วคะแนนจะไม่มีความหมายเลย) · เป็นการเสนอ ไม่ใช่การบังคับ */
+    const fallback = columns[columns.length - 1].name;
+    const picked = columns.some((c) => c.name === f.default) ? f.default : fallback;
+    const opts = columns.map((c) =>
+      `<option value="${esc(c.name)}"${c.name === picked ? " selected" : ""}>` +
+      `${esc(c.name)} — ${esc(c.dtype === "numeric" ? "ตัวเลข" : "หมวดหมู่")}` +
+      `${c.values ? ` · ${c.values.length} ค่า` : ""}</option>`).join("");
+    return `<select id="${id}" data-key="${key}" data-type="column"${req}>${opts}</select>`;
+  }
+  // "columns" — เลือกได้หลายอัน · ใช้ช่องกาถูกไม่ใช่ multi-select เพราะ multi-select
+  // บนมือถือซ่อนสิ่งที่เลือกไว้ และคนส่วนใหญ่ไม่รู้ว่าต้องกด ctrl ค้าง
+  const picked = new Set(Array.isArray(f.default) ? f.default : []);
+  const boxes = columns.map((c, i) =>
+    `<label class="chk"><input type="checkbox" value="${esc(c.name)}"` +
+    `${picked.has(c.name) ? " checked" : ""}> ${esc(c.name)}</label>`).join("");
+  return `<div class="chks" id="${id}" data-key="${key}" data-type="columns">${boxes}</div>`;
+}
+
 function configFormHtml(env, offer) {
   /* ข้ามช่องที่ `fixed` — มันคือค่าที่แก้ผ่านฟอร์มไม่ได้ (เช่น เมล็ดของชุดที่ใช้
      ตัดสิน ซึ่งอยู่ใน ARENA_SECRETS) การแสดงช่องที่กรอกแล้วไม่มีผลคือการโกหก
@@ -829,6 +928,9 @@ function configFormHtml(env, offer) {
      ตัดตัวเลือกที่เข้าคู่กันไม่ได้ทิ้ง เดิมฟอร์มโชว์คะแนนหลักทั้ง 5 ตัวรวมกัน
      แล้วคนที่เลือก classification คู่กับ `r2` จะโดนปฏิเสธหลังกดบันทึก */
   const hide = new Set(offer ? offer.hide : []);
+  // `title` ของ config เป็นสิ่งเดียวกับชื่อโจทย์ข้างบน — โชว์สองช่องที่หมายถึง
+  // อย่างเดียวกันคือเชิญให้กรอกไม่ตรงกัน แล้วหน้าโจทย์กับกระดานจะเรียกคนละชื่อ
+  hide.add("title");
   const narrow = (offer && offer.narrow) || {};
   const defaults = (offer && offer.defaults) || {};
   const shown = env.fields
@@ -854,6 +956,19 @@ function readConfigForm(root, extra) {
   const flat = { ...(extra || {}) };
   root.querySelectorAll("[data-key]").forEach((el) => {
     const type = el.dataset.type;
+
+    // ช่องที่มีตัวควบคุมของตัวเอง — ค่าไม่ได้อยู่ที่ `el.value`
+    if (type === "upload") {
+      if (DATASET) flat[el.dataset.key] = DATASET.digest;
+      return;
+    }
+    if (type === "columns") {
+      const picked = [...el.querySelectorAll("input:checked")].map((c) => c.value);
+      flat[el.dataset.key] = picked;             // ส่งลิสต์ว่างด้วย = "ไม่ตัดคอลัมน์ไหนเลย"
+      return;
+    }
+    if (type === "column" && el.tagName !== "SELECT") return;   // ยังไม่ได้อัปโหลด
+
     let v = el.value;
     if (v === "") return;                        // ปล่อยให้ env ใช้ค่าเริ่มต้นของมัน
     if (type === "int") v = parseInt(v, 10);
@@ -874,8 +989,20 @@ function readConfigForm(root, extra) {
   }
   const one = (v) => (typeof v === "string" ? JSON.stringify(v) : v);
   const line = (k, v) => `${k}: ${Array.isArray(v) ? "[" + v.map(one).join(", ") + "]" : one(v)}`;
+  /* ⚠️ **ต้องเช็ค `Array.isArray` ก่อน `typeof === "object"`** — ใน JavaScript
+     อาเรย์เป็น object ด้วย · ถ้าไม่เช็คก่อน `labels: [0, 1]` จะถูกเขียนเป็น
+     mapping ที่ใช้ index เป็นคีย์
+
+         labels:
+           0: 0
+           1: 1
+
+     ซึ่ง `yaml.safe_load` อ่านได้เรียบร้อยเป็น dict แล้ว `TaskSpec` ล้มด้วย
+     ข้อความที่ไม่ได้ชี้ไปที่สาเหตุเลย · บั๊กนี้มองไม่เห็นจากการอ่านโค้ด
+     และไม่มีเทสต์ฝั่ง Python ตัวไหนแตะ เพราะมันอยู่ในเบราว์เซอร์ล้วนๆ */
+  const nested = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
   return Object.entries(tree).map(([k, v]) =>
-    (v && typeof v === "object")
+    nested(v)
       ? `${k}:\n` + Object.entries(v).map(([k2, v2]) => "  " + line(k2, v2)).join("\n")
       : line(k, v)
   ).join("\n") + "\n";
@@ -938,6 +1065,9 @@ async function renderAuthoring() {
           <span class="msg" id="nc-msg"></span></div>
       </div></details>` : "") +
 
+    /* ลำดับของช่องไม่ใช่เรื่องความสวยงาม — **`slug` สร้างจากสามช่องบน** จึงต้อง
+       อยู่ใต้ทั้งสาม · ฟอร์มที่ขอ id ก่อนถามว่ากำลังสร้างอะไร คือฟอร์มที่บังคับให้
+       คนคิดคำตอบของระบบก่อนคิดคำตอบของตัวเอง */
     `<details><summary>สร้างโจทย์ <span class="hint">— ในวิชาที่คุณดูแล</span></summary>
       <div class="form">
         <div class="f"><label for="nk-course">วิชา</label>
@@ -945,29 +1075,210 @@ async function renderAuthoring() {
         <div class="f"><label for="nk-env">ชนิดโจทย์</label>
           <select id="nk-env">${choiceOpts}</select>
           <span class="tip" id="nk-blurb"></span></div>
-        <div class="f"><label for="nk-slug">slug</label>
-          <input id="nk-slug" placeholder="cp461-titanic-1-2026"></div>
-        <div class="f"><label for="nk-title">ชื่อโจทย์</label>
-          <input id="nk-title" placeholder="ว่างไว้ = ใช้ชื่อจาก config"></div>
+        <div class="f"><label for="nk-name">ชื่อโจทย์</label>
+          <input id="nk-name" placeholder="diabetes-screening">
+          <span class="tip" id="nk-name-note">นิสิตจะเห็นชื่อนี้แบบจัดรูปให้แล้ว</span></div>
+        <div class="f full"><label for="nk-slug">รหัสของโจทย์ <span class="hint">— ระบบตั้งให้จากสามช่องบน</span></label>
+          <input id="nk-slug" placeholder="เลือกวิชาและตั้งชื่อก่อน">
+          <span class="tip">ใช้ใน URL และในคำสั่ง <code>arena submit</code> · แก้เองได้ถ้าต้องการ</span></div>
         <div class="f-group"><h3>ปฏิทิน</h3><div class="form">${calendarFieldsHtml("nk")}</div></div>
         <div class="f-group" id="nk-cfg"></div>
+        <div class="f-group" id="nk-preview" hidden></div>
         <div class="f full"><button class="btn" id="nk-go">สร้างโจทย์</button>
           <span class="msg" id="nk-msg"></span></div>
       </div></details>`;
 
   const chosen = () => CHOICES[parseInt($("nk-env").value, 10)];
+
+  /* slug เป็นค่าที่ระบบเสนอ ไม่ใช่ค่าที่ระบบบังคับ — พอผู้สอนแก้เองเมื่อไร
+     เราหยุดเขียนทับ · การเขียนทับสิ่งที่คนเพิ่งพิมพ์คือความรำคาญที่แก้ยาก
+     เพราะเขาจะไม่รู้ว่าทำไมค่าที่พิมพ์หายไป */
+  let slugTouched = false;
+  const suggestSlug = () => {
+    if (slugTouched) return;
+    const course = $("nk-course").value || "";
+    const c = chosen();
+    const parts = [course.split("-")[0], c ? c.offer.id : "", slugPart($("nk-name").value)];
+    const term = course.split("-").slice(1).join("-");
+    const body = parts.filter(Boolean).join("-");
+    $("nk-slug").value = body && term ? `${body}-${term}` : body;
+  };
+
   const drawConfig = () => {
     const c = chosen();
     $("nk-blurb").textContent = c ? c.offer.blurb : "";
     $("nk-cfg").innerHTML = c
       ? `<h3>รายละเอียดของโจทย์</h3>` + configFormHtml(c.env, c.offer)
       : `<span class="tip">ยังไม่มี environment ติดตั้งบนเครื่องนี้</span>`;
+    wireConfigForm($("nk-cfg"));
+    suggestSlug();
   };
-  if (CHOICES.length) { $("nk-env").onchange = drawConfig; drawConfig(); }
+
+  $("nk-course").onchange = () => { suggestSlug(); schedulePreview(); };
+  $("nk-name").oninput = () => {
+    $("nk-name-note").textContent = $("nk-name").value.trim()
+      ? `นิสิตจะเห็น: ${properTitle($("nk-name").value)}`
+      : "นิสิตจะเห็นชื่อนี้แบบจัดรูปให้แล้ว";
+    suggestSlug();
+  };
+  $("nk-slug").oninput = () => { slugTouched = true; };
+
+  if (CHOICES.length) {
+    $("nk-env").onchange = () => { DATASET = null; drawConfig(); schedulePreview(); };
+    drawConfig();
+  }
   window.__chosen = chosen;   // ให้ createCompetition หยิบไปใช้
 
   if (me.is_staff) $("nc-go").onclick = () => createCourse();
   $("nk-go").onclick = () => createCompetition();
+}
+
+/* ── ต่อสายให้ช่องที่มีตัวควบคุมพิเศษ ────────────────────────────────
+   เรียกทุกครั้งที่วาด `#nk-cfg` ใหม่ เพราะ `innerHTML` ทิ้ง handler เดิมทั้งหมด */
+function wireConfigForm(root) {
+  root.querySelectorAll('[data-type="upload"]').forEach((el) => {
+    el.onchange = () => uploadDataset(el);
+  });
+  // ทุกช่องที่เปลี่ยนแล้วการแบ่งเปลี่ยนตาม ต้องพาไปคำนวณตัวอย่างใหม่
+  root.querySelectorAll("select, input").forEach((el) => {
+    if (el.dataset.type === "upload") return;
+    el.addEventListener("change", schedulePreview);
+  });
+  // เปลี่ยนคอลัมน์เฉลย = เปลี่ยนคลาสทั้งชุด — เติมให้ทันที ไม่ต้องรอ debounce
+  // ของตัวอย่างการแบ่ง เพราะผู้สอนกำลังมองช่องนั้นอยู่พอดี
+  const target = root.querySelector('[data-type="column"][data-key="target"]');
+  if (target) target.addEventListener("change", fillLabelsFromTarget);
+}
+
+/* ค่าที่ไม่ได้อยู่ในฟอร์มแต่ต้องอยู่ใน config — **ที่เดียว**
+
+   `offer.defaults` คือค่าที่ตัวเลือกโจทย์ตอบให้แล้ว (`kind`) ส่วน `title` มาจาก
+   ช่องชื่อโจทย์ด้านบนซึ่งถูกซ่อนจากฟอร์ม config ไปแล้ว
+
+   ⚠️ **ตัวอย่างการแบ่งกับตอนกดสร้างต้องประกอบ config อันเดียวกัน** — เดิมเติม
+   `title` เฉพาะตอนสร้าง ผลคือตัวอย่างล้มด้วย "missing argument: 'title'" ทุกครั้ง
+   ทั้งที่ฟอร์มกรอกครบ · สองที่ที่ประกอบคนละแบบจะเพี้ยนกันอีกเสมอ */
+function configExtras(c) {
+  const extra = { ...c.offer.defaults };
+  if (c.env.fields.some((f) => f.key === "title")) {
+    extra.title = properTitle($("nk-name").value) || "ยังไม่ได้ตั้งชื่อ";
+  }
+  return extra;
+}
+
+async function uploadDataset(input) {
+  const note = $(input.id + "-note");
+  const file = input.files && input.files[0];
+  if (!file) { DATASET = null; return; }
+
+  note.textContent = `กำลังอ่าน ${file.name}…`;
+  const form = new FormData();
+  form.append("file", file);
+  form.append("course_id", $("nk-course").value);
+  form.append("env_plugin", window.__chosen().env.env_plugin);
+  try {
+    DATASET = await api("/api/datasets", { method: "POST", body: form });
+  } catch (e) {
+    DATASET = null;
+    note.textContent = e.message || "อ่านไฟล์ไม่ได้";
+    return;
+  }
+  note.textContent =
+    `${DATASET.rows.toLocaleString()} แถว · ${DATASET.columns.length} คอลัมน์ · ` +
+    `${DATASET.digest.slice(7, 19)}…`;
+
+  /* วาดฟอร์มใหม่ทั้งก้อนเพื่อให้ช่อง "คอลัมน์เฉลย" กับ "คอลัมน์ที่ไม่ให้โมเดลเห็น"
+     มีรายชื่อจริงให้เลือก — แล้วเอาไฟล์ที่เพิ่งเลือกกลับมาแสดงเป็นข้อความ
+     (ค่าของ `<input type=file>` ตั้งจากสคริปต์ไม่ได้ตามข้อกำหนดของเบราว์เซอร์) */
+  const c = window.__chosen();
+  $("nk-cfg").innerHTML = `<h3>รายละเอียดของโจทย์</h3>` + configFormHtml(c.env, c.offer);
+  wireConfigForm($("nk-cfg"));
+  const again = $("nk-cfg").querySelector('[data-type="upload"]');
+  if (again) {
+    $(again.id + "-note").textContent =
+      `${file.name} · ${DATASET.rows.toLocaleString()} แถว · ${DATASET.columns.length} คอลัมน์`;
+  }
+  fillLabelsFromTarget();
+  schedulePreview();
+}
+
+/* `labels` ตรึงลำดับของคลาสไว้ทั้งเทอมเพราะ confusion matrix อ้างลำดับนี้ — แต่
+   ค่าอยู่ในไฟล์อยู่แล้ว **ผู้สอนไม่ควรต้องพิมพ์เอง** · เคยบังคับให้พิมพ์แล้ว
+   ไม่มีใครเติมให้ ผลคือสร้าง classification ไม่ได้เลยสักครั้ง */
+function fillLabelsFromTarget() {
+  const target = $("nk-cfg").querySelector('[data-type="column"][data-key="target"]');
+  const labels = $("nk-cfg").querySelector('[data-key="labels"]');
+  if (!target || !labels || !DATASET) return;
+  const column = DATASET.columns.find((c) => c.name === target.value);
+  if (column && column.values) labels.value = column.values.join(", ");
+}
+
+/* ── ตัวอย่างการแบ่ง ─────────────────────────────────────────────────
+   ผู้สอนกรอกสัดส่วนเป็นตัวเลข 0–1 แต่สิ่งที่เขาตัดสินใจจริงคือ "กองที่ตัดสิน
+   รอบสุดท้ายจะมีกี่แถว และคลาสที่พบน้อยจะเหลือกี่แถวในนั้น" · ตัวเลขสองแบบนี้
+   ต่างกันมากเมื่อข้อมูลไม่สมดุล และแบบหลังคือแบบที่บอกได้ว่าอันดับจะมีความหมายไหม */
+let previewTimer = null;
+
+function schedulePreview() {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(() => { drawPreview().catch(() => {}); }, 350);
+}
+
+async function drawPreview() {
+  const el = $("nk-preview");
+  const c = window.__chosen && window.__chosen();
+  if (!el || !c || !DATASET) { if (el) el.hidden = true; return; }
+
+  fillLabelsFromTarget();
+  el.hidden = false;
+  el.innerHTML = `<h3>ข้อมูลจะถูกแบ่งแบบนี้</h3><span class="tip">กำลังคำนวณ…</span>`;
+
+  let body;
+  try {
+    body = await api("/api/competitions/preview", {
+      method: "POST",
+      body: new URLSearchParams({
+        course_id: $("nk-course").value,
+        env_plugin: c.env.env_plugin,
+        config: readConfigForm($("nk-cfg"), configExtras(c)),
+      }),
+    });
+  } catch (e) {
+    el.innerHTML = `<h3>ข้อมูลจะถูกแบ่งแบบนี้</h3>` +
+      `<span class="msg warn">${esc(e.message || "คำนวณไม่ได้")}</span>`;
+    return;
+  }
+
+  const NAMES = {
+    student: ["แจกนิสิต", "เขาแบ่ง train/val เองจากกองนี้"],
+    test_public: ["กระดานระหว่างเทอม", "นิสิตไม่เห็นข้อมูล เห็นแค่คะแนน"],
+    test_private: ["ตัดสินรอบสุดท้าย", "ไม่มีผลกลับเลยจนถึงวันปิดรับ"],
+  };
+  const total = body.rows || 1;
+  const rows = Object.entries(body.sizes).map(([part, n]) => {
+    const [name, why] = NAMES[part] || [part, ""];
+    const dist = body.classes && body.classes[part];
+    const share = dist
+      ? Object.entries(dist).map(([k, v]) =>
+          `${esc(k)} ${(v / n * 100).toFixed(0)}%`).join(" · ")
+      : "";
+    return `<tr><th>${esc(name)}</th>` +
+      `<td class="num">${n.toLocaleString()} แถว</td>` +
+      `<td class="num">${(n / total * 100).toFixed(0)}%</td>` +
+      `<td>${share}</td></tr>` +
+      `<tr class="why"><td colspan="4">${esc(why)}</td></tr>`;
+  }).join("");
+
+  const thin = Object.entries(body.thin || {});
+  const warn = thin.length
+    ? `<p class="msg warn">คลาส ${thin.map(([k, v]) =>
+         `${esc(k)} (เหลือ ${v.test_private} แถวตอนตัดสิน)`).join(" · ")} ` +
+      `บางเกินไป — อันดับสุดท้ายจะขึ้นกับโชคมากกว่าโมเดล ` +
+      `ลองลดสัดส่วนที่แจกนิสิต หรือใช้ข้อมูลที่มีคลาสนั้นมากกว่านี้</p>`
+    : "";
+
+  el.innerHTML = `<h3>ข้อมูลจะถูกแบ่งแบบนี้</h3>` +
+    `<table class="split"><tbody>${rows}</tbody></table>${warn}`;
 }
 
 async function createCourse() {
@@ -1004,21 +1315,29 @@ async function createCompetition() {
   msg.className = "msg";
   const c = window.__chosen && window.__chosen();
   if (!c) { msg.className = "msg warn"; msg.textContent = "ไม่มีชนิดโจทย์ให้เลือก"; return; }
+  const bad = outOfRange($("nk-cfg"));
+  if (bad) { msg.className = "msg warn"; msg.textContent = bad; return; }
   msg.textContent = "กำลังสร้าง…";
   try {
+    /* **ชื่อเดียว ไม่ใช่สองชื่อ** — เดิมมีทั้ง "ชื่อโจทย์" ของ competition และ
+       "ชื่อโจทย์ที่นิสิตเห็น" ใน config ซึ่งเป็นสิ่งเดียวกันแต่กรอกสองที่ แล้ว
+       ไม่มีอะไรบังคับให้ตรงกัน · ตอนนี้มาจากช่องเดียวและจัดรูปด้วยกติกาเดียวกัน */
+    const title = properTitle($("nk-name").value);
     const body = new URLSearchParams({
       course_id: $("nk-course").value,
       slug: $("nk-slug").value,
-      title: $("nk-title").value,
+      title,
       env_plugin: c.env.env_plugin,
       // ค่าที่ตัวเลือกโจทย์กำหนดให้ ไม่ได้อยู่ในฟอร์ม จึงต้องเติมกลับเข้า config
       // ก่อนส่ง — ไม่งั้น `kind` จะหายไปแล้ว loader ปฏิเสธ
-      config: readConfigForm($("nk-cfg"), c.offer.defaults),
+      config: readConfigForm($("nk-cfg"), configExtras(c)),
       phases: JSON.stringify(readCalendar("nk")),
     });
     const res = await api("/api/competitions", { method: "POST", body });
     msg.className = "msg ok";
     msg.textContent = `สร้างแล้ว — ${res.competition.title} · config_hash ${res.config_hash.slice(0, 20)}…`;
+    // ล้างไฟล์ที่เลือกไว้ — ไม่งั้นโจทย์ถัดไปจะอ้างชุดข้อมูลของโจทย์นี้โดยเงียบๆ
+    DATASET = null;
     await refresh();
   } catch (e) { msg.className = "msg warn"; msg.textContent = e.message || "สร้างไม่สำเร็จ"; }
 }

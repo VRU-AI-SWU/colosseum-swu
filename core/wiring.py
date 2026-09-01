@@ -133,6 +133,114 @@ def prepare_config(env_plugin: str, config_text: str) -> dict:
     raise ConfigRejected(f"ไม่รู้จัก env_plugin {env_plugin!r} บน deployment นี้")
 
 
+# ── ชุดข้อมูลที่ผู้สอนอัปโหลด ───────────────────────────────────────
+#
+# **โจทย์ทำนายต่างจาก agent env ตรงที่ข้อมูลมาจากผู้สอน ไม่ได้มาจากโค้ด** — สี่
+# ฟังก์ชันข้างล่างคือทางที่ไฟล์เดินทางเข้าและออกจากระบบ และทั้งหมดอยู่ฝั่ง trusted
+#
+# `core/` ยังไม่ import `envs/` ตรงๆ เหมือนเดิม · การผูกเกิดที่ไฟล์นี้ที่เดียว
+
+
+class DatasetRejected(Exception):
+    """ไฟล์ที่อัปโหลดใช้ไม่ได้ — ข้อความมาจาก env จริง"""
+
+
+def _prediction_plugin(env_plugin: str):
+    """plugin ของโจทย์ทำนายที่ทำเรื่องสร้างโจทย์ได้ด้วย"""
+    from runners.prediction.plugin import AUTHORING
+    from runners.prediction.plugin import resolve as resolve_prediction
+
+    try:
+        return resolve_prediction(env_plugin, also=AUTHORING)
+    except (ImportError, AttributeError, TypeError, ValueError) as exc:
+        raise DatasetRejected(
+            f"env {env_plugin!r} รับไฟล์ข้อมูลไม่ได้บน deployment นี้ — {exc}"
+        ) from exc
+
+
+def _spec_of(env_plugin: str, config_text: str):
+    """config ที่ฟอร์มส่งมา → spec จริงของ env นั้น
+
+    เขียนลงไฟล์ชั่วคราวเพราะสัญญาของ plugin รับ path — เหตุผลเดียวกับที่
+    `Worker._config_file` และ `prepare_config` ทำ
+    """
+    import tempfile
+
+    plugin = _prediction_plugin(env_plugin)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "config.yaml"
+        path.write_text(config_text, encoding="utf-8")
+        try:
+            return plugin, plugin.load_spec(str(path))
+        except Exception as exc:  # noqa: BLE001 — ข้อความของ env อ่านรู้เรื่องกว่า
+            # env ขึ้นต้นข้อความด้วย path ของไฟล์ที่มันอ่าน ซึ่งที่นี่เป็นไฟล์ชั่วคราว
+            # ที่เราเพิ่งเขียนเอง · ผู้สอนที่เห็น `/var/folders/.../config.yaml`
+            # จะไปตามหาไฟล์ที่ไม่มีอยู่จริงบนเครื่องเขา
+            raise DatasetRejected(str(exc).replace(f"{path}: ", "")) from exc
+
+
+def inspect_dataset(env_plugin: str, blob: bytes) -> dict:
+    """ตรวจไฟล์ที่เพิ่งอัปโหลดแล้วสรุปคอลัมน์ให้หน้าเว็บ — **ยังไม่เก็บลงคลัง**"""
+    try:
+        return _prediction_plugin(env_plugin).inspect_dataset(blob)
+    except DatasetRejected:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise DatasetRejected(str(exc)) from exc
+
+
+def save_dataset(env_plugin: str, blob: bytes) -> str:
+    """เก็บไฟล์ลงคลังแล้วคืนรหัสที่ใส่ในช่อง `dataset` ของ config"""
+    try:
+        return _prediction_plugin(env_plugin).save_dataset(blob)
+    except DatasetRejected:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise DatasetRejected(str(exc)) from exc
+
+
+def upload_dataset(env_plugin: str, blob: bytes) -> dict:
+    """ทางเข้าเดียวของไฟล์ — **ตรวจก่อนเก็บเสมอ** แล้วคืนสรุปคอลัมน์ให้หน้าเว็บ
+
+    ไฟล์ที่ใช้ไม่ได้จึงไม่เคยเดินทางถึงคลัง · คลังที่มีไฟล์ซึ่ง `load_spec` อ่าน
+    ไม่ได้ แปลว่ามีโจทย์ที่สร้างได้แต่ให้คะแนนไม่ได้ ซึ่งจะไปโผล่ตอนนิสิตส่งงาน
+
+    เก็บทันทีไม่ใช่รอตอนกดสร้าง เพราะขั้นถัดไปของผู้สอนคือดู**ตัวอย่างการแบ่ง**
+    ซึ่งเซิร์ฟเวอร์ต้องอ่านไฟล์จริงถึงจะตอบได้ · การอ้างด้วยลายนิ้วมือทำให้
+    อัปโหลดไฟล์เดิมซ้ำไม่เกิดของซ้ำในคลัง
+    """
+    profile = inspect_dataset(env_plugin, blob)
+    profile["digest"] = save_dataset(env_plugin, blob)
+    return profile
+
+
+def preview_config(env_plugin: str, config_text: str) -> dict:
+    """🔒 ไฟล์จะถูกแบ่งเป็นกี่แถวต่อกอง และคลาสไหนจะบางเกินไป
+
+    **สิ่งที่ผู้สอนต้องเห็นก่อนกดสร้าง** — สัดส่วน `0.15` ไม่ได้บอกอะไรเลย
+    ส่วน "คลาส 1 จะเหลือ 3 แถวในกองที่ตัดสินรอบสุดท้าย" บอกได้ทันทีว่าอันดับ
+    สุดท้ายจะมีความหมายหรือเป็นเรื่องของโชค
+    """
+    plugin, spec = _spec_of(env_plugin, config_text)
+    try:
+        return plugin.preview(spec)
+    except Exception as exc:  # noqa: BLE001
+        raise DatasetRejected(str(exc)) from exc
+
+
+def student_dataset(env_plugin: str, config_text: str) -> bytes:
+    """ไฟล์ที่นิสิตดาวน์โหลด — **กองที่แจกเท่านั้น**
+
+    ทางออกทางเดียวของข้อมูลจากเซิร์ฟเวอร์ · ทุกไบต์ที่ผ่านฟังก์ชันนี้ถือว่านิสิต
+    เห็นแล้ว — ผู้เรียกจึงต้องเป็น endpoint ที่ตรวจแล้วว่าคนขออยู่ในวิชานั้นจริง
+    """
+    plugin, spec = _spec_of(env_plugin, config_text)
+    try:
+        return plugin.student_bytes(spec)
+    except Exception as exc:  # noqa: BLE001
+        raise DatasetRejected(str(exc)) from exc
+
+
 #: ชนิดโจทย์ → paradigm ที่ใช้เป็นค่าเริ่มต้นตอนสร้างจากหน้าเว็บ
 #:
 #: **เป็นค่าเริ่มต้น ไม่ใช่กฎ** — `unsupervised-learning` ใช้ runner `prediction`
