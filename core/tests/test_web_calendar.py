@@ -262,3 +262,55 @@ def test_the_guard_covers_both_focus_and_an_open_section():
     guard = guard[:guard.index("\n}")]
     assert "activeElement" in guard
     assert "details[open]" in guard
+
+
+# ── แผงของคนที่ล็อกอินแล้ว ต้องหายไปตอนออกจากระบบ ──────────────────
+
+
+def test_every_signed_in_panel_is_hidden_when_leaving_the_board():
+    """**บั๊กที่เคยเกิดจริง** — หลังล็อกเอาต์ แผงสร้างโจทย์ยังค้างอยู่บนหน้าจอ
+
+    `show()` ซ่อนแค่ `gate` `enroll` `board` `picker` · `#team` กับ `#staff`
+    อยู่ใน `#board` จึงหายตาม แต่ `#cal` กับ `#authoring` อยู่**นอก** และไม่มี
+    ใครซ่อนมันเลย · ผลคือคนถัดไปที่มานั่งที่เครื่องนั้นเห็นรหัสวิชา รหัสโจทย์
+    ชื่อไฟล์ข้อมูล และชื่อคอลัมน์ทั้งหมด
+
+    ตรวจว่าใช้ **คลาสใน markup** ไม่ใช่รายชื่อใน JS — รายชื่อคือสิ่งที่ต้องจำไป
+    เติมทุกครั้งที่เพิ่มแผงใหม่ ซึ่งเป็นสาเหตุของบั๊กนี้ตั้งแต่แรก
+    """
+    html = INDEX.read_text()
+
+    for panel in ("cal", "authoring"):
+        tag = re.search(rf'<section[^>]*id="{panel}"[^>]*>', html)
+        assert tag, f"ไม่เจอ element #{panel}"
+        assert "signed-in" in tag.group(0), (
+            f"#{panel} อยู่นอก #board จึงต้องติดคลาส signed-in ไม่งั้นมันจะค้างหลังล็อกเอาต์"
+        )
+
+    assert 'querySelectorAll(".signed-in")' in html, (
+        "show() ต้องซ่อนจากคลาสใน markup — รายชื่อที่เขียนใน JS คือสิ่งที่คนลืมอัปเดต"
+    )
+
+
+def test_leaving_the_board_only_hides_never_shows():
+    """แต่ละแผงมีเงื่อนไขของตัวเอง — `show()` สั่งแสดงจะทับเงื่อนไขนั้น
+
+    ปฏิทินต้องมีข้อมูลก่อนถึงจะโผล่ · แผงสร้างโจทย์เฉพาะผู้สอน · ถ้า `show()`
+    ตั้ง `hidden = false` ให้ทุกอันตอนกลับเข้าหน้ากระดาน นิสิตจะเห็นแผงเปล่า
+    """
+    html = INDEX.read_text()
+    block = html[html.index("function show(view)"):]
+    block = block[: block.index("\n}")]
+    assert 'el.hidden = true' in block
+    assert "el.hidden = false" not in block, "show() ต้องไม่สั่งแสดงแผงพวกนี้"
+
+
+def test_logging_out_forgets_the_uploaded_dataset():
+    """รหัสไฟล์กับชื่อคอลัมน์ที่อัปโหลดค้างในหน่วยความจำของหน้า — ต้องล้างด้วย"""
+    html = INDEX.read_text()
+    block = html[html.index("function logout(msg)"):]
+    block = block[: block.index("\n}")]
+    assert "DATASET = null" in block
+    assert 'querySelectorAll(".signed-in")' in block and 'innerHTML = ""' in block, (
+        "ต้องล้างเนื้อของแผงด้วย ไม่ใช่แค่ซ่อน — `hidden` ไม่กันคนที่เปิด devtools"
+    )

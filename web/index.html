@@ -445,7 +445,7 @@ table.split tr.why td {
 
   <nav class="picker" id="picker" hidden></nav>
 
-  <section class="cal" id="cal" hidden>
+  <section class="cal signed-in" id="cal" hidden>
     <div class="cal-head">
       <h2>ปฏิทินการแข่ง</h2>
       <span class="cal-now" id="cal-now"></span>
@@ -495,7 +495,7 @@ table.split tr.why td {
     </div>
   </section>
 
-  <section class="card authoring" id="authoring" hidden></section>
+  <section class="card authoring signed-in" id="authoring" hidden></section>
 
   <main id="board" hidden>
     <div class="team" id="team" hidden></div>
@@ -602,6 +602,23 @@ function show(view) {
   $("enroll").hidden = view !== "enroll";
   $("board").hidden = view !== "board";
   $("picker").hidden = view !== "board";
+
+  /* ── แผงที่มีไว้ให้คนที่ล็อกอินแล้ว ต้องหายไปพร้อมกันทุกอัน ──────────
+     `#team` กับ `#staff` อยู่ใน `#board` จึงถูกซ่อนตามอยู่แล้ว แต่ `#cal`
+     กับ `#authoring` อยู่นอก และเดิมไม่มีใครซ่อนมันเลย · ผลคือหลังล็อกเอาต์
+     หน้าเว็บยังโชว์แผงสร้างโจทย์พร้อมรหัสวิชา รหัสโจทย์ ชื่อไฟล์ข้อมูล และ
+     ชื่อคอลัมน์ทั้งหมด ให้ใครก็ตามที่มานั่งต่อที่เครื่องนั้น
+
+     **ใช้คลาสไม่ใช่รายชื่อใน JS** — บั๊กนี้เกิดเพราะทุกครั้งที่เพิ่มแผงใหม่
+     ต้องจำไปเติมใน `logout()` ด้วย ซึ่งไม่มีใครจำได้ · ติด `signed-in` ที่
+     markup แล้วแผงใหม่ถูกครอบอัตโนมัติ มีเทสต์บังคับว่าแผงของผู้สอนต้องมีคลาสนี้
+
+     **ซ่อนอย่างเดียว ไม่สั่งให้แสดง** — แต่ละแผงมีเงื่อนไขของตัวเอง (ปฏิทิน
+     ต้องมีข้อมูลก่อน · แผงสร้างโจทย์เฉพาะผู้สอน) การสั่งแสดงจากที่นี่จะทับ
+     เงื่อนไขพวกนั้นแล้วโชว์แผงเปล่าให้นิสิต */
+  if (view !== "board") {
+    document.querySelectorAll(".signed-in").forEach((el) => { el.hidden = true; });
+  }
 }
 
 async function api(path, options = {}) {
@@ -1806,8 +1823,17 @@ function logout(msg) {
   courseId = "";
   slug = "";
   store.remove(KEY);
-  $("team").hidden = true;
-  show("gate");
+  // ไฟล์ที่อัปโหลดค้างอยู่ในหน่วยความจำของหน้า — รหัสไฟล์กับชื่อคอลัมน์ทั้งหมด
+  // ไม่ควรอยู่ต่อหลังคนออกจากระบบ
+  DATASET = null;
+  show("gate");   // ซ่อนแผงของคนที่ล็อกอินแล้วทั้งหมดให้เอง
+  /* ล้าง**เนื้อ**ด้วย ไม่ใช่แค่ซ่อน — `hidden` กันตาคนถัดไปที่มานั่งเครื่องนี้ได้
+     แต่ไม่กันคนที่เปิด devtools · แผงพวกนี้ถูกวาดใหม่ทั้งก้อนตอนล็อกอินอยู่แล้ว
+     การเก็บของเก่าไว้จึงไม่ได้ประโยชน์อะไรเลย
+
+     `#authoring` เว้น `#cal` ไว้ไม่ได้ — ทั้งคู่ถือข้อมูลของวิชา · ส่วน `#team`
+     กับ `#staff` อยู่ใน `#board` ซึ่งถูกวาดใหม่ทุกรอบ refresh อยู่แล้ว */
+  document.querySelectorAll(".signed-in").forEach((el) => { el.innerHTML = ""; });
   $("gate-err").hidden = !msg;
   $("gate-err").textContent = msg || "";
 }
